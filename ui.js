@@ -1,10 +1,13 @@
 const TRACK_LENGTH = 400;
 const SEGMENT_LENGTH = 100;
+const FINISH_LINE_PHASE = 50;
 
 const wrapTrackDistance = distance => ((distance % TRACK_LENGTH) + TRACK_LENGTH) % TRACK_LENGTH;
 
 export function getTrackPoint({ cx, cy, halfStraight, radius }, absoluteDistance, laneOffset = 0) {
-    const d = wrapTrackDistance(absoluteDistance);
+    // Phase the logical 0m/400m point to the centre of the home straight.
+    // The track geometry stays identical; only the race-distance origin moves.
+    const d = wrapTrackDistance(absoluteDistance + FINISH_LINE_PHASE);
     const r = radius + laneOffset;
 
     if (d < 100) {

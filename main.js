@@ -11,23 +11,59 @@ window.addEventListener('DOMContentLoaded', () => {
     ui.renderLineList(lineGroups);
 
     let audioContext = null;
-    const playBellSound = () => {
+
+    const ensureAudioReady = async () => {
         try {
-            audioContext ??= new (window.AudioContext || window.webkitAudioContext)();
-            const now = audioContext.currentTime;
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) return false;
+
+            audioContext ??= new AudioContextClass();
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            // Safari / iOS Safari requires the audio graph to be unlocked by a
+            // direct user gesture. A silent one-sample pulse makes the later bell
+            // callback reliable without producing an audible click.
+            const buffer = audioContext.createBuffer(1, 1, audioContext.sampleRate);
+            const source = audioContext.createBufferSource();
+            const gain = audioContext.createGain();
+            gain.gain.value = 0;
+            source.buffer = buffer;
+            source.connect(gain);
+            gain.connect(audioContext.destination);
+            source.start();
+            return audioContext.state === 'running';
+        } catch (error) {
+            console.warn('Audio initialization unavailable:', error);
+            return false;
+        }
+    };
+
+    const playBellSound = async () => {
+        try {
+            const ready = await ensureAudioReady();
+            if (!ready || !audioContext) return;
+
+            const now = audioContext.currentTime + 0.02;
+            const master = audioContext.createGain();
+            master.gain.setValueAtTime(0.9, now);
+            master.connect(audioContext.destination);
+
             [880, 1760, 2640, 3520].forEach((frequency, index) => {
                 const oscillator = audioContext.createOscillator();
                 const gain = audioContext.createGain();
-                const duration = 2.5 / (index + 1);
+                const duration = 2.6 / (index + 1);
+                const level = 0.22 / (index + 1);
 
                 oscillator.type = index === 0 ? 'sine' : 'triangle';
                 oscillator.frequency.setValueAtTime(frequency, now);
-                gain.gain.setValueAtTime(0.25 / (index + 1), now);
+                gain.gain.setValueAtTime(level, now);
                 gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
                 oscillator.connect(gain);
-                gain.connect(audioContext.destination);
+                gain.connect(master);
                 oscillator.start(now);
-                oscillator.stop(now + duration);
+                oscillator.stop(now + duration + 0.05);
             });
         } catch (error) {
             console.warn('Bell sound unavailable:', error);
@@ -44,7 +80,10 @@ window.addEventListener('DOMContentLoaded', () => {
         speedValue: document.getElementById('speedVal')
     };
 
-    controls.start?.addEventListener('click', () => physics.start());
+    controls.start?.addEventListener('click', async () => {
+        await ensureAudioReady();
+        physics.start();
+    });
     controls.pause?.addEventListener('click', () => physics.pause());
     controls.reset?.addEventListener('click', () => physics.reset());
     controls.speed?.addEventListener('input', event => {

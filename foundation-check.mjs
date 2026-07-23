@@ -54,6 +54,17 @@ await check('main.jsのimport先が存在する', async () => {
   }
 });
 
+
+await check('ベル音源と再生経路が存在する', async () => {
+  const main = await read('main.js');
+  const bell = await readFile(resolve(root, 'bell.wav'));
+  assert.ok(bell.byteLength > 10000, `bell.wav too small: ${bell.byteLength}`);
+  assert.match(main, /new Audio\(['"]\.\/bell\.wav['"]\)/);
+  assert.match(main, /physics\.onBell/);
+  assert.match(main, /bellAudio\.play\(\)/);
+  assert.match(main, /playWebAudioBell/);
+});
+
 await check('バンク座標が0mと400mで一致する', () => {
   const geometry = { cx: 400, cy: 400, halfStraight: 140, radius: 200 };
   const a = getTrackPoint(geometry, 0, 0);

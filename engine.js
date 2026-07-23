@@ -146,16 +146,14 @@ export class PhysicsEngine {
     }
 
     _followPacer(rider, dt) {
-        const desiredPosition = this.pacer.distance - 14 - (rider.globalIndex * 17);
-        const positionError = desiredPosition - rider.distance;
-        const desiredSpeed = this.pacer.speed + (positionError * 1.8);
-        const maxDelta = 3.8 * dt;
-        const previousSpeed = rider.speed;
-        rider.speed += clamp(desiredSpeed - rider.speed, -maxDelta, maxDelta);
-        rider.speed = clamp(rider.speed, 0, this.pacer.speed * 1.12);
-        rider.distance += rider.speed * dt;
-        rider.acceleration = (rider.speed - previousSpeed) / Math.max(dt, 1e-6);
-        rider.laneOffset += (rider.initialLaneOffset - rider.laneOffset) * clamp(4 * dt, 0, 1);
+        // Formation phase: the pacer and all nine riders move as one rigid queue.
+        // Each rider is placed directly on the shared distance axis, so cornering
+        // cannot introduce spring lag or amplify spacing errors down the line.
+        const formationGap = 17;
+        rider.distance = this.pacer.distance - 14 - (rider.globalIndex * formationGap);
+        rider.speed = this.pacer.speed;
+        rider.acceleration = 0;
+        rider.laneOffset = rider.initialLaneOffset;
     }
 
     _updateLeader(rider, dt) {

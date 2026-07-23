@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0f172a">
+    <title>KEIRIN FLOW - Alpha2.2</title>
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <p class="eyebrow">KEIRIN DIGITAL TWIN</p>
+            <h1>KEIRIN FLOW</h1>
+            <p class="subtitle">Where Every Race Has a Thousand Futures.</p>
+        </header>
+
+        <main>
+            <section id="bank-container" aria-label="競輪シミュレーション">
+                <canvas id="bankCanvas" width="800" height="800"></canvas>
+                <div id="race-info-overlay">
+                    <span id="lap-counter">1周目 / 残り800m</span>
+                    <span id="race-status">PRE-RACE</span>
+                    <span id="gap-status">車間: --</span>
+                </div>
+            </section>
+
+            <aside id="control-panel">
+                <section class="panel-section">
+                    <h2>ライン構成</h2>
+                    <div id="line-list-ui"></div>
+                </section>
+
+                <section class="panel-section action-buttons">
+                    <h2>レース操作</h2>
+                    <button id="btn-start" class="primary-btn" type="button">▶ START</button>
+                    <button id="btn-pause" class="secondary-btn" type="button">⏸ PAUSE</button>
+                    <button id="btn-reset" class="secondary-btn" type="button">↺ RESET</button>
+                    <label class="speed-control" for="speedRange">
+                        <span>速度 <strong id="speedVal">1.0</strong>x</span>
+                        <input type="range" id="speedRange" min="0.5" max="3" step="0.5" value="1">
+                    </label>
+                </section>
+
+                <section class="panel-section">
+                    <h2>着順</h2>
+                    <ol id="result-list" class="result-list">
+                        <li class="empty-result">レース終了後に表示</li>
+                    </ol>
+                </section>
+            </aside>
+        </main>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+PASS  9車が重複なく生成される
+PASS  HTMLとmain.jsの必須IDが一致する
+PASS  main.jsのimport先が存在する
+PASS  バンク座標が0mと400mで一致する
+PASS  ゴールラインがホームストレッチ中央にある
+PASS  0.5xでベル1回・9車完走・順位確定
+PASS  0.5xでライン車間が破綻しない
+PASS  1xでベル1回・9車完走・順位確定
+PASS  1xでライン車間が破綻しない
+PASS  2xでベル1回・9車完走・順位確定
+PASS  2xでライン車間が破綻しない
+PASS  3xでベル1回・9車完走・順位確定
+PASS  3xでライン車間が破綻しない
+
+13/13 checks passed.

@@ -148,9 +148,9 @@ export class UIRenderer {
         const gapStatus = document.getElementById('gap-status');
         const resultList = document.getElementById('result-list');
 
-        const leaderDistance = Math.max(...state.riders.map(rider => rider.distance));
-        const lap = leaderDistance < 400 ? '1周目' : '2周目（最終周）';
-        const remaining = Math.max(0, Math.ceil(state.totalDistance - leaderDistance));
+        const remaining = Math.max(0, Math.ceil(state.raceClock?.remainingDistance ?? state.totalDistance));
+        const currentLap = state.raceClock?.currentLap ?? (remaining > TRACK_LENGTH ? 2 : 1);
+        const lap = currentLap > 1 ? '残り2周' : '最終周';
         if (lapCounter) lapCounter.textContent = `${lap} / 残り${remaining}m`;
 
         if (raceStatus) {

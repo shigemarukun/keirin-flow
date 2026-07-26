@@ -10,24 +10,124 @@ const CAR_STYLES = Object.freeze({
     9: { background: '#7f3fbf', text: '#ffffff' }
 });
 
+const RACE_STATE = Object.freeze({
+    POSITION_BATTLE: 'POSITION_BATTLE',
+    FINAL: 'FINAL',
+    FINISHED: 'FINISHED'
+});
+
 const PACER_STATE = Object.freeze({
     LEADING: 'LEADING',
     EXITING: 'EXITING',
     EXITED: 'EXITED'
 });
 
+const CLOCK_OWNER = Object.freeze({
+    PACER: 'PACER',
+    LEADER: 'LEADER'
+});
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-const wrap400 = distance => ((distance % 400) + 400) % 400;
+const wrapTrack = (distance, trackLength) => ((distance % trackLength) + trackLength) % trackLength;
+
+/**
+ * 将来的なバンク長（333m, 400m, 500m）やレース距離の拡張を見据えたプロファイル設計
+ */
+export const RACE_PROFILES = Object.freeze({
+    PROFILE_400: {
+        TRACK_LENGTH: 400,
+        RACE_DISTANCE: 800, // 2周回レース（赤板スタート）
+        FORMATION_SPEED: 10.5,
+        // TODO: 以下はすべて「仮値」。実レース映像でチューニング予定
+        PacerLeaveLine: 620,
+        Bell: 600,
+        PacerExit: 560,
+        FinalLap: 400,
+        FinalBack: 200,
+        Finish: 0
+    }
+    // TODO: PROFILE_333 や PROFILE_500 を将来ここに追加する
+});
+
+// デフォルトプロファイル（400バンク想定）
+export const RACE_CONFIG = RACE_PROFILES.PROFILE_400;
+
+export class RaceClock {
+    constructor(config = RACE_CONFIG) {
+        this.trackLength = config.TRACK_LENGTH;
+        this.totalDistance = config.RACE_DISTANCE;
+        this.config = config;
+        this.owner = CLOCK_OWNER.PACER;
+        this.referenceDistance = 0;
+        this.remainingDistance = this.totalDistance;
+        this.currentLap = 2;
+        this.firedEventSequence = [];
+
+        this.events = {
+            PacerLeaveLine: { name: 'PacerLeaveLine', fired: false, condition: clock => clock.remainingDistance <= this.config.PacerLeaveLine },
+            Bell: { name: 'Bell', fired: false, condition: clock => clock.remainingDistance <= this.config.Bell },
+            PacerExit: { name: 'PacerExit', fired: false, condition: clock => clock.remainingDistance <= this.config.PacerExit },
+            FinalLap: { name: 'FinalLap', fired: false, condition: clock => clock.remainingDistance <= this.config.FinalLap },
+            FinalBack: { name: 'FinalBack', fired: false, condition: clock => clock.remainingDistance <= this.config.FinalBack },
+            Finish: { name: 'Finish', fired: false, condition: clock => clock.remainingDistance <= 0 }
+        };
+    }
+
+    update(pacerDistance, leaderDistance, engine) {
+        // The clock follows the pacer until the pacer has actually completed
+        // its exit.  On hand-off, never allow the reference distance to move
+        // backwards; the leader may still be a few metres behind the pacer.
+        if (engine.pacer.state === PACER_STATE.EXITED) {
+            this.owner = CLOCK_OWNER.LEADER;
+        }
+
+        const candidateDistance = this.owner === CLOCK_OWNER.PACER
+            ? pacerDistance
+            : leaderDistance;
+        this.referenceDistance = Math.max(this.referenceDistance, candidateDistance);
+
+        this.remainingDistance = Math.max(0, this.totalDistance - this.referenceDistance);
+        this.currentLap = this.remainingDistance > this.trackLength ? 2 : 1;
+
+        const triggered = [];
+        const sequenceOrder = ['PacerLeaveLine', 'Bell', 'PacerExit', 'FinalLap', 'FinalBack', 'Finish'];
+
+        for (const key of sequenceOrder) {
+            const ev = this.events[key];
+            if (!ev.fired && ev.condition(this, engine)) {
+                ev.fired = true;
+                triggered.push(ev.name);
+                this.firedEventSequence.push(ev.name);
+
+            }
+        }
+        return triggered;
+    }
+
+    reset() {
+        this.owner = CLOCK_OWNER.PACER;
+        this.referenceDistance = 0;
+        this.remainingDistance = this.totalDistance;
+        this.currentLap = 2;
+        this.firedEventSequence = [];
+        for (const key of Object.keys(this.events)) {
+            this.events[key].fired = false;
+        }
+    }
+}
 
 export class PhysicsEngine {
-    constructor(lineGroups, lineOffsets = [-18, -6, 6, 18]) {
+    constructor(lineGroups, lineOffsets = [-18, -6, 6, 18], profile = RACE_CONFIG) {
         this.lineGroups = lineGroups.map(group => [...group]);
         this.lineOffsets = [...lineOffsets];
-        this.totalDistance = 800;
+        this.profile = profile;
+        this.totalDistance = profile.RACE_DISTANCE;
         this.timeScale = 1;
         this.onBellCallback = null;
         this.onFinishCallback = null;
+        this.RACE_STATE = RACE_STATE;
         this.PACER_STATE = PACER_STATE;
+        this.raceClock = new RaceClock(profile);
         this._buildRiders();
         this.reset();
     }
@@ -47,10 +147,11 @@ export class PhysicsEngine {
                     globalIndex,
                     isLeader: lineOrder === 0,
                     frontRider: null,
+                    formationFrontRider: null,
                     baseLaneOffset,
                     initialLaneOffset: -18,
                     initialDistance,
-                    targetSpeed: 10.5 + ((number % 3) * 0.08),
+                    targetSpeed: this.profile.FORMATION_SPEED,
                     style: CAR_STYLES[number] ?? CAR_STYLES[1],
                     distance: initialDistance,
                     speed: 0,
@@ -72,23 +173,34 @@ export class PhysicsEngine {
                 ) ?? null;
             }
         }
+
+        for (const rider of this.riders) {
+            if (rider.globalIndex > 0) {
+                rider.formationFrontRider = this.riders.find(candidate =>
+                    candidate.globalIndex === rider.globalIndex - 1
+                ) ?? null;
+            }
+        }
     }
 
     reset() {
         this.isStarted = false;
         this.elapsedTime = 0;
         this.bellRung = false;
+        this.currentState = RACE_STATE.POSITION_BATTLE;
         this.ranking = [];
+        this.raceClock.reset();
         this.pacer = {
             distance: 0,
-            speed: 10.5,
+            speed: this.profile.FORMATION_SPEED,
             state: PACER_STATE.LEADING,
-            laneOffset: -18
+            laneOffset: -18,
+            exitProgress: 0
         };
 
         for (const rider of this.riders) {
             rider.distance = rider.initialDistance;
-            rider.speed = 0;
+            rider.speed = this.profile.FORMATION_SPEED;
             rider.acceleration = 0;
             rider.laneOffset = rider.initialLaneOffset;
             rider.finished = false;
@@ -119,91 +231,129 @@ export class PhysicsEngine {
     }
 
     _targetSpeedFor(rider) {
-        const dist400 = wrap400(rider.distance);
-        const onCorner = (dist400 >= 100 && dist400 < 200) || (dist400 >= 300 && dist400 < 400);
-        const finalLapBoost = rider.distance >= 400 ? 1.18 : 1;
+        const trackLength = this.profile.TRACK_LENGTH;
+        const distOnTrack = wrapTrack(rider.distance, trackLength);
+        const quarter = trackLength / 4;
+        
+        const onCorner = (distOnTrack >= quarter && distOnTrack < quarter * 2) || (distOnTrack >= quarter * 3 && distOnTrack < trackLength);
+        const isFinalLap = (this.totalDistance - rider.distance) <= trackLength;
+        const finalLapBoost = isFinalLap ? 1.18 : 1;
         const cornerFactor = onCorner ? 0.98 : 1;
+
         return rider.targetSpeed * finalLapBoost * cornerFactor;
     }
 
     _updatePacer(dt) {
         if (this.pacer.state === PACER_STATE.EXITED) return;
-
         this.pacer.distance += this.pacer.speed * dt;
 
-        if (!this.bellRung && this.pacer.distance >= 400) {
-            this.bellRung = true;
+        if (this.raceClock.events.PacerLeaveLine.fired && this.pacer.state === PACER_STATE.LEADING) {
             this.pacer.state = PACER_STATE.EXITING;
-            this.onBellCallback?.();
         }
 
         if (this.pacer.state === PACER_STATE.EXITING) {
-            const progress = clamp((this.pacer.distance - 400) / 40, 0, 1);
-            const eased = progress * progress * (3 - 2 * progress);
+            const targetProgress = this.raceClock.events.PacerExit.fired ? 1 : 0.7;
+            if (this.pacer.exitProgress < targetProgress) {
+                this.pacer.exitProgress = Math.min(targetProgress, this.pacer.exitProgress + (0.8 * dt));
+            } else if (this.raceClock.events.PacerExit.fired) {
+                this.pacer.exitProgress = 1;
+            }
+
+            const eased = this.pacer.exitProgress * this.pacer.exitProgress * (3 - 2 * this.pacer.exitProgress);
             this.pacer.laneOffset = -18 + (72 * eased);
-            if (progress >= 1) this.pacer.state = PACER_STATE.EXITED;
+
+            if (this.raceClock.events.PacerExit.fired && this.pacer.exitProgress >= 1) {
+                this.pacer.state = PACER_STATE.EXITED;
+                this.currentState = RACE_STATE.FINAL;
+            }
         }
     }
 
-    _followPacer(rider, dt) {
-        // Formation phase: the pacer and all nine riders move as one rigid queue.
-        // Each rider is placed directly on the shared distance axis, so cornering
-        // cannot introduce spring lag or amplify spacing errors down the line.
-        const formationGap = 17;
-        rider.distance = this.pacer.distance - 14 - (rider.globalIndex * formationGap);
-        rider.speed = this.pacer.speed;
-        rider.acceleration = 0;
-        rider.laneOffset = rider.initialLaneOffset;
+    _decision(rider) {
+        if (this.currentState === RACE_STATE.POSITION_BATTLE) {
+            // TODO:// PositionBattleの戦術AI実装までは // Formationロジックを利用する
+            if (rider.globalIndex === 0) {
+                const targetDistance = this.pacer.distance - 14;
+                const gapError = targetDistance - rider.distance;
+                let desired = this.pacer.speed;
+                if (gapError < -0.5) desired -= 0.4;
+                else if (gapError > 0.5) desired += 0.4;
+                return desired;
+            } else {
+                const front = rider.formationFrontRider;
+                if (!front) return this.pacer.speed;
+
+                const idealGap = 17;
+                const actualGap = front.distance - rider.distance;
+                const gapError = actualGap - idealGap;
+
+                let desired = front.speed;
+                if (gapError < -0.8) desired -= 0.3;
+                else if (gapError > 0.8) desired += 0.3;
+                return desired;
+            }
+        } else {
+            const targetCeiling = this._targetSpeedFor(rider) * 1.25;
+            if (rider.isLeader) {
+                return this._targetSpeedFor(rider);
+            } else {
+                const front = rider.frontRider;
+                if (!front) return this.pacer.speed;
+                if (front.finished) return targetCeiling;
+
+                const idealGap = 17;
+                const actualGap = front.distance - rider.distance;
+                const gapError = actualGap - idealGap;
+
+                let desired = front.speed;
+                if (gapError < -0.6) desired -= 0.4;
+                else if (gapError > 0.6) desired += 0.4;
+                return desired;
+            }
+        }
     }
 
-    _updateLeader(rider, dt) {
-        const targetSpeed = this._targetSpeedFor(rider);
+    _move(rider, desiredSpeed, dt) {
         const previousSpeed = rider.speed;
-        const accel = rider.speed < targetSpeed ? 3.5 : -3;
-        rider.speed += accel * dt;
+        const stepAccel = 3.0 * dt;
 
-        if ((accel > 0 && rider.speed > targetSpeed) || (accel < 0 && rider.speed < targetSpeed)) {
-            rider.speed = targetSpeed;
+        if (rider.speed < desiredSpeed) {
+            rider.speed = Math.min(desiredSpeed, rider.speed + stepAccel);
+        } else if (rider.speed > desiredSpeed) {
+            rider.speed = Math.max(desiredSpeed, rider.speed - stepAccel);
         }
 
-        rider.distance += rider.speed * dt;
-        rider.acceleration = (rider.speed - previousSpeed) / Math.max(dt, 1e-6);
-    }
-
-    _updateFollower(rider, dt) {
-        const front = rider.frontRider;
-        if (!front) return;
-
-        const previousSpeed = rider.speed;
-        const targetCeiling = this._targetSpeedFor(rider) * 1.25;
-
-        // Once the front rider crosses the line, the follower must be allowed to
-        // cross it too. Keeping a 5m collision barrier against a clamped 800m
-        // position would dead-lock every follower at 795m.
-        if (front.finished) {
-            const finishAcceleration = rider.speed < targetCeiling ? 2.4 : -2.0;
-            rider.speed = clamp(rider.speed + (finishAcceleration * dt), 0, targetCeiling);
-            rider.distance += rider.speed * dt;
-            rider.acceleration = (rider.speed - previousSpeed) / Math.max(dt, 1e-6);
-            return;
-        }
-
-        const idealGap = 17 + Math.min(3, front.speed * 0.2);
-        const actualGap = front.distance - rider.distance;
-        const gapError = actualGap - idealGap;
-        const relativeSpeed = front.speed - rider.speed;
-
-        // Bounded damped car-following controller. The internal 120Hz substeps and
-        // acceleration limits keep the line stable even at 3x playback speed.
-        const requestedAcceleration = (gapError * 1.35) + (relativeSpeed * 2.25);
-        const acceleration = clamp(requestedAcceleration, -4.5, 4.2);
-        rider.speed = clamp(rider.speed + acceleration * dt, 0, targetCeiling);
+        // TODO:// 将来はDecisionがLaneTargetを返す設計に変更する（現在はState依存）
+        const targetLane = (this.currentState === RACE_STATE.POSITION_BATTLE) ? rider.initialLaneOffset : rider.baseLaneOffset;
+        rider.laneOffset += (targetLane - rider.laneOffset) * clamp(2.6 * dt, 0, 1);
 
         const nextDistance = rider.distance + (rider.speed * dt);
         const minimumGap = 5;
-        rider.distance = Math.min(nextDistance, front.distance - minimumGap);
-        if (rider.distance === front.distance - minimumGap && rider.speed > front.speed) {
-            rider.speed = front.speed;
+
+        if (this.currentState === RACE_STATE.POSITION_BATTLE) {
+            if (rider.globalIndex === 0) {
+                rider.distance = nextDistance;
+            } else {
+                const front = rider.formationFrontRider;
+                if (front) {
+                    rider.distance = Math.min(nextDistance, front.distance - minimumGap);
+                    if (rider.distance === front.distance - minimumGap && rider.speed > front.speed) {
+                        rider.speed = front.speed;
+                    }
+                } else {
+                    rider.distance = nextDistance;
+                }
+            }
+        } else {
+            const front = rider.frontRider;
+            if (!rider.isLeader && front && !front.finished) {
+                rider.distance = Math.min(nextDistance, front.distance - minimumGap);
+                if (rider.distance === front.distance - minimumGap && rider.speed > front.speed) {
+                    rider.speed = front.speed;
+                }
+            } else {
+                rider.distance = nextDistance;
+            }
         }
 
         rider.acceleration = (rider.speed - previousSpeed) / Math.max(dt, 1e-6);
@@ -280,17 +430,22 @@ export class PhysicsEngine {
                 if (rider.finished) continue;
                 const previousDistance = rider.distance;
 
-                if (this.pacer.state !== PACER_STATE.EXITED) {
-                    this._followPacer(rider, stepDt);
-                } else {
-                    rider.laneOffset += (rider.baseLaneOffset - rider.laneOffset) * clamp(2.6 * stepDt, 0, 1);
-                    if (rider.isLeader) this._updateLeader(rider, stepDt);
-                    else this._updateFollower(rider, stepDt);
-                }
+                const desiredSpeed = this._decision(rider);
+                this._move(rider, desiredSpeed, stepDt);
 
                 if (previousDistance < this.totalDistance && rider.distance >= this.totalDistance) {
                     this._recordFinish(rider);
                 }
+            }
+
+            const leader = this.riders.reduce((max, r) => r.distance > max.distance ? r : max, this.riders[0]);
+            const leaderDistance = leader ? leader.distance : 0;
+
+            const triggeredEvents = this.raceClock.update(this.pacer.distance, leaderDistance, this);
+
+            if (triggeredEvents.includes('Bell')) {
+                this.bellRung = true;
+                this.onBellCallback?.();
             }
         }
 
@@ -298,6 +453,7 @@ export class PhysicsEngine {
 
         if (this.riders.every(rider => rider.finished)) {
             this.isStarted = false;
+            this.currentState = RACE_STATE.FINISHED;
             this._finalizeRanking();
             this.onFinishCallback?.(this.ranking.map(item => ({ ...item })));
         }
@@ -305,17 +461,30 @@ export class PhysicsEngine {
 
     getDiagnostics() {
         const gaps = this.riders
-            .filter(rider => rider.frontRider && !rider.finished && !rider.frontRider.finished)
-            .map(rider => ({
+            .map(rider => {
+                const front = this.currentState === RACE_STATE.POSITION_BATTLE
+                    ? rider.formationFrontRider
+                    : rider.frontRider;
+                return { rider, front };
+            })
+            .filter(({ rider, front }) => front && !rider.finished && !front.finished)
+            .map(({ rider, front }) => ({
                 number: rider.number,
-                frontNumber: rider.frontRider.number,
-                gap: rider.frontRider.distance - rider.distance
+                frontNumber: front.number,
+                gap: front.distance - rider.distance
             }));
 
         return {
             gaps,
             minGap: gaps.length ? Math.min(...gaps.map(item => item.gap)) : null,
-            maxGap: gaps.length ? Math.max(...gaps.map(item => item.gap)) : null
+            maxGap: gaps.length ? Math.max(...gaps.map(item => item.gap)) : null,
+            raceClock: {
+                owner: this.raceClock.owner,
+                remainingDistance: this.raceClock.remainingDistance,
+                currentLap: this.raceClock.currentLap,
+                eventsFired: Object.fromEntries(Object.entries(this.raceClock.events).map(([k, v]) => [k, v.fired])),
+                firedSequence: this.raceClock.firedEventSequence
+            }
         };
     }
 
@@ -325,10 +494,12 @@ export class PhysicsEngine {
             pacer: this.pacer,
             ranking: this.ranking,
             isStarted: this.isStarted,
+            currentState: this.currentState,
             elapsedTime: this.elapsedTime,
             totalDistance: this.totalDistance,
             bellRung: this.bellRung,
-            diagnostics: this.getDiagnostics()
+            diagnostics: this.getDiagnostics(),
+            raceClock: this.raceClock
         };
     }
 }

@@ -1,0 +1,44 @@
+KEIRIN FLOW v2.3.0 — PM RELEASE AUDIT
+Date: 2026-07-26
+
+RELEASE CONTENTS
+- index.html
+- style.css
+- main.js
+- engine.js
+- ui.js
+- ai.js
+- foundation-check.mjs
+- README.md
+- CHANGELOG.md
+
+FINAL CHECKS
+PASS  JavaScript syntax check
+PASS  9 riders generated without duplication
+PASS  HTML/main.js/module interface compatibility
+PASS  400m RaceProfile configuration
+PASS  steady-speed single-file initial formation
+PASS  counter-clockwise track order (6→3→12→9)
+PASS  event sequence and one-shot bell at 0.5x
+PASS  event sequence and one-shot bell at 1.0x
+PASS  event sequence and one-shot bell at 2.0x
+PASS  event sequence and one-shot bell at 3.0x
+PASS  ClockOwner PACER→LEADER transition
+PASS  remaining-distance monotonicity during ClockOwner handoff
+PASS  all 9 riders finish and ranking has 9 entries
+PASS  RESET restores the full initial state
+
+PM CORRECTIONS APPLIED
+- Updated ui.js to display RaceClock remaining distance/current lap.
+- Started all riders at FORMATION_SPEED to remove startup stretching.
+- Delayed ClockOwner transition until the pacer has actually exited.
+- Prevented remaining distance from moving backwards at PACER→LEADER handoff.
+- Updated diagnostics to use formation order during POSITION_BATTLE.
+- Updated index title and initial remaining-lap display.
+- Rebuilt foundation-check.mjs as a release-level regression test.
+
+KNOWN LIMITS
+- POSITION_BATTLE tactics are not implemented yet; formation behavior is used provisionally.
+- Event distances are tuning values pending comparison with real race footage.
+- Precise bank geometry by venue is planned for v2.4.0 or later.
+- Browser audiovisual behavior still requires the user's GitHub Pages/Safari/iPhone practical check.

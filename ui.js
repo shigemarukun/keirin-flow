@@ -275,24 +275,29 @@ export class UIRenderer {
 
     drawRiders(state) {
         // 誘導員
-        if (state.pacer.state !== 'EXITED') {
-            const point =
-                this.getBankCoordinates(
-                    state.pacer.distance,
-                    state.pacer.laneOffset
-                );
+       if (state.pacer.state !== 'EXITED') {
+    const pacerLaneOffset =
+        state.pacer.state === 'EXITING'
+            ? Math.abs(state.pacer.laneOffset)
+            : state.pacer.laneOffset;
 
-            this.drawMarker(
-                point.x,
-                point.y,
-                10,
-                '#64748b',
-                '#f8fafc',
-                '誘',
-                '#ffffff',
-                10
-            );
-        }
+    const point =
+        this.getBankCoordinates(
+            state.pacer.distance,
+            pacerLaneOffset
+        );
+
+    this.drawMarker(
+        point.x,
+        point.y,
+        10,
+        '#64748b',
+        '#f8fafc',
+        '誘',
+        '#ffffff',
+        10
+    );
+}
 
 
         // 選手

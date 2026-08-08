@@ -21,54 +21,84 @@ export function getTrackPoint(
 ) {
     // Phase the logical 0m/400m point to the centre of the home straight.
     // The track geometry stays identical; only the race-distance origin moves.
-    const d = wrapTrackDistance(absoluteDistance + FINISH_LINE_PHASE);
+    const d = wrapTrackDistance(
+        absoluteDistance + FINISH_LINE_PHASE
+    );
+
     const r = radius + laneOffset;
 
-    // ---------------------------------------------------------
+
+    // =========================================================
     // CR-0001B
     //
     // 旧仕様:
-    //   直線 100m
+    //   直線     100m
     //   コーナー 100m
-    //   直線 100m
+    //   直線     100m
     //   コーナー 100m
     //
     // 新仕様:
-    //   画面上の経路長の比率から、400mの論理距離を配分する。
+    //   画面上の経路長比率に合わせて400mを配分する。
     //
-    // 直線1区間の描画長:
+    // 直線1区間:
     //   2 * halfStraight
     //
-    // 半円コーナー1区間の描画弧長:
+    // 半円コーナー1区間:
     //   PI * radius
-    // ---------------------------------------------------------
+    // =========================================================
 
-    const straightPx = 2 * halfStraight;
-    const cornerPx = Math.PI * radius;
-    const totalPx = (2 * straightPx) + (2 * cornerPx);
+    const straightPx =
+        2 * halfStraight;
+
+    const cornerPx =
+        Math.PI * radius;
+
+    const totalPx =
+        (2 * straightPx)
+        + (2 * cornerPx);
+
 
     const straightDist =
-        TRACK_LENGTH * straightPx / totalPx;
+        TRACK_LENGTH
+        * straightPx
+        / totalPx;
+
 
     const cornerDist =
-        TRACK_LENGTH * cornerPx / totalPx;
+        TRACK_LENGTH
+        * cornerPx
+        / totalPx;
+
 
     // 各区間の境界
-    const b1 = straightDist;
-    const b2 = b1 + cornerDist;
-    const b3 = b2 + straightDist;
+    const b1 =
+        straightDist;
+
+    const b2 =
+        b1 + cornerDist;
+
+    const b3 =
+        b2 + straightDist;
 
 
     // =========================================================
     // 第1区間：下側直線
     // =========================================================
     if (d < b1) {
-        const p = d / straightDist;
+        const p =
+            d / straightDist;
 
         return {
-            x: cx - halfStraight + (2 * halfStraight * p),
-            y: cy + r,
-            angle: 0
+            x:
+                cx
+                - halfStraight
+                + (2 * halfStraight * p),
+
+            y:
+                cy + r,
+
+            angle:
+                0
         };
     }
 
@@ -77,15 +107,26 @@ export function getTrackPoint(
     // 第2区間：右側コーナー
     // =========================================================
     if (d < b2) {
-        const p = (d - b1) / cornerDist;
+        const p =
+            (d - b1)
+            / cornerDist;
 
         const theta =
-            Math.PI / 2 - (Math.PI * p);
+            Math.PI / 2
+            - (Math.PI * p);
 
         return {
-            x: cx + halfStraight + (Math.cos(theta) * r),
-            y: cy + (Math.sin(theta) * r),
-            angle: theta - Math.PI / 2
+            x:
+                cx
+                + halfStraight
+                + (Math.cos(theta) * r),
+
+            y:
+                cy
+                + (Math.sin(theta) * r),
+
+            angle:
+                theta - Math.PI / 2
         };
     }
 
@@ -94,12 +135,21 @@ export function getTrackPoint(
     // 第3区間：上側直線
     // =========================================================
     if (d < b3) {
-        const p = (d - b2) / straightDist;
+        const p =
+            (d - b2)
+            / straightDist;
 
         return {
-            x: cx + halfStraight - (2 * halfStraight * p),
-            y: cy - r,
-            angle: Math.PI
+            x:
+                cx
+                + halfStraight
+                - (2 * halfStraight * p),
+
+            y:
+                cy - r,
+
+            angle:
+                Math.PI
         };
     }
 
@@ -107,49 +157,93 @@ export function getTrackPoint(
     // =========================================================
     // 第4区間：左側コーナー
     // =========================================================
-    const p = (d - b3) / cornerDist;
+    const p =
+        (d - b3)
+        / cornerDist;
 
     const theta =
-        -Math.PI / 2 - (Math.PI * p);
+        -Math.PI / 2
+        - (Math.PI * p);
+
 
     return {
-        x: cx - halfStraight + (Math.cos(theta) * r),
-        y: cy + (Math.sin(theta) * r),
-        angle: theta - Math.PI / 2
+        x:
+            cx
+            - halfStraight
+            + (Math.cos(theta) * r),
+
+        y:
+            cy
+            + (Math.sin(theta) * r),
+
+        angle:
+            theta - Math.PI / 2
     };
 }
 
 
+
 export class UIRenderer {
+
     constructor(canvasId) {
-        this.canvas = document.getElementById(canvasId);
+
+        this.canvas =
+            document.getElementById(canvasId);
+
 
         if (!this.canvas) {
-            throw new Error(`Canvas #${canvasId} not found`);
+            throw new Error(
+                `Canvas #${canvasId} not found`
+            );
         }
 
-        this.ctx = this.canvas.getContext('2d');
+
+        this.ctx =
+            this.canvas.getContext('2d');
+
 
         if (!this.ctx) {
-            throw new Error('2D canvas context is unavailable');
+            throw new Error(
+                '2D canvas context is unavailable'
+            );
         }
 
-        this.cx = this.canvas.width / 2;
-        this.cy = this.canvas.height / 2;
 
-        this.halfStraight = 140;
-        this.radius = 200;
+        this.cx =
+            this.canvas.width / 2;
+
+        this.cy =
+            this.canvas.height / 2;
+
+
+        this.halfStraight =
+            140;
+
+        this.radius =
+            200;
+
 
         this.trackGeometry = {
-            cx: this.cx,
-            cy: this.cy,
-            halfStraight: this.halfStraight,
-            radius: this.radius
+            cx:
+                this.cx,
+
+            cy:
+                this.cy,
+
+            halfStraight:
+                this.halfStraight,
+
+            radius:
+                this.radius
         };
     }
 
 
-    getBankCoordinates(distance, laneOffset = 0) {
+
+    getBankCoordinates(
+        distance,
+        laneOffset = 0
+    ) {
         return getTrackPoint(
             this.trackGeometry,
             distance,
@@ -158,39 +252,76 @@ export class UIRenderer {
     }
 
 
-    drawTrack(offset, width, color) {
-        const c = this.ctx;
+
+    drawTrack(
+        offset,
+        width,
+        color
+    ) {
+
+        const c =
+            this.ctx;
+
 
         c.beginPath();
+
 
         for (
             let distance = 0;
             distance <= TRACK_LENGTH;
             distance += 1
         ) {
+
             const point =
-                this.getBankCoordinates(distance, offset);
+                this.getBankCoordinates(
+                    distance,
+                    offset
+                );
+
 
             if (distance === 0) {
-                c.moveTo(point.x, point.y);
+
+                c.moveTo(
+                    point.x,
+                    point.y
+                );
+
             } else {
-                c.lineTo(point.x, point.y);
+
+                c.lineTo(
+                    point.x,
+                    point.y
+                );
             }
         }
 
+
         c.closePath();
 
-        c.lineWidth = width;
-        c.strokeStyle = color;
-        c.lineJoin = 'round';
-        c.lineCap = 'round';
+
+        c.lineWidth =
+            width;
+
+        c.strokeStyle =
+            color;
+
+        c.lineJoin =
+            'round';
+
+        c.lineCap =
+            'round';
+
 
         c.stroke();
     }
 
 
+
     drawBank() {
-        const c = this.ctx;
+
+        const c =
+            this.ctx;
+
 
         c.clearRect(
             0,
@@ -199,33 +330,71 @@ export class UIRenderer {
             this.canvas.height
         );
 
-        this.drawTrack(0, 100, '#334155');
-        this.drawTrack(-50, 2, '#64748b');
-        this.drawTrack(50, 2, '#64748b');
 
+        // バンク本体
+        this.drawTrack(
+            0,
+            100,
+            '#334155'
+        );
+
+
+        // 内側
+        this.drawTrack(
+            -50,
+            2,
+            '#64748b'
+        );
+
+
+        // 外側
+        this.drawTrack(
+            50,
+            2,
+            '#64748b'
+        );
+
+
+        // ゴールライン
         const inside =
-            this.getBankCoordinates(0, -50);
+            this.getBankCoordinates(
+                0,
+                -50
+            );
+
 
         const outside =
-            this.getBankCoordinates(0, 50);
+            this.getBankCoordinates(
+                0,
+                50
+            );
+
 
         c.beginPath();
+
 
         c.moveTo(
             inside.x,
             inside.y
         );
 
+
         c.lineTo(
             outside.x,
             outside.y
         );
 
-        c.lineWidth = 4;
-        c.strokeStyle = '#f8fafc';
+
+        c.lineWidth =
+            4;
+
+        c.strokeStyle =
+            '#f8fafc';
+
 
         c.stroke();
     }
+
 
 
     drawMarker(
@@ -238,9 +407,13 @@ export class UIRenderer {
         textColor,
         fontSize = 11
     ) {
-        const c = this.ctx;
+
+        const c =
+            this.ctx;
+
 
         c.beginPath();
+
 
         c.arc(
             x,
@@ -250,20 +423,36 @@ export class UIRenderer {
             Math.PI * 2
         );
 
-        c.fillStyle = background;
+
+        c.fillStyle =
+            background;
+
         c.fill();
 
-        c.lineWidth = 2;
-        c.strokeStyle = border;
+
+        c.lineWidth =
+            2;
+
+        c.strokeStyle =
+            border;
+
         c.stroke();
 
-        c.fillStyle = textColor;
+
+        c.fillStyle =
+            textColor;
+
 
         c.font =
             `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
 
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
+
+        c.textAlign =
+            'center';
+
+        c.textBaseline =
+            'middle';
+
 
         c.fillText(
             label,
@@ -273,46 +462,69 @@ export class UIRenderer {
     }
 
 
+
     drawRiders(state) {
+
+        // =====================================================
         // 誘導員
-       if (state.pacer.state !== 'EXITED') {
-    const pacerLaneOffset =
-        state.pacer.state === 'EXITING'
-            ? Math.abs(state.pacer.laneOffset)
-            : state.pacer.laneOffset;
+        //
+        // laneOffset はEngine側の値をそのまま使用する。
+        //
+        // マイナス側 = 内側
+        // プラス側   = 外側
+        //
+        // Math.abs() 等による符号変換は禁止。
+        // =====================================================
 
-    const point =
-        this.getBankCoordinates(
-            state.pacer.distance,
-            pacerLaneOffset
-        );
+        if (
+            state.pacer.state !== 'EXITED'
+        ) {
 
-    this.drawMarker(
-        point.x,
-        point.y,
-        10,
-        '#64748b',
-        '#f8fafc',
-        '誘',
-        '#ffffff',
-        10
-    );
-}
+            const point =
+                this.getBankCoordinates(
+                    state.pacer.distance,
+                    state.pacer.laneOffset
+                );
 
 
-        // 選手
-        const orderedRiders =
-            [...state.riders].sort(
-                (a, b) =>
-                    a.globalIndex - b.globalIndex
+            this.drawMarker(
+                point.x,
+                point.y,
+                10,
+                '#64748b',
+                '#f8fafc',
+                '誘',
+                '#ffffff',
+                10
             );
+        }
 
-        for (const rider of orderedRiders) {
+
+
+        // =====================================================
+        // 選手
+        // =====================================================
+
+        const orderedRiders =
+            [...state.riders]
+                .sort(
+                    (a, b) =>
+                        a.globalIndex
+                        - b.globalIndex
+                );
+
+
+        for (
+            const rider
+            of orderedRiders
+        ) {
+
             const point =
                 this.getBankCoordinates(
                     rider.distance,
                     rider.laneOffset
                 );
+
 
             this.drawMarker(
                 point.x,
@@ -328,36 +540,55 @@ export class UIRenderer {
     }
 
 
+
     updateUI(state) {
+
         const lapCounter =
-            document.getElementById('lap-counter');
+            document.getElementById(
+                'lap-counter'
+            );
+
 
         const raceStatus =
-            document.getElementById('race-status');
+            document.getElementById(
+                'race-status'
+            );
+
 
         const gapStatus =
-            document.getElementById('gap-status');
+            document.getElementById(
+                'gap-status'
+            );
+
 
         const resultList =
-            document.getElementById('result-list');
+            document.getElementById(
+                'result-list'
+            );
 
 
-        const remaining = Math.max(
-            0,
-            Math.ceil(
-                state.raceClock?.remainingDistance
-                ?? state.totalDistance
-            )
-        );
+
+        const remaining =
+            Math.max(
+                0,
+                Math.ceil(
+                    state.raceClock
+                        ?.remainingDistance
+                    ?? state.totalDistance
+                )
+            );
+
 
 
         const currentLap =
-            state.raceClock?.currentLap
+            state.raceClock
+                ?.currentLap
             ?? (
                 remaining > TRACK_LENGTH
                     ? 2
                     : 1
             );
+
 
 
         const lap =
@@ -366,28 +597,38 @@ export class UIRenderer {
                 : '最終周';
 
 
+
         if (lapCounter) {
+
             lapCounter.textContent =
                 `${lap} / 残り${remaining}m`;
         }
 
 
+
         if (raceStatus) {
+
             if (
                 state.ranking.length
                 === state.riders.length
             ) {
+
                 raceStatus.textContent =
                     'FINISHED';
+
 
                 raceStatus.style.color =
                     '#f59e0b';
 
-            } else if (state.isStarted) {
+            } else if (
+                state.isStarted
+            ) {
+
                 raceStatus.textContent =
                     state.bellRung
                         ? 'BELL / FINAL LAP'
                         : 'RACING...';
+
 
                 raceStatus.style.color =
                     state.bellRung
@@ -395,10 +636,12 @@ export class UIRenderer {
                         : '#22c55e';
 
             } else {
+
                 raceStatus.textContent =
                     state.elapsedTime > 0
                         ? 'PAUSED'
                         : 'PRE-RACE';
+
 
                 raceStatus.style.color =
                     '#38bdf8';
@@ -406,12 +649,16 @@ export class UIRenderer {
         }
 
 
+
         if (gapStatus) {
+
             const minGap =
                 state.diagnostics.minGap;
 
+
             const maxGap =
                 state.diagnostics.maxGap;
+
 
             gapStatus.textContent =
                 minGap == null
@@ -420,7 +667,9 @@ export class UIRenderer {
         }
 
 
+
         if (resultList) {
+
             resultList.innerHTML =
                 state.ranking.length
                     ? state.ranking
@@ -434,21 +683,37 @@ export class UIRenderer {
     }
 
 
-    renderLineList(lineGroups) {
+
+    renderLineList(
+        lineGroups
+    ) {
+
         const container =
-            document.getElementById('line-list-ui');
+            document.getElementById(
+                'line-list-ui'
+            );
+
 
         if (!container) {
             return;
         }
 
+
         container.innerHTML =
             lineGroups
                 .map(
-                    (group, index) => `
+                    (
+                        group,
+                        index
+                    ) => `
                         <div class="line-row">
-                            <span class="line-name">ライン${index + 1}</span>
-                            <span class="line-members">${group.join(' - ')}</span>
+                            <span class="line-name">
+                                ライン${index + 1}
+                            </span>
+
+                            <span class="line-members">
+                                ${group.join(' - ')}
+                            </span>
                         </div>
                     `
                 )

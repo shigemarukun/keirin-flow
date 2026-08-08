@@ -120,6 +120,18 @@ export class PhysicsEngine {
     constructor(lineGroups, lineOffsets = [-18, -6, 6, 18], profile = RACE_CONFIG) {
         this.lineGroups = lineGroups.map(group => [...group]);
         this.lineOffsets = [...lineOffsets];
+
+        // CR-0003: POSITION_BATTLEの最小実装テスト。
+        // AI導入前のため、複数車で構成される最後方側のラインを1本だけ固定的に仕掛けラインとして扱う。
+        // 将来はAIのDecision結果で置き換える。
+        const multiMemberLineIds = this.lineGroups
+            .map((group, lineId) => ({ lineId, memberCount: group.length }))
+            .filter(item => item.memberCount >= 2)
+            .map(item => item.lineId);
+        this.positionBattleAttackLineId = multiMemberLineIds.length
+            ? multiMemberLineIds[multiMemberLineIds.length - 1]
+            : Math.max(0, this.lineGroups.length - 1);
+
         this.profile = profile;
         this.totalDistance = profile.RACE_DISTANCE;
         this.timeScale = 1;
@@ -260,7 +272,7 @@ export class PhysicsEngine {
             }
 
             const eased = this.pacer.exitProgress * this.pacer.exitProgress * (3 - 2 * this.pacer.exitProgress);
-            this.pacer.laneOffset = -18 + (120 * eased);
+            this.pacer.laneOffset = -18 - (72 * eased);
 
             if (this.raceClock.events.PacerExit.fired && this.pacer.exitProgress >= 1) {
                 this.pacer.state = PACER_STATE.EXITED;
@@ -271,7 +283,33 @@ export class PhysicsEngine {
 
     _decision(rider) {
         if (this.currentState === RACE_STATE.POSITION_BATTLE) {
-            // TODO:// PositionBattleの戦術AI実装までは // Formationロジックを利用する
+            const attackActive = this.pacer.state === PACER_STATE.EXITING;
+            const isAttackLine = rider.lineId === this.positionBattleAttackLineId;
+
+            // CR-0003:
+            // 誘導員が退避を開始したら、最後方側の1ラインだけを仕掛けラインとして前へ上げる。
+            // AI判断はまだ入れず、ラインがまとまって上昇できるかだけを検証する。
+            if (attackActive && isAttackLine) {
+                if (rider.isLeader) {
+                    // 先頭車は誘導員より少し高い目標速度で前方へ上がる。
+                    return this.pacer.speed + 1.8;
+                }
+
+                // 同ラインの後続車は、そのラインの前走者を追従する。
+                const front = rider.frontRider;
+                if (!front) return this.pacer.speed + 1.0;
+
+                const idealGap = 17;
+                const actualGap = front.distance - rider.distance;
+                const gapError = actualGap - idealGap;
+
+                let desired = front.speed;
+                if (gapError < -0.8) desired -= 0.3;
+                else if (gapError > 0.8) desired += 0.5;
+                return desired;
+            }
+
+            // 仕掛け対象外は、従来どおりFormationロジックを維持する。
             if (rider.globalIndex === 0) {
                 const targetDistance = this.pacer.distance - 14;
                 const gapError = targetDistance - rider.distance;
@@ -324,14 +362,40 @@ export class PhysicsEngine {
         }
 
         // TODO:// 将来はDecisionがLaneTargetを返す設計に変更する（現在はState依存）
-        const targetLane = (this.currentState === RACE_STATE.POSITION_BATTLE) ? rider.initialLaneOffset : rider.baseLaneOffset;
+        const attackActive =
+            this.currentState === RACE_STATE.POSITION_BATTLE &&
+            this.pacer.state === PACER_STATE.EXITING &&
+            rider.lineId === this.positionBattleAttackLineId;
+
+        // CR-0003:
+        // 仕掛けラインだけは外側の本来レーンへ移動しながら前へ上がる。
+        // それ以外は従来どおり一列の初期レーンを維持する。
+        const targetLane = this.currentState === RACE_STATE.POSITION_BATTLE
+            ? (attackActive ? rider.baseLaneOffset : rider.initialLaneOffset)
+            : rider.baseLaneOffset;
+
         rider.laneOffset += (targetLane - rider.laneOffset) * clamp(2.6 * dt, 0, 1);
 
         const nextDistance = rider.distance + (rider.speed * dt);
         const minimumGap = 5;
 
         if (this.currentState === RACE_STATE.POSITION_BATTLE) {
-            if (rider.globalIndex === 0) {
+            if (attackActive) {
+                // 仕掛けラインは他ラインのFormation順に縛らず、同ライン内だけで車間を守る。
+                if (rider.isLeader) {
+                    rider.distance = nextDistance;
+                } else {
+                    const front = rider.frontRider;
+                    if (front) {
+                        rider.distance = Math.min(nextDistance, front.distance - minimumGap);
+                        if (rider.distance === front.distance - minimumGap && rider.speed > front.speed) {
+                            rider.speed = front.speed;
+                        }
+                    } else {
+                        rider.distance = nextDistance;
+                    }
+                }
+            } else if (rider.globalIndex === 0) {
                 rider.distance = nextDistance;
             } else {
                 const front = rider.formationFrontRider;

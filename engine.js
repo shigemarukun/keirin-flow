@@ -260,7 +260,7 @@ export class PhysicsEngine {
             }
 
             const eased = this.pacer.exitProgress * this.pacer.exitProgress * (3 - 2 * this.pacer.exitProgress);
-            this.pacer.laneOffset = -18 - (120 * eased);
+            this.pacer.laneOffset = -18 + (120 * eased);
 
             if (this.raceClock.events.PacerExit.fired && this.pacer.exitProgress >= 1) {
                 this.pacer.state = PACER_STATE.EXITED;

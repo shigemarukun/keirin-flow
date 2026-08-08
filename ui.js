@@ -21,11 +21,13 @@ export function getTrackPoint(
 ) {
     // Phase the logical 0m/400m point to the centre of the home straight.
     // The track geometry stays identical; only the race-distance origin moves.
-    const d = wrapTrackDistance(
-        absoluteDistance + FINISH_LINE_PHASE
-    );
+    const d =
+        wrapTrackDistance(
+            absoluteDistance + FINISH_LINE_PHASE
+        );
 
-    const r = radius + laneOffset;
+    const r =
+        radius + laneOffset;
 
 
     // =========================================================
@@ -339,7 +341,7 @@ export class UIRenderer {
         );
 
 
-        // 内側
+        // 内側ライン
         this.drawTrack(
             -50,
             2,
@@ -347,7 +349,7 @@ export class UIRenderer {
         );
 
 
-        // 外側
+        // 外側ライン
         this.drawTrack(
             50,
             2,
@@ -468,12 +470,15 @@ export class UIRenderer {
         // =====================================================
         // 誘導員
         //
-        // laneOffset はEngine側の値をそのまま使用する。
+        // 通常時：
+        // Engineのdistance / laneOffsetをそのまま使用。
         //
-        // マイナス側 = 内側
-        // プラス側   = 外側
+        // EXITING時：
+        // 通常のバンク座標を求めたあと、
+        // Canvas中央方向へ直接オフセットして退避させる。
         //
-        // Math.abs() 等による符号変換は禁止。
+        // これによりlaneOffsetの符号解釈に依存せず、
+        // 視覚上確実にバンク内側へ退避させる。
         // =====================================================
 
         if (
@@ -487,9 +492,67 @@ export class UIRenderer {
                 );
 
 
+            let drawX =
+                point.x;
+
+            let drawY =
+                point.y;
+
+
+            if (
+                state.pacer.state === 'EXITING'
+            ) {
+
+                // 現在位置からCanvas中央方向へのベクトル
+                const dx =
+                    this.cx - point.x;
+
+                const dy =
+                    this.cy - point.y;
+
+
+                const length =
+                    Math.sqrt(
+                        (dx * dx)
+                        + (dy * dy)
+                    ) || 1;
+
+
+                // 中央方向の単位ベクトル
+                const inwardX =
+                    dx / length;
+
+                const inwardY =
+                    dy / length;
+
+
+                // Engine側の退避進行度をそのまま利用
+                const exitProgress =
+                    Math.max(
+                        0,
+                        Math.min(
+                            1,
+                            state.pacer.exitProgress ?? 0
+                        )
+                    );
+
+
+                // 最大120px、Canvas中央方向へ退避
+                const exitAmount =
+                    exitProgress * 120;
+
+
+                drawX +=
+                    inwardX * exitAmount;
+
+                drawY +=
+                    inwardY * exitAmount;
+            }
+
+
             this.drawMarker(
-                point.x,
-                point.y,
+                drawX,
+                drawY,
                 10,
                 '#64748b',
                 '#f8fafc',

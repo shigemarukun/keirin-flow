@@ -1,5 +1,4 @@
 const TRACK_LENGTH = 400;
-const SEGMENT_LENGTH = 100;
 const FINISH_LINE_PHASE = 50;
 
 const wrapTrackDistance = distance =>
@@ -12,22 +11,19 @@ const wrapTrackDistance = distance =>
  * 論理距離400mを、画面上の実際の経路長
  * （直線 + 半円コーナー）の比率に合わせて配分する。
  *
- * 既存の座標系・周回方向・FINISH_LINE_PHASE・laneOffset・角度式は変更しない。
+ * 既存の座標系・周回方向・FINISH_LINE_PHASE・laneOffset・角度式は維持する。
  */
 export function getTrackPoint(
     { cx, cy, halfStraight, radius },
     absoluteDistance,
     laneOffset = 0
 ) {
-    // Phase the logical 0m/400m point to the centre of the home straight.
-    // The track geometry stays identical; only the race-distance origin moves.
-    const d =
-        wrapTrackDistance(
-            absoluteDistance + FINISH_LINE_PHASE
-        );
+    // 論理上の0m / 400m地点をホームストレッチ中央へ位相調整
+    const d = wrapTrackDistance(
+        absoluteDistance + FINISH_LINE_PHASE
+    );
 
-    const r =
-        radius + laneOffset;
+    const r = radius + laneOffset;
 
 
     // =========================================================
@@ -40,31 +36,20 @@ export function getTrackPoint(
     //   コーナー 100m
     //
     // 新仕様:
-    //   画面上の経路長比率に合わせて400mを配分する。
-    //
-    // 直線1区間:
-    //   2 * halfStraight
-    //
-    // 半円コーナー1区間:
-    //   PI * radius
+    //   画面上の経路長比率に合わせて400mを配分
     // =========================================================
 
-    const straightPx =
-        2 * halfStraight;
-
-    const cornerPx =
-        Math.PI * radius;
+    const straightPx = 2 * halfStraight;
+    const cornerPx = Math.PI * radius;
 
     const totalPx =
         (2 * straightPx)
         + (2 * cornerPx);
 
-
     const straightDist =
         TRACK_LENGTH
         * straightPx
         / totalPx;
-
 
     const cornerDist =
         TRACK_LENGTH
@@ -73,14 +58,9 @@ export function getTrackPoint(
 
 
     // 各区間の境界
-    const b1 =
-        straightDist;
-
-    const b2 =
-        b1 + cornerDist;
-
-    const b3 =
-        b2 + straightDist;
+    const b1 = straightDist;
+    const b2 = b1 + cornerDist;
+    const b3 = b2 + straightDist;
 
 
     // =========================================================
@@ -167,7 +147,6 @@ export function getTrackPoint(
         -Math.PI / 2
         - (Math.PI * p);
 
-
     return {
         x:
             cx
@@ -184,7 +163,6 @@ export function getTrackPoint(
 }
 
 
-
 export class UIRenderer {
 
     constructor(canvasId) {
@@ -192,17 +170,14 @@ export class UIRenderer {
         this.canvas =
             document.getElementById(canvasId);
 
-
         if (!this.canvas) {
             throw new Error(
                 `Canvas #${canvasId} not found`
             );
         }
 
-
         this.ctx =
             this.canvas.getContext('2d');
-
 
         if (!this.ctx) {
             throw new Error(
@@ -218,28 +193,17 @@ export class UIRenderer {
             this.canvas.height / 2;
 
 
-        this.halfStraight =
-            140;
-
-        this.radius =
-            200;
+        this.halfStraight = 140;
+        this.radius = 200;
 
 
         this.trackGeometry = {
-            cx:
-                this.cx,
-
-            cy:
-                this.cy,
-
-            halfStraight:
-                this.halfStraight,
-
-            radius:
-                this.radius
+            cx: this.cx,
+            cy: this.cy,
+            halfStraight: this.halfStraight,
+            radius: this.radius
         };
     }
-
 
 
     getBankCoordinates(
@@ -254,42 +218,32 @@ export class UIRenderer {
     }
 
 
-
     drawTrack(
         offset,
         width,
         color
     ) {
-
-        const c =
-            this.ctx;
-
+        const c = this.ctx;
 
         c.beginPath();
-
 
         for (
             let distance = 0;
             distance <= TRACK_LENGTH;
             distance += 1
         ) {
-
             const point =
                 this.getBankCoordinates(
                     distance,
                     offset
                 );
 
-
             if (distance === 0) {
-
                 c.moveTo(
                     point.x,
                     point.y
                 );
-
             } else {
-
                 c.lineTo(
                     point.x,
                     point.y
@@ -297,33 +251,20 @@ export class UIRenderer {
             }
         }
 
-
         c.closePath();
 
-
-        c.lineWidth =
-            width;
-
-        c.strokeStyle =
-            color;
-
-        c.lineJoin =
-            'round';
-
-        c.lineCap =
-            'round';
-
+        c.lineWidth = width;
+        c.strokeStyle = color;
+        c.lineJoin = 'round';
+        c.lineCap = 'round';
 
         c.stroke();
     }
 
 
-
     drawBank() {
 
-        const c =
-            this.ctx;
-
+        const c = this.ctx;
 
         c.clearRect(
             0,
@@ -364,7 +305,6 @@ export class UIRenderer {
                 -50
             );
 
-
         const outside =
             this.getBankCoordinates(
                 0,
@@ -374,29 +314,21 @@ export class UIRenderer {
 
         c.beginPath();
 
-
         c.moveTo(
             inside.x,
             inside.y
         );
-
 
         c.lineTo(
             outside.x,
             outside.y
         );
 
-
-        c.lineWidth =
-            4;
-
-        c.strokeStyle =
-            '#f8fafc';
-
+        c.lineWidth = 4;
+        c.strokeStyle = '#f8fafc';
 
         c.stroke();
     }
-
 
 
     drawMarker(
@@ -409,13 +341,9 @@ export class UIRenderer {
         textColor,
         fontSize = 11
     ) {
-
-        const c =
-            this.ctx;
-
+        const c = this.ctx;
 
         c.beginPath();
-
 
         c.arc(
             x,
@@ -425,36 +353,27 @@ export class UIRenderer {
             Math.PI * 2
         );
 
-
         c.fillStyle =
             background;
 
         c.fill();
 
-
-        c.lineWidth =
-            2;
-
-        c.strokeStyle =
-            border;
+        c.lineWidth = 2;
+        c.strokeStyle = border;
 
         c.stroke();
-
 
         c.fillStyle =
             textColor;
 
-
         c.font =
             `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-
 
         c.textAlign =
             'center';
 
         c.textBaseline =
             'middle';
-
 
         c.fillText(
             label,
@@ -464,51 +383,51 @@ export class UIRenderer {
     }
 
 
-
     drawRiders(state) {
 
         // =====================================================
         // 誘導員
         //
-        // 通常時：
-        // Engineのdistance / laneOffsetをそのまま使用。
+        // LEADING:
+        //   従来どおりEngineのdistance / laneOffsetを使用。
         //
-        // EXITING時：
-        // 通常のバンク座標を求めたあと、
-        // Canvas中央方向へ直接オフセットして退避させる。
+        // EXITING:
+        //   laneOffsetの符号には依存せず、
+        //   基準走行位置からCanvas中央方向へ直接退避。
         //
-        // これによりlaneOffsetの符号解釈に依存せず、
-        // 視覚上確実にバンク内側へ退避させる。
+        // EXITED:
+        //   描画しない。
         // =====================================================
 
         if (
             state.pacer.state !== 'EXITED'
         ) {
 
-            const point =
-                this.getBankCoordinates(
-                    state.pacer.distance,
-                    state.pacer.laneOffset
-                );
+            let point;
 
 
-            let drawX =
-                point.x;
-
-            let drawY =
-                point.y;
-
-
+            // -------------------------------------------------
+            // 退避中
+            // -------------------------------------------------
             if (
                 state.pacer.state === 'EXITING'
             ) {
 
-                // 現在位置からCanvas中央方向へのベクトル
+                // 誘導員の通常走行基準レーン
+                // Engine初期値と同じ -18 を基準にする
+                const basePoint =
+                    this.getBankCoordinates(
+                        state.pacer.distance,
+                        -18
+                    );
+
+
+                // 現在地点 → Canvas中央方向
                 const dx =
-                    this.cx - point.x;
+                    this.cx - basePoint.x;
 
                 const dy =
-                    this.cy - point.y;
+                    this.cy - basePoint.y;
 
 
                 const length =
@@ -518,7 +437,7 @@ export class UIRenderer {
                     ) || 1;
 
 
-                // 中央方向の単位ベクトル
+                // 内側方向の単位ベクトル
                 const inwardX =
                     dx / length;
 
@@ -526,33 +445,53 @@ export class UIRenderer {
                     dy / length;
 
 
-                // Engine側の退避進行度をそのまま利用
-                const exitProgress =
+                // Engineに実在するexitProgress
+                // 0.0 → 1.0
+                const progress =
                     Math.max(
                         0,
                         Math.min(
                             1,
-                            state.pacer.exitProgress ?? 0
+                            state.pacer.exitProgress
                         )
                     );
 
 
-                // 最大120px、Canvas中央方向へ退避
+                // 最大120px、バンク中央方向へ退避
                 const exitAmount =
-                    exitProgress * 120;
+                    progress * 120;
 
 
-                drawX +=
-                    inwardX * exitAmount;
+                point = {
+                    x:
+                        basePoint.x
+                        + (inwardX * exitAmount),
 
-                drawY +=
-                    inwardY * exitAmount;
+                    y:
+                        basePoint.y
+                        + (inwardY * exitAmount),
+
+                    angle:
+                        basePoint.angle
+                };
+
+
+            // -------------------------------------------------
+            // 通常先導中
+            // -------------------------------------------------
+            } else {
+
+                point =
+                    this.getBankCoordinates(
+                        state.pacer.distance,
+                        state.pacer.laneOffset
+                    );
             }
 
 
             this.drawMarker(
-                drawX,
-                drawY,
+                point.x,
+                point.y,
                 10,
                 '#64748b',
                 '#f8fafc',
@@ -561,7 +500,6 @@ export class UIRenderer {
                 10
             );
         }
-
 
 
         // =====================================================
@@ -603,7 +541,6 @@ export class UIRenderer {
     }
 
 
-
     updateUI(state) {
 
         const lapCounter =
@@ -611,24 +548,20 @@ export class UIRenderer {
                 'lap-counter'
             );
 
-
         const raceStatus =
             document.getElementById(
                 'race-status'
             );
-
 
         const gapStatus =
             document.getElementById(
                 'gap-status'
             );
 
-
         const resultList =
             document.getElementById(
                 'result-list'
             );
-
 
 
         const remaining =
@@ -642,7 +575,6 @@ export class UIRenderer {
             );
 
 
-
         const currentLap =
             state.raceClock
                 ?.currentLap
@@ -653,12 +585,10 @@ export class UIRenderer {
             );
 
 
-
         const lap =
             currentLap > 1
                 ? '残り2周'
                 : '最終周';
-
 
 
         if (lapCounter) {
@@ -666,7 +596,6 @@ export class UIRenderer {
             lapCounter.textContent =
                 `${lap} / 残り${remaining}m`;
         }
-
 
 
         if (raceStatus) {
@@ -679,9 +608,9 @@ export class UIRenderer {
                 raceStatus.textContent =
                     'FINISHED';
 
-
                 raceStatus.style.color =
                     '#f59e0b';
+
 
             } else if (
                 state.isStarted
@@ -692,11 +621,11 @@ export class UIRenderer {
                         ? 'BELL / FINAL LAP'
                         : 'RACING...';
 
-
                 raceStatus.style.color =
                     state.bellRung
                         ? '#f59e0b'
                         : '#22c55e';
+
 
             } else {
 
@@ -705,19 +634,16 @@ export class UIRenderer {
                         ? 'PAUSED'
                         : 'PRE-RACE';
 
-
                 raceStatus.style.color =
                     '#38bdf8';
             }
         }
 
 
-
         if (gapStatus) {
 
             const minGap =
                 state.diagnostics.minGap;
-
 
             const maxGap =
                 state.diagnostics.maxGap;
@@ -728,7 +654,6 @@ export class UIRenderer {
                     ? '車間: --'
                     : `車間: ${minGap.toFixed(1)}〜${maxGap.toFixed(1)}m`;
         }
-
 
 
         if (resultList) {
@@ -744,7 +669,6 @@ export class UIRenderer {
                     : '<li class="empty-result">レース終了後に表示</li>';
         }
     }
-
 
 
     renderLineList(
@@ -765,18 +689,10 @@ export class UIRenderer {
         container.innerHTML =
             lineGroups
                 .map(
-                    (
-                        group,
-                        index
-                    ) => `
+                    (group, index) => `
                         <div class="line-row">
-                            <span class="line-name">
-                                ライン${index + 1}
-                            </span>
-
-                            <span class="line-members">
-                                ${group.join(' - ')}
-                            </span>
+                            <span class="line-name">ライン${index + 1}</span>
+                            <span class="line-members">${group.join(' - ')}</span>
                         </div>
                     `
                 )

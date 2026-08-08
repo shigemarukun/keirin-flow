@@ -2,16 +2,69 @@ const TRACK_LENGTH = 400;
 const SEGMENT_LENGTH = 100;
 const FINISH_LINE_PHASE = 50;
 
-const wrapTrackDistance = distance => ((distance % TRACK_LENGTH) + TRACK_LENGTH) % TRACK_LENGTH;
+const wrapTrackDistance = distance =>
+    ((distance % TRACK_LENGTH) + TRACK_LENGTH) % TRACK_LENGTH;
 
-export function getTrackPoint({ cx, cy, halfStraight, radius }, absoluteDistance, laneOffset = 0) {
+
+/**
+ * CR-0001B
+ *
+ * 論理距離400mを、画面上の実際の経路長
+ * （直線 + 半円コーナー）の比率に合わせて配分する。
+ *
+ * 既存の座標系・周回方向・FINISH_LINE_PHASE・laneOffset・角度式は変更しない。
+ */
+export function getTrackPoint(
+    { cx, cy, halfStraight, radius },
+    absoluteDistance,
+    laneOffset = 0
+) {
     // Phase the logical 0m/400m point to the centre of the home straight.
     // The track geometry stays identical; only the race-distance origin moves.
     const d = wrapTrackDistance(absoluteDistance + FINISH_LINE_PHASE);
     const r = radius + laneOffset;
 
-    if (d < 100) {
-        const p = d / SEGMENT_LENGTH;
+    // ---------------------------------------------------------
+    // CR-0001B
+    //
+    // 旧仕様:
+    //   直線 100m
+    //   コーナー 100m
+    //   直線 100m
+    //   コーナー 100m
+    //
+    // 新仕様:
+    //   画面上の経路長の比率から、400mの論理距離を配分する。
+    //
+    // 直線1区間の描画長:
+    //   2 * halfStraight
+    //
+    // 半円コーナー1区間の描画弧長:
+    //   PI * radius
+    // ---------------------------------------------------------
+
+    const straightPx = 2 * halfStraight;
+    const cornerPx = Math.PI * radius;
+    const totalPx = (2 * straightPx) + (2 * cornerPx);
+
+    const straightDist =
+        TRACK_LENGTH * straightPx / totalPx;
+
+    const cornerDist =
+        TRACK_LENGTH * cornerPx / totalPx;
+
+    // 各区間の境界
+    const b1 = straightDist;
+    const b2 = b1 + cornerDist;
+    const b3 = b2 + straightDist;
+
+
+    // =========================================================
+    // 第1区間：下側直線
+    // =========================================================
+    if (d < b1) {
+        const p = d / straightDist;
+
         return {
             x: cx - halfStraight + (2 * halfStraight * p),
             y: cy + r,
@@ -19,9 +72,16 @@ export function getTrackPoint({ cx, cy, halfStraight, radius }, absoluteDistance
         };
     }
 
-    if (d < 200) {
-        const p = (d - 100) / SEGMENT_LENGTH;
-        const theta = Math.PI / 2 - (Math.PI * p);
+
+    // =========================================================
+    // 第2区間：右側コーナー
+    // =========================================================
+    if (d < b2) {
+        const p = (d - b1) / cornerDist;
+
+        const theta =
+            Math.PI / 2 - (Math.PI * p);
+
         return {
             x: cx + halfStraight + (Math.cos(theta) * r),
             y: cy + (Math.sin(theta) * r),
@@ -29,8 +89,13 @@ export function getTrackPoint({ cx, cy, halfStraight, radius }, absoluteDistance
         };
     }
 
-    if (d < 300) {
-        const p = (d - 200) / SEGMENT_LENGTH;
+
+    // =========================================================
+    // 第3区間：上側直線
+    // =========================================================
+    if (d < b3) {
+        const p = (d - b2) / straightDist;
+
         return {
             x: cx + halfStraight - (2 * halfStraight * p),
             y: cy - r,
@@ -38,8 +103,15 @@ export function getTrackPoint({ cx, cy, halfStraight, radius }, absoluteDistance
         };
     }
 
-    const p = (d - 300) / SEGMENT_LENGTH;
-    const theta = -Math.PI / 2 - (Math.PI * p);
+
+    // =========================================================
+    // 第4区間：左側コーナー
+    // =========================================================
+    const p = (d - b3) / cornerDist;
+
+    const theta =
+        -Math.PI / 2 - (Math.PI * p);
+
     return {
         x: cx - halfStraight + (Math.cos(theta) * r),
         y: cy + (Math.sin(theta) * r),
@@ -47,17 +119,27 @@ export function getTrackPoint({ cx, cy, halfStraight, radius }, absoluteDistance
     };
 }
 
+
 export class UIRenderer {
     constructor(canvasId) {
         this.canvas = document.getElementById(canvasId);
-        if (!this.canvas) throw new Error(`Canvas #${canvasId} not found`);
+
+        if (!this.canvas) {
+            throw new Error(`Canvas #${canvasId} not found`);
+        }
+
         this.ctx = this.canvas.getContext('2d');
-        if (!this.ctx) throw new Error('2D canvas context is unavailable');
+
+        if (!this.ctx) {
+            throw new Error('2D canvas context is unavailable');
+        }
 
         this.cx = this.canvas.width / 2;
         this.cy = this.canvas.height / 2;
+
         this.halfStraight = 140;
         this.radius = 200;
+
         this.trackGeometry = {
             cx: this.cx,
             cy: this.cy,
@@ -66,69 +148,167 @@ export class UIRenderer {
         };
     }
 
+
     getBankCoordinates(distance, laneOffset = 0) {
-        return getTrackPoint(this.trackGeometry, distance, laneOffset);
+        return getTrackPoint(
+            this.trackGeometry,
+            distance,
+            laneOffset
+        );
     }
+
 
     drawTrack(offset, width, color) {
         const c = this.ctx;
+
         c.beginPath();
-        for (let distance = 0; distance <= TRACK_LENGTH; distance += 1) {
-            const point = this.getBankCoordinates(distance, offset);
-            if (distance === 0) c.moveTo(point.x, point.y);
-            else c.lineTo(point.x, point.y);
+
+        for (
+            let distance = 0;
+            distance <= TRACK_LENGTH;
+            distance += 1
+        ) {
+            const point =
+                this.getBankCoordinates(distance, offset);
+
+            if (distance === 0) {
+                c.moveTo(point.x, point.y);
+            } else {
+                c.lineTo(point.x, point.y);
+            }
         }
+
         c.closePath();
+
         c.lineWidth = width;
         c.strokeStyle = color;
         c.lineJoin = 'round';
         c.lineCap = 'round';
+
         c.stroke();
     }
 
+
     drawBank() {
         const c = this.ctx;
-        c.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        c.clearRect(
+            0,
+            0,
+            this.canvas.width,
+            this.canvas.height
+        );
 
         this.drawTrack(0, 100, '#334155');
         this.drawTrack(-50, 2, '#64748b');
         this.drawTrack(50, 2, '#64748b');
 
-        const inside = this.getBankCoordinates(0, -50);
-        const outside = this.getBankCoordinates(0, 50);
+        const inside =
+            this.getBankCoordinates(0, -50);
+
+        const outside =
+            this.getBankCoordinates(0, 50);
+
         c.beginPath();
-        c.moveTo(inside.x, inside.y);
-        c.lineTo(outside.x, outside.y);
+
+        c.moveTo(
+            inside.x,
+            inside.y
+        );
+
+        c.lineTo(
+            outside.x,
+            outside.y
+        );
+
         c.lineWidth = 4;
         c.strokeStyle = '#f8fafc';
+
         c.stroke();
     }
 
-    drawMarker(x, y, radius, background, border, label, textColor, fontSize = 11) {
+
+    drawMarker(
+        x,
+        y,
+        radius,
+        background,
+        border,
+        label,
+        textColor,
+        fontSize = 11
+    ) {
         const c = this.ctx;
+
         c.beginPath();
-        c.arc(x, y, radius, 0, Math.PI * 2);
+
+        c.arc(
+            x,
+            y,
+            radius,
+            0,
+            Math.PI * 2
+        );
+
         c.fillStyle = background;
         c.fill();
+
         c.lineWidth = 2;
         c.strokeStyle = border;
         c.stroke();
+
         c.fillStyle = textColor;
-        c.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+
+        c.font =
+            `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+
         c.textAlign = 'center';
         c.textBaseline = 'middle';
-        c.fillText(label, x, y);
+
+        c.fillText(
+            label,
+            x,
+            y
+        );
     }
 
+
     drawRiders(state) {
+        // 誘導員
         if (state.pacer.state !== 'EXITED') {
-            const point = this.getBankCoordinates(state.pacer.distance, state.pacer.laneOffset);
-            this.drawMarker(point.x, point.y, 10, '#64748b', '#f8fafc', '誘', '#ffffff', 10);
+            const point =
+                this.getBankCoordinates(
+                    state.pacer.distance,
+                    state.pacer.laneOffset
+                );
+
+            this.drawMarker(
+                point.x,
+                point.y,
+                10,
+                '#64748b',
+                '#f8fafc',
+                '誘',
+                '#ffffff',
+                10
+            );
         }
 
-        const orderedRiders = [...state.riders].sort((a, b) => a.globalIndex - b.globalIndex);
+
+        // 選手
+        const orderedRiders =
+            [...state.riders].sort(
+                (a, b) =>
+                    a.globalIndex - b.globalIndex
+            );
+
         for (const rider of orderedRiders) {
-            const point = this.getBankCoordinates(rider.distance, rider.laneOffset);
+            const point =
+                this.getBankCoordinates(
+                    rider.distance,
+                    rider.laneOffset
+                );
+
             this.drawMarker(
                 point.x,
                 point.y,
@@ -142,54 +322,131 @@ export class UIRenderer {
         }
     }
 
-    updateUI(state) {
-        const lapCounter = document.getElementById('lap-counter');
-        const raceStatus = document.getElementById('race-status');
-        const gapStatus = document.getElementById('gap-status');
-        const resultList = document.getElementById('result-list');
 
-        const remaining = Math.max(0, Math.ceil(state.raceClock?.remainingDistance ?? state.totalDistance));
-        const currentLap = state.raceClock?.currentLap ?? (remaining > TRACK_LENGTH ? 2 : 1);
-        const lap = currentLap > 1 ? '残り2周' : '最終周';
-        if (lapCounter) lapCounter.textContent = `${lap} / 残り${remaining}m`;
+    updateUI(state) {
+        const lapCounter =
+            document.getElementById('lap-counter');
+
+        const raceStatus =
+            document.getElementById('race-status');
+
+        const gapStatus =
+            document.getElementById('gap-status');
+
+        const resultList =
+            document.getElementById('result-list');
+
+
+        const remaining = Math.max(
+            0,
+            Math.ceil(
+                state.raceClock?.remainingDistance
+                ?? state.totalDistance
+            )
+        );
+
+
+        const currentLap =
+            state.raceClock?.currentLap
+            ?? (
+                remaining > TRACK_LENGTH
+                    ? 2
+                    : 1
+            );
+
+
+        const lap =
+            currentLap > 1
+                ? '残り2周'
+                : '最終周';
+
+
+        if (lapCounter) {
+            lapCounter.textContent =
+                `${lap} / 残り${remaining}m`;
+        }
+
 
         if (raceStatus) {
-            if (state.ranking.length === state.riders.length) {
-                raceStatus.textContent = 'FINISHED';
-                raceStatus.style.color = '#f59e0b';
+            if (
+                state.ranking.length
+                === state.riders.length
+            ) {
+                raceStatus.textContent =
+                    'FINISHED';
+
+                raceStatus.style.color =
+                    '#f59e0b';
+
             } else if (state.isStarted) {
-                raceStatus.textContent = state.bellRung ? 'BELL / FINAL LAP' : 'RACING...';
-                raceStatus.style.color = state.bellRung ? '#f59e0b' : '#22c55e';
+                raceStatus.textContent =
+                    state.bellRung
+                        ? 'BELL / FINAL LAP'
+                        : 'RACING...';
+
+                raceStatus.style.color =
+                    state.bellRung
+                        ? '#f59e0b'
+                        : '#22c55e';
+
             } else {
-                raceStatus.textContent = state.elapsedTime > 0 ? 'PAUSED' : 'PRE-RACE';
-                raceStatus.style.color = '#38bdf8';
+                raceStatus.textContent =
+                    state.elapsedTime > 0
+                        ? 'PAUSED'
+                        : 'PRE-RACE';
+
+                raceStatus.style.color =
+                    '#38bdf8';
             }
         }
 
+
         if (gapStatus) {
-            const minGap = state.diagnostics.minGap;
-            const maxGap = state.diagnostics.maxGap;
-            gapStatus.textContent = minGap == null
-                ? '車間: --'
-                : `車間: ${minGap.toFixed(1)}〜${maxGap.toFixed(1)}m`;
+            const minGap =
+                state.diagnostics.minGap;
+
+            const maxGap =
+                state.diagnostics.maxGap;
+
+            gapStatus.textContent =
+                minGap == null
+                    ? '車間: --'
+                    : `車間: ${minGap.toFixed(1)}〜${maxGap.toFixed(1)}m`;
         }
 
+
         if (resultList) {
-            resultList.innerHTML = state.ranking.length
-                ? state.ranking.map(item => `<li><strong>${item.rank}着 ${item.number}番</strong><span>${item.margin}</span></li>`).join('')
-                : '<li class="empty-result">レース終了後に表示</li>';
+            resultList.innerHTML =
+                state.ranking.length
+                    ? state.ranking
+                        .map(
+                            item =>
+                                `<li><strong>${item.rank}着 ${item.number}番</strong><span>${item.margin}</span></li>`
+                        )
+                        .join('')
+                    : '<li class="empty-result">レース終了後に表示</li>';
         }
     }
 
-    renderLineList(lineGroups) {
-        const container = document.getElementById('line-list-ui');
-        if (!container) return;
 
-        container.innerHTML = lineGroups.map((group, index) => `
-            <div class="line-row">
-                <span class="line-name">ライン${index + 1}</span>
-                <span class="line-members">${group.join(' - ')}</span>
-            </div>
-        `).join('');
+    renderLineList(lineGroups) {
+        const container =
+            document.getElementById('line-list-ui');
+
+        if (!container) {
+            return;
+        }
+
+        container.innerHTML =
+            lineGroups
+                .map(
+                    (group, index) => `
+                        <div class="line-row">
+                            <span class="line-name">ライン${index + 1}</span>
+                            <span class="line-members">${group.join(' - ')}</span>
+                        </div>
+                    `
+                )
+                .join('');
     }
 }

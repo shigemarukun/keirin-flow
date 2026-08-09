@@ -12,7 +12,7 @@ export const INTERACTION_RULES = Object.freeze({
         stretchedGap: 17,
         detachedGap: 27,
         switchAfterSeconds: 0.65,
-        safetyGap: 5.3
+        safetyGap: 5.8
     },
     threat: {
         detectBehind: 40,
@@ -25,7 +25,7 @@ export const INTERACTION_RULES = Object.freeze({
         maxSeconds: 1.05,
         cooldownSeconds: 1.1,
         lateralTargetMargin: 7,
-        maxOuterOffset: 24,
+        maxOuterOffset: 42,
         speedCheck: 0.96,
         attackerSpeedLoss: 2.2,
         attackerExtraLoad: 0.42

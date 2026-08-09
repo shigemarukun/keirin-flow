@@ -1,0 +1,15 @@
+$ node --check engine.js
+
+
+$ node --check race-plan.js
+
+
+$ node --check rules.js
+
+
+$ node scenario-a-check.mjs
+PASS 0.5x  final=4-5-8-6-1-7-2-9-3  1E 0.89 -> 0.11
+PASS 1x  final=4-5-8-6-1-7-2-9-3  1E 0.89 -> 0.11
+PASS 2x  final=4-5-8-6-1-7-2-9-3  1E 0.89 -> 0.11
+PASS 3x  final=4-5-8-6-1-7-2-9-3  1E 0.88 -> 0.11
+BASE SCENARIO A: all causal checkpoints passed

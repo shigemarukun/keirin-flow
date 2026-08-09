@@ -63,7 +63,7 @@ export class PhysicsEngine {
                 plan,capability,distance:initialDistance,speed:this.profile.FORMATION_SPEED,acceleration:0,laneOffset:-18,
                 action:ACTION.FORMATION,followTargetNumber:plan.followNumber??(lineOrder>0?group[lineOrder-1]:null),followStatus:lineOrder===0?FOLLOW_STATUS.LEADER:FOLLOW_STATUS.ATTACHED,
                 detachedTime:0,attackCompleted:false,hasLed:false,energy:capability.energyCapacity,fatigue:0,effort:0,drafting:false,load:0,
-                blockTimer:0,blockCooldown:0,blockTargetNumber:null,banteMakuriStarted:false,interference:0,finished:false,finishTime:null,history:[]
+                blockTimer:0,blockCooldown:0,blockTargetNumber:null,blockCount:0,banteMakuriStarted:false,interference:0,finished:false,finishTime:null,history:[]
             });globalIndex+=1;
         }));
     }
@@ -75,7 +75,7 @@ export class PhysicsEngine {
             r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=r.initialLaneOffset;r.action=ACTION.FORMATION;
             r.followTargetNumber=r.plan.followNumber??r.lineFrontNumber;r.followStatus=r.isLeader?FOLLOW_STATUS.LEADER:FOLLOW_STATUS.ATTACHED;r.detachedTime=0;
             r.attackCompleted=false;r.hasLed=false;r.energy=r.capability.energyCapacity;r.fatigue=0;r.effort=0;r.drafting=false;r.load=0;
-            r.blockTimer=0;r.blockCooldown=0;r.blockTargetNumber=null;r.banteMakuriStarted=false;r.interference=0;r.finished=false;r.finishTime=null;r.history=[];
+            r.blockTimer=0;r.blockCooldown=0;r.blockTargetNumber=null;r.blockCount=0;r.banteMakuriStarted=false;r.interference=0;r.finished=false;r.finishTime=null;r.history=[];
         }
     }
 
@@ -116,13 +116,17 @@ export class PhysicsEngine {
 
     _resolveLeaderAction(rider){
         const p=rider.plan;const remaining=this.raceClock.remainingDistance;const controlling=this._isControllingLine(rider.lineId);const threat=this._findThreatForLine(rider.lineId);
-        if(p.preFollowNumber&&remaining<=p.preFollowTriggerRemaining&&remaining>p.triggerRemaining&&!rider.attackCompleted){rider.followTargetNumber=p.preFollowNumber;return ACTION.FOLLOW;}
+        if(p.preFollowNumber&&remaining<=p.preFollowTriggerRemaining&&remaining>p.triggerRemaining&&!rider.attackCompleted){const pre=this._rider(p.preFollowNumber);if(pre&&pre.distance>rider.distance+4){rider.followTargetNumber=p.preFollowNumber;return ACTION.FOLLOW;}}
 
         if((p.tactic===TACTIC.OSAE_SENKO||p.tactic===TACTIC.KAMASHI||p.tactic===TACTIC.NAKADAN_MAKURI||p.tactic===TACTIC.MAKURI)&&controlling)rider.hasLed=true;
 
         if(controlling&&threat&&p.defendOnThreat&&rider.energy>0.18){rider.blockTargetNumber=threat.number;return ACTION.DEFEND;}
 
-        if(p.tactic===TACTIC.OSAE_SENKO){if(remaining<=p.settleRemaining)return ACTION.LEAD;if(remaining<=p.triggerRemaining)return ACTION.MOVE_UP;return ACTION.FORMATION;}
+        if(p.tactic===TACTIC.OSAE_SENKO){
+            if(rider.attackCompleted)return ACTION.LEAD;
+            if(remaining<=p.triggerRemaining)return ACTION.MOVE_UP;
+            return ACTION.FORMATION;
+        }
         if(p.tactic===TACTIC.TSUPPARI){if(threat&&remaining<=p.triggerRemaining)return ACTION.DEFEND;return remaining<=p.triggerRemaining?ACTION.LEAD:ACTION.FORMATION;}
         if(p.tactic===TACTIC.MAKURI||p.tactic===TACTIC.NAKADAN_MAKURI||p.tactic===TACTIC.KAMASHI){
             if(!rider.attackCompleted&&remaining<=p.triggerRemaining)return ACTION.ATTACK;
@@ -145,6 +149,7 @@ export class PhysicsEngine {
 
     _canBlock(rider,threat){
         if(rider.lineOrder!==1||!rider.plan.blockEnabled||!threat||rider.blockCooldown>0||rider.energy<0.20)return false;
+        if(rider.plan.maxBlockAttempts!=null&&rider.blockCount>=rider.plan.maxBlockAttempts)return false;
         const front=this._rider(rider.lineFrontNumber);if(!front||front.finished)return false;const rr=this.rules.threat;const gap=front.distance-threat.distance;
         return this._isControllingLine(rider.lineId)&&gap<=rr.blockStartGap&&gap>=-rr.blockEndAhead;
     }
@@ -171,16 +176,28 @@ export class PhysicsEngine {
             const threat=this._findThreatForLine(rider.lineId);
             if(rider.blockTimer>0){rider.blockTimer=Math.max(0,rider.blockTimer-dt);rider.action=ACTION.BLOCK;if(rider.blockTimer===0){rider.blockCooldown=this.rules.block.cooldownSeconds;rider.blockTargetNumber=null;}}
             else if(this._canBanteMakuri(rider)){rider.banteMakuriStarted=true;rider.followTargetNumber=null;rider.action=ACTION.BANTE_MAKURI;this._emit('BANTE_MAKURI',{rider:rider.number,lineId:rider.lineId});}
-            else if(this._canBlock(rider,threat)){rider.blockTimer=this.rules.block.maxSeconds;rider.blockTargetNumber=threat.number;rider.action=ACTION.BLOCK;this._emit('BLOCK_START',{rider:rider.number,target:threat.number,lineId:rider.lineId});}
+            else if(this._canBlock(rider,threat)){rider.blockTimer=this.rules.block.maxSeconds;rider.blockTargetNumber=threat.number;rider.blockCount+=1;rider.action=ACTION.BLOCK;this._emit('BLOCK_START',{rider:rider.number,target:threat.number,lineId:rider.lineId});}
             else if(this._shouldSwitch(rider)){const c=this._findSwitchCandidate(rider);if(c){if(rider.followTargetNumber!==c.number)this._emit('SWITCH',{rider:rider.number,from:rider.followTargetNumber,to:c.number});rider.followTargetNumber=c.number;rider.followStatus=FOLLOW_STATUS.SWITCHED;rider.action=ACTION.SWITCH;}else rider.action=ACTION.FOLLOW;}
             else rider.action=ACTION.FOLLOW;
             if(!rider.followTargetNumber&&!rider.banteMakuriStarted)rider.followTargetNumber=rider.lineFrontNumber;
         }
 
         const p=rider.plan;
-        if(rider.isLeader&&rider.action===ACTION.ATTACK){const targetLineFront=p.targetLineId!=null?this._frontOfLine(p.targetLineId):null;if(targetLineFront&&rider.distance>=targetLineFront.distance+(p.settleAfterPassMeters??6)){rider.attackCompleted=true;rider.hasLed=true;rider.action=ACTION.LEAD;this._emit('ATTACK_COMPLETED',{rider:rider.number,targetLineId:p.targetLineId});}}
+        if(rider.isLeader&&(rider.action===ACTION.ATTACK||rider.action===ACTION.MOVE_UP)){
+            const targetLineFront=p.targetLineId!=null?this._frontOfLine(p.targetLineId):null;
+            if(targetLineFront&&rider.distance>=targetLineFront.distance+(p.settleAfterPassMeters??6)){
+                rider.attackCompleted=true;rider.hasLed=true;rider.action=ACTION.LEAD;
+                this._emit('ATTACK_COMPLETED',{rider:rider.number,targetLineId:p.targetLineId});
+            }
+        }
 
-        if(!rider.isLeader&&this.raceClock.remainingDistance<=this.rules.finalSprint.remainingMax&&rider.energy>=this.rules.finalSprint.energyMin&&rider.action===ACTION.FOLLOW){rider.action=ACTION.FINAL_SPRINT;}
+        if(!rider.isLeader&&this.raceClock.remainingDistance<=this.rules.finalSprint.remainingMax&&rider.energy>=this.rules.finalSprint.energyMin&&rider.action===ACTION.FOLLOW){
+            const front=rider.followTargetNumber?this._rider(rider.followTargetNumber):null;
+            const lineLeader=this._line(rider.lineId).find(x=>x.lineOrder===0)??null;
+            const failedLineAttack=lineLeader&&(lineLeader.action===ACTION.ATTACK||lineLeader.plan.tactic===TACTIC.MAKURI||lineLeader.plan.tactic===TACTIC.NAKADAN_MAKURI)&&!lineLeader.attackCompleted&&lineLeader.energy<0.30;
+            const lineStillLive=front&&!front.finished&&front.energy>=0.30&&!failedLineAttack;
+            if(lineStillLive||rider.plan.allowIndependentSprint)rider.action=ACTION.FINAL_SPRINT;
+        }
 
         const target=rider.followTargetNumber?this._rider(rider.followTargetNumber):null;if(!target||target.finished){if(!rider.isLeader&&!rider.banteMakuriStarted)rider.followStatus=FOLLOW_STATUS.DETACHED;return;}
         const gap=target.distance-rider.distance;if(gap>this.rules.follow.detachedGap){rider.followStatus=FOLLOW_STATUS.DETACHED;rider.detachedTime+=dt;}else if(gap>this.rules.follow.stretchedGap){rider.followStatus=FOLLOW_STATUS.STRETCHED;rider.detachedTime=Math.max(0,rider.detachedTime-dt*0.5);}else if(rider.followStatus!==FOLLOW_STATUS.SWITCHED){rider.followStatus=FOLLOW_STATUS.ATTACHED;rider.detachedTime=0;}
@@ -232,13 +249,25 @@ export class PhysicsEngine {
 
     _desiredSpeed(rider){
         const p=rider.plan,base=this.profile.FORMATION_SPEED,top=this._effectiveTopSpeed(rider);let requested=base;
+        if(rider.isLeader&&p.yieldFromRemaining!=null&&this.raceClock.remainingDistance<=p.yieldFromRemaining&&this.raceClock.remainingDistance>p.triggerRemaining){
+            const yieldTarget=p.yieldUntilTargetAhead?this._rider(p.yieldUntilTargetAhead):null;
+            if(!yieldTarget||yieldTarget.distance<=rider.distance+4)requested=p.yieldSpeed??base*0.90;
+        }
         if(rider.action===ACTION.MOVE_UP||rider.action===ACTION.ATTACK)requested=p.attackSpeed??base*1.65;
         else if(rider.action===ACTION.DEFEND)requested=p.defendSpeed??base*1.55;
         else if(rider.action===ACTION.LEAD)requested=p.leadSpeed??base*1.28;
         else if(rider.action===ACTION.BLOCK){const front=this._rider(rider.lineFrontNumber);const target=rider.blockTargetNumber?this._rider(rider.blockTargetNumber):null;requested=Math.max(front?.speed??base,Math.min(target?.speed??base,top));}
         else if(rider.action===ACTION.BANTE_MAKURI)requested=Math.min(top,base*1.92);
         else if(rider.action===ACTION.FINAL_SPRINT)requested=Math.min(top,base*2.02);
-        else{const target=rider.followTargetNumber?this._rider(rider.followTargetNumber):null;if(target&&!target.finished)requested=this._followDesiredSpeed(rider,target);else if(rider.isLeader){const gapError=(this.pacer.distance-14)-rider.distance;requested=clamp(this.pacer.speed+gapError*0.06,this.pacer.speed-0.4,this.pacer.speed+0.6);}else requested=base*1.15;}
+        else{const target=rider.followTargetNumber?this._rider(rider.followTargetNumber):null;if(target&&!target.finished)requested=this._followDesiredSpeed(rider,target);else if(rider.isLeader){
+            const predecessor=this.riders.find(o=>o.globalIndex===rider.globalIndex-1&&!o.finished);
+            if(predecessor&&rider.action===ACTION.FORMATION){requested=this._followDesiredSpeed(rider,predecessor);}
+            else {const gapError=(this.pacer.distance-14)-rider.distance;requested=clamp(this.pacer.speed+gapError*0.06,this.pacer.speed-0.4,this.pacer.speed+0.6);}
+        }else requested=base*1.15;}
+        if(rider.isLeader&&p.yieldFromRemaining!=null&&this.raceClock.remainingDistance<=p.yieldFromRemaining&&this.raceClock.remainingDistance>p.triggerRemaining){
+            const yieldTarget=p.yieldUntilTargetAhead?this._rider(p.yieldUntilTargetAhead):null;
+            if((!yieldTarget||yieldTarget.distance<=rider.distance+4)&&rider.action!==ACTION.ATTACK&&rider.action!==ACTION.MOVE_UP)requested=Math.min(requested,p.yieldSpeed??base*0.90);
+        }
         requested=Math.min(requested,top);if(rider.action===ACTION.ATTACK||rider.action===ACTION.MOVE_UP)requested=this._blockSpeedPenalty(rider,requested);return clamp(requested,0,top);
     }
 
@@ -246,15 +275,51 @@ export class PhysicsEngine {
         if(rider.action===ACTION.MOVE_UP||rider.action===ACTION.ATTACK||rider.action===ACTION.BANTE_MAKURI)return rider.plan.attackLane??28;
         if(rider.action===ACTION.BLOCK){const target=rider.blockTargetNumber?this._rider(rider.blockTargetNumber):null;if(target)return clamp(target.laneOffset-this.rules.block.lateralTargetMargin,-18,this.rules.block.maxOuterOffset);}
         if(rider.action===ACTION.DEFEND||rider.action===ACTION.LEAD)return -18;
-        const target=rider.followTargetNumber?this._rider(rider.followTargetNumber):null;if(target)return target.laneOffset;return -18;
+        const lineLeader=this._line(rider.lineId).find(x=>x.lineOrder===0)??null;
+        if(!rider.isLeader&&lineLeader&&lineLeader.action===ACTION.ATTACK&&rider.action!==ACTION.BLOCK)return lineLeader.laneOffset;
+        const target=rider.followTargetNumber?this._rider(rider.followTargetNumber):null;
+        if(rider.action===ACTION.FINAL_SPRINT&&target){
+            const gap=target.distance-rider.distance;
+            if(gap<10)return clamp(target.laneOffset+12,-18,46);
+        }
+        if(target){
+            // During an outside rise, keep a passing/positioning line visibly outside
+            // until there is enough longitudinal room to settle. This permits realistic
+            // two- and three-abreast states instead of collapsing riders onto one rail.
+            if(rider.isLeader&&rider.plan.preFollowNumber&&rider.followTargetNumber===rider.plan.preFollowNumber&&!rider.attackCompleted){
+                if(rider.plan.outsideUntilLineClearsNumber){
+                    const clearTarget=this._rider(rider.plan.outsideUntilLineClearsNumber);
+                    const tail=this._line(rider.lineId).sort((a,b)=>b.lineOrder-a.lineOrder)[0];
+                    if(clearTarget&&tail&&tail.distance<=clearTarget.distance+4)return rider.plan.attackLane??32;
+                }
+                const gap=target.distance-rider.distance;
+                if(gap>-2&&gap<6)return rider.plan.attackLane??32;
+            }
+            return target.laneOffset;
+        }
+        return -18;
     }
 
     _move(rider,desiredSpeed,dt){
         const prev=rider.speed,f=this._fatigueFactor(rider);const accel=rider.capability.acceleration*rider.capability.response*(0.56+0.44*f),decel=rider.capability.deceleration;
         if(rider.speed<desiredSpeed)rider.speed=Math.min(desiredSpeed,rider.speed+accel*dt);else if(rider.speed>desiredSpeed)rider.speed=Math.max(desiredSpeed,rider.speed-decel*dt);
-        const laneTarget=this._targetLane(rider);const laneRate=rider.action===ACTION.BLOCK?1.65:(rider.isLeader||rider.action===ACTION.BANTE_MAKURI?2.0:(rider.lineOrder>=2?1.08:1.35));rider.laneOffset+=(laneTarget-rider.laneOffset)*clamp(laneRate*dt,0,1);
+        const laneTarget=this._targetLane(rider);const laneTargetRider=rider.followTargetNumber?this._rider(rider.followTargetNumber):null;const lineLeaderForLane=this._line(rider.lineId).find(x=>x.lineOrder===0)??null;const followingAttack=(laneTargetRider&&(laneTargetRider.action===ACTION.ATTACK||laneTargetRider.action===ACTION.MOVE_UP));const laneRate=rider.action===ACTION.BLOCK?1.65:(rider.isLeader||rider.action===ACTION.BANTE_MAKURI?2.0:(followingAttack?(rider.lineOrder>=2?3.2:3.8):(rider.lineOrder>=2?1.08:1.35)));rider.laneOffset+=(laneTarget-rider.laneOffset)*clamp(laneRate*dt,0,1);
         let next=rider.distance+rider.speed*dt;const target=rider.followTargetNumber?this._rider(rider.followTargetNumber):null;const safety=this.rules.follow.safetyGap;
         if(target&&!target.finished&&target.distance>rider.distance&&rider.action!==ACTION.ATTACK&&rider.action!==ACTION.BANTE_MAKURI&&rider.action!==ACTION.FINAL_SPRINT){next=Math.min(next,target.distance-safety);if(next>=target.distance-safety&&rider.speed>target.speed)rider.speed=target.speed;}
+
+        // Spatial occupancy guard. Riders may run abreast, but they may not occupy
+        // effectively the same longitudinal + lateral slot. When a slot is occupied,
+        // the rider stays outside/inside rather than being rendered on top of another.
+        for(const other of this.riders){
+            if(other.number===rider.number||other.finished)continue;
+            const longitudinal=Math.abs(other.distance-next);
+            const lateral=Math.abs(other.laneOffset-rider.laneOffset);
+            if(longitudinal<8.0&&lateral<10.0){
+                const preferred=(rider.action===ACTION.ATTACK||rider.action===ACTION.MOVE_UP||rider.action===ACTION.BLOCK||rider.action===ACTION.FINAL_SPRINT)?1:-1;
+                const candidate=clamp(other.laneOffset+preferred*12,-18,46);
+                rider.laneOffset+=(candidate-rider.laneOffset)*clamp(4.2*dt,0,1);
+            }
+        }
         rider.distance=next;rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
     }
 

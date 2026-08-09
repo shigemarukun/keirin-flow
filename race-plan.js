@@ -1,66 +1,70 @@
 import { TACTIC } from './tactics.js';
 
-// Demonstration plan for the decision engine.
-// It describes intentions, not a finishing order.
-// 7-line takes control first, 4-line attacks from middle, then 1-line attacks
-// the 4-line late.  The engine must decide resistance, block, switch and final
-// sprint from the live situation.
+// BASE SCENARIO A — reference race for movement calibration.
+// This file fixes tactical intentions and trigger windows only.
+// It never specifies the finishing order directly.
+//
+// Expected story:
+// 1-2-3 / 4-5-6 / 7-8-9 -> 7-line moves outside to cut the pacer.
+// 1 does not tsuppari. 4-line rises behind 7-line.
+// Final lap: 7-8-9 / 4-5-6 / 1-2-3.
+// 1 attacks; 7 resists; 8 blocks; 1-line loses momentum around half-lap.
+// 4, having conserved energy in the middle, attacks and the target validation result is 4-5-8.
 export const DEFAULT_RACE_PLAN = Object.freeze({
     1: {
         tactic: TACTIC.MAKURI,
-        triggerRemaining: 205,
-        attackLane: 29,
-        attackSpeed: 20.0,
-        targetLineId: 1,
-        settleAfterPassMeters: 6,
-        capability: { dash: 1.10, topSpeed: 22.1, acceleration: 3.7, endurance: 0.98 }
+        preFollowNumber: 6,
+        preFollowTriggerRemaining: 560,
+        yieldFromRemaining: 610,
+        yieldUntilTargetAhead: 6,
+        yieldSpeed: 9.3,
+        triggerRemaining: 315,
+        attackLane: 34,
+        attackSpeed: 20.8,
+        targetLineId: 2,
+        settleAfterPassMeters: 7,
+        capability: { dash: 1.08, topSpeed: 21.4, acceleration: 3.75, endurance: 0.58, fatigueStart: 0.62, fatigueFloor: 0.45 }
     },
-    2: {
-        tactic: TACTIC.MARK,
-        followNumber: 1,
-        capability: { dash: 1.02, topSpeed: 21.8, acceleration: 3.7, blockSkill: 0.95 }
-    },
-    3: { tactic: TACTIC.MARK, followNumber: 2, capability: { topSpeed: 21.2, acceleration: 3.5 } },
+    2: { tactic: TACTIC.MARK, followNumber: 1, capability: { topSpeed: 21.5, acceleration: 3.65, endurance: 0.96 } },
+    3: { tactic: TACTIC.MARK, followNumber: 2, capability: { topSpeed: 21.0, acceleration: 3.45, endurance: 0.94 } },
 
     4: {
         tactic: TACTIC.NAKADAN_MAKURI,
         preFollowNumber: 9,
-        preFollowTriggerRemaining: 620,
-        triggerRemaining: 365,
-        attackLane: 28,
-        attackSpeed: 18.5,
+        preFollowTriggerRemaining: 635,
+        outsideUntilLineClearsNumber: 1,
+        triggerRemaining: 210,
+        attackLane: 46,
+        attackSpeed: 22.2,
+        leadSpeed: 21.6,
         targetLineId: 2,
-        settleAfterPassMeters: 6,
-        defendOnThreat: true,
-        defendSpeed: 18.0,
-        capability: { endurance: 0.92, topSpeed: 21.3, acceleration: 3.4 }
+        settleAfterPassMeters: 7,
+        capability: { dash: 1.20, topSpeed: 24.2, acceleration: 4.45, endurance: 1.16 }
     },
-    5: {
-        tactic: TACTIC.MARK,
-        followNumber: 4,
-        blockEnabled: true,
-        banteMakuriEnabled: true,
-        capability: { blockSkill: 1.16, dash: 1.04, topSpeed: 22.0, acceleration: 3.8, endurance: 1.03 }
-    },
-    6: { tactic: TACTIC.MARK, followNumber: 5, capability: { topSpeed: 21.2, acceleration: 3.5 } },
+    5: { tactic: TACTIC.MARK, followNumber: 4, blockEnabled: false, banteMakuriEnabled: false, capability: { dash: 1.12, topSpeed: 24.0, acceleration: 4.45, endurance: 1.16 } },
+    6: { tactic: TACTIC.MARK, followNumber: 5, capability: { topSpeed: 21.3, acceleration: 3.5, endurance: 1.00 } },
 
     7: {
         tactic: TACTIC.OSAE_SENKO,
-        triggerRemaining: 640,
-        settleRemaining: 555,
-        attackLane: 26,
-        attackSpeed: 16.0,
-        leadSpeed: 13.0,
+        targetLineId: 0,
+        settleAfterPassMeters: 5,
+        triggerRemaining: 655,
+        settleRemaining: 0,
+        attackLane: 34,
+        attackSpeed: 20.0,
+        leadSpeed: 15.0,
         defendOnThreat: true,
-        defendSpeed: 16.4,
-        capability: { endurance: 0.84, topSpeed: 20.2, acceleration: 3.2 }
+        defendSpeed: 18.0,
+        capability: { endurance: 0.78, topSpeed: 21.2, acceleration: 3.75 }
     },
     8: {
         tactic: TACTIC.MARK,
         followNumber: 7,
         blockEnabled: true,
         banteMakuriEnabled: false,
-        capability: { blockSkill: 1.02, topSpeed: 21.4, acceleration: 3.6 }
+        allowIndependentSprint: true,
+        maxBlockAttempts: 1,
+        capability: { blockSkill: 1.18, topSpeed: 20.6, acceleration: 3.55, endurance: 1.12 }
     },
-    9: { tactic: TACTIC.MARK, followNumber: 8, capability: { topSpeed: 20.9, acceleration: 3.4 } }
+    9: { tactic: TACTIC.MARK, followNumber: 8, capability: { topSpeed: 20.8, acceleration: 3.35, endurance: 0.98 } }
 });

@@ -1,59 +1,11 @@
-// KEIRIN FLOW — Base Scenario B rider calibration.
-// This is a reference scenario, not a hard-coded finish-order table.
-// The engine still determines finish order from distance/speed/energy.
-
 export const DEFAULT_RACE_PLAN = Object.freeze({
-    1: {
-        role: 'TSUPPARI_LEADER',
-        topSpeed: 22.6, acceleration: 3.9, endurance: 1.18,
-        firstDefenseSpeed: 18.0,
-        secondDefenseSpeed: 19.1,
-        finalHoldSpeed: 19.4
-    },
-    2: {
-        role: 'BANTE_DEFENDER',
-        topSpeed: 22.5, acceleration: 4.0, endurance: 1.16,
-        blockSkill: 1.25,
-        finalSpeed: 20.2
-    },
-    3: {
-        role: 'THIRD_MARK',
-        topSpeed: 21.3, acceleration: 3.45, endurance: 1.04,
-        finalSpeed: 18.8
-    },
-
-    4: {
-        role: 'MIDDLE_MAKURI',
-        topSpeed: 22.2, acceleration: 4.05, endurance: 1.12,
-        makuriSpeed: 21.4
-    },
-    5: {
-        role: 'BLOCK_DIVE',
-        topSpeed: 24.2, acceleration: 4.60, endurance: 1.18,
-        diveSpeed: 23.6
-    },
-    6: {
-        role: 'THIRD_MARK',
-        topSpeed: 22.6, acceleration: 3.95, endurance: 1.10,
-        finalSpeed: 20.7
-    },
-
-    7: {
-        role: 'DOUBLE_ATTACK',
-        topSpeed: 21.0, acceleration: 3.7, endurance: 0.66,
-        firstAttackSpeed: 17.5,
-        retreatSpeed: 9.2,
-        secondAttackSpeed: 19.0,
-        collapseSpeed: 11.4
-    },
-    8: {
-        role: 'MARK_7',
-        topSpeed: 20.5, acceleration: 3.35, endurance: 0.90,
-        finalSpeed: 17.2
-    },
-    9: {
-        role: 'MARK_8',
-        topSpeed: 22.0, acceleration: 3.85, endurance: 0.98,
-        finalSpeed: 20.4
-    }
+    1:{role:'TSUPPARI',topSpeed:22.8,acceleration:4.10,endurance:1.18,formation:10.5,defend1:20.0,defend2:20.5,final:20.0},
+    2:{role:'BANTE',topSpeed:22.6,acceleration:4.00,endurance:1.16,final:20.2},
+    3:{role:'THIRD',topSpeed:21.5,acceleration:3.55,endurance:1.04,final:18.9},
+    4:{role:'MIDDLE_MAKURI',topSpeed:24.8,acceleration:4.65,endurance:1.14,makuri:24.0,blocked:15.2},
+    5:{role:'BLOCK_DIVE',topSpeed:26.0,acceleration:5.10,endurance:1.18,dive:25.6},
+    6:{role:'THIRD',topSpeed:22.2,acceleration:3.85,endurance:1.10,final:20.0},
+    7:{role:'DOUBLE_ATTACK',topSpeed:25.0,acceleration:5.00,endurance:0.96,attack1:22.8,contest1:21.2,retreat:5.2,attack2:24.6,contest2:23.2,fade:7.0},
+    8:{role:'MARK',topSpeed:21.0,acceleration:3.60,endurance:0.92,final:13.4},
+    9:{role:'MARK',topSpeed:21.7,acceleration:3.80,endurance:0.98,final:15.2}
 });

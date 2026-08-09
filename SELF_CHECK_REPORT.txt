@@ -1,6 +1,15 @@
-PASS 0.5x finish=4-5-6-1-2-3-7-8-9
-PASS 1x finish=4-5-6-1-2-3-7-8-9
-PASS 2x finish=4-5-6-1-2-3-7-8-9
-PASS 3x finish=4-5-6-1-2-3-7-8-9
-PASS dynamic follow candidate without changing line affiliation
-Race Tactics Architecture v1 checks passed
+$ node --check engine.js
+
+
+$ node --check race-plan.js
+
+
+$ node --check scenario-b-controller.js
+
+
+$ node scenario-b-check.mjs
+PASS 0.5x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.0 minSpatial=1.285
+PASS 1x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.2 minSpatial=1.289
+PASS 2x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.4 minSpatial=1.289
+PASS 3x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.4 minSpatial=1.296
+SCENARIO B V2: all movement/contest/block checkpoints passed

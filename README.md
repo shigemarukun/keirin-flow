@@ -1,13 +1,13 @@
-# KEIRIN FLOW — Base Scenario A v1
+# KEIRIN FLOW — Base Scenario B v1
 
-This build is the first reference-race calibration build.
+基準シナリオBの忠実再現ビルドです。
 
-See `BASE_SCENARIO_A.md` for the exact race story and `scenario-a-check.mjs` for causal regression checks.
+GitHub PagesへはZIP内のファイルを同じ階層へまとめて上書きしてください。
 
-Run:
+ローカル確認:
 
 ```bash
-node scenario-a-check.mjs
+node scenario-b-check.mjs
 ```
 
-The browser entry point remains `index.html`; upload all files in this ZIP to the same GitHub Pages repository level.
+詳細は `BASE_SCENARIO_B.md` を参照してください。

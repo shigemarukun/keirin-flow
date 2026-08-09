@@ -167,7 +167,9 @@ export class PhysicsEngine {
                     laneOffset: -18,
                     finished: false,
                     finishTime: null,
-                    history: []
+                    history: [],
+                    followTargetNumber: null,
+                    followStatus: lineOrder === 0 ? 'LEADER' : 'ATTACHED'
                 });
                 globalIndex += 1;
             });
@@ -180,6 +182,10 @@ export class PhysicsEngine {
                     candidate.lineOrder === rider.lineOrder - 1
                 ) ?? null;
             }
+        }
+
+        for (const rider of this.riders) {
+            if (!rider.isLeader) rider.followTargetNumber = rider.frontRider?.number ?? null;
         }
 
         for (const rider of this.riders) {
@@ -214,6 +220,8 @@ export class PhysicsEngine {
             rider.finished = false;
             rider.finishTime = null;
             rider.history = [];
+            rider.followTargetNumber = rider.frontRider?.number ?? null;
+            rider.followStatus = rider.isLeader ? 'LEADER' : 'ATTACHED';
         }
     }
 
@@ -292,13 +300,53 @@ export class PhysicsEngine {
         return this.riders.find(rider => rider.number === number) ?? null;
     }
 
-    _followLineFront(rider, fallbackSpeed = this.profile.FORMATION_SPEED, gain = 0.22) {
-        const front = rider.frontRider;
+    _followTargetRider(rider) {
+        if (rider.isLeader || rider.followTargetNumber == null) return null;
+        return this._rider(rider.followTargetNumber);
+    }
+
+    _updateFollowStatus(rider) {
+        if (rider.isLeader) {
+            rider.followStatus = 'LEADER';
+            return;
+        }
+        const front = this._followTargetRider(rider);
+        if (!front || front.finished) {
+            rider.followStatus = 'DETACHED';
+            return;
+        }
+        const gap = front.distance - rider.distance;
+        if (gap <= 20) rider.followStatus = 'ATTACHED';
+        else if (gap <= 32) rider.followStatus = 'STRETCHED';
+        else rider.followStatus = 'DETACHED';
+    }
+
+    _followLineFront(rider, fallbackSpeed = this.profile.FORMATION_SPEED, gain = 0.32) {
+        const front = this._followTargetRider(rider);
         if (!front || front.finished) return fallbackSpeed;
 
+        // CR-0005: 6m一点へ吸着させない。
+        // 番手と3番手で異なる車間帯を持たせ、帯の中では前走者と同速で流す。
+        const phase = this._scriptedPhase();
+        const compact456 = rider.lineId === 1 &&
+            (phase === 'LINE_456_FOLLOW' || phase === 'LINE_456_ATTACK');
+        const targetGap = compact456
+            ? (rider.lineOrder >= 2 ? 6.8 : 5.8)
+            : (rider.lineOrder >= 2 ? 9.0 : 6.0);
+        const tolerance = compact456
+            ? 0.7
+            : (rider.lineOrder >= 2 ? 1.0 : 0.8);
         const actualGap = front.distance - rider.distance;
-        const gapError = actualGap - this.scriptedLineGap;
-        return front.speed + clamp(gapError * gain, -1.2, 2.0);
+        const low = targetGap - tolerance;
+        const high = targetGap + tolerance;
+
+        if (actualGap < low) {
+            return front.speed - clamp((low - actualGap) * 0.34, 0.15, 1.8);
+        }
+        if (actualGap > high) {
+            return front.speed + clamp((actualGap - high) * gain, 0.15, 3.0);
+        }
+        return front.speed;
     }
 
     _chaseTarget(rider, targetDistance, baseSpeed, gain = 0.10, minAdjust = -1.0, maxAdjust = 6.0) {
@@ -346,7 +394,8 @@ export class PhysicsEngine {
                 // 4-5-6は7-8-9の後ろを目掛けて上昇。
                 return this._chaseTarget(rider, nine.distance - 1, v + 5.0, 0.28, -0.5, 12.0);
             }
-            return v;
+            // 1-2-3は後の捲りまで脚を溜め、4-5-6へ位置を譲る。
+            return v * 0.90;
         }
 
         if (phase === 'LINE_789_FRONT') {
@@ -390,43 +439,31 @@ export class PhysicsEngine {
         return v;
     }
 
-    _scriptedLaneTarget(rider) {
-        const phase = this._scriptedPhase();
-
+    _scriptedLeaderLaneTarget(rider, phase) {
         if (phase === 'FORMATION') return rider.initialLaneOffset;
-
-        if (phase === 'LINE_789_RISE') {
-            // CR-0004: ライン先頭だけが先に外へ持ち出す。
-            // 2・3番手は前走者の現在レーンを追うことで、
-            // 7→8→9の順に同じ軌跡へ入り、3車同時の横移動を防ぐ。
-            if (rider.lineId === 2) {
-                if (rider.isLeader) return 26;
-                return rider.frontRider?.laneOffset ?? rider.initialLaneOffset;
-            }
-            return -18;
-        }
-
+        if (phase === 'LINE_789_RISE') return rider.lineId === 2 ? 26 : -18;
         if (phase === 'LINE_456_FOLLOW') {
             if (rider.lineId === 2) return 26;
             if (rider.lineId === 1) return 8;
             return -18;
         }
-
-        if (phase === 'LINE_789_FRONT') {
-            return -18;
-        }
-
-        if (phase === 'LINE_123_ATTACK') {
-            return rider.lineId === 0 ? 28 : -18;
-        }
-
+        if (phase === 'LINE_789_FRONT') return -18;
+        if (phase === 'LINE_123_ATTACK') return rider.lineId === 0 ? 28 : -18;
         if (phase === 'LINE_456_ATTACK') {
             if (rider.lineId === 1) return 30;
             if (rider.lineId === 0) return -8;
             return -18;
         }
-
         return rider.initialLaneOffset;
+    }
+
+    _scriptedLaneTarget(rider) {
+        const phase = this._scriptedPhase();
+        if (phase === 'FORMATION' || rider.isLeader) {
+            return this._scriptedLeaderLaneTarget(rider, phase);
+        }
+        const front = this._followTargetRider(rider);
+        return front?.laneOffset ?? rider.laneOffset;
     }
 
     _decision(rider) {
@@ -487,7 +524,7 @@ export class PhysicsEngine {
 
         if (this.scriptedScenarioEnabled && phase !== 'FORMATION') {
             // シナリオ開始後は他ラインを追い越せる。同ライン内だけ最低車間を守る。
-            const front = rider.frontRider;
+            const front = this._followTargetRider(rider);
             if (!rider.isLeader && front && !front.finished) {
                 rider.distance = Math.min(nextDistance, front.distance - minimumGap);
                 if (rider.distance === front.distance - minimumGap && rider.speed > front.speed) {
@@ -511,7 +548,7 @@ export class PhysicsEngine {
                 }
             }
         } else {
-            const front = rider.frontRider;
+            const front = this._followTargetRider(rider);
             if (!rider.isLeader && front && !front.finished) {
                 rider.distance = Math.min(nextDistance, front.distance - minimumGap);
                 if (rider.distance === front.distance - minimumGap && rider.speed > front.speed) {
@@ -522,6 +559,7 @@ export class PhysicsEngine {
             }
         }
 
+        this._updateFollowStatus(rider);
         rider.acceleration = (rider.speed - previousSpeed) / Math.max(dt, 1e-6);
     }
 
@@ -573,8 +611,11 @@ export class PhysicsEngine {
                 acceleration: rider.acceleration,
                 laneOffset: rider.laneOffset,
                 position: positions.get(rider.number),
-                frontNumber: rider.frontRider?.number ?? null,
-                gap: rider.frontRider ? rider.frontRider.distance - rider.distance : null
+                frontNumber: this._followTargetRider(rider)?.number ?? null,
+                gap: this._followTargetRider(rider)
+                    ? this._followTargetRider(rider).distance - rider.distance
+                    : null,
+                followStatus: rider.followStatus
             });
             if (rider.history.length > 1200) rider.history.shift();
         }

@@ -396,7 +396,14 @@ export class PhysicsEngine {
         if (phase === 'FORMATION') return rider.initialLaneOffset;
 
         if (phase === 'LINE_789_RISE') {
-            return rider.lineId === 2 ? 26 : -18;
+            // CR-0004: ライン先頭だけが先に外へ持ち出す。
+            // 2・3番手は前走者の現在レーンを追うことで、
+            // 7→8→9の順に同じ軌跡へ入り、3車同時の横移動を防ぐ。
+            if (rider.lineId === 2) {
+                if (rider.isLeader) return 26;
+                return rider.frontRider?.laneOffset ?? rider.initialLaneOffset;
+            }
+            return -18;
         }
 
         if (phase === 'LINE_456_FOLLOW') {

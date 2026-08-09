@@ -1,0 +1,7 @@
+Official KEIRIN.JP concepts used for this implementation (reviewed 2026-08-09):
+- Lines / second-rider roles: block, gap, switch, competition for position
+- Strategies: tsuppari, kamashi, makuri, oikomi / sashi
+- Glossary: osae-senko, bante-makuri, mogakiai, switch, nige / mark
+- Rules: cross-cutting, inside interference/overtaking, forcing outward, yellow line
+
+The engine coefficients are simulation tuning values, NOT official physiological or adjudication thresholds.

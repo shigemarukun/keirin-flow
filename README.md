@@ -1,54 +1,32 @@
-# KEIRIN FLOW v2.3.0 — Alpha2.3 Final
+# KEIRIN FLOW — Official Decision Engine v2
 
-競輪の展開予想を動きとして再生するための、レースエンジン基盤です。
+This build preserves the working RaceClock / bell / pacer / bank rendering foundation and replaces scripted line motion with a live tactical interaction layer.
 
-## このリリースの目的
+## Core race flow
 
-赤板付近（残り2周・800m）からシミュレーションを開始し、誘導員・打鐘・最終周回までの進行を、距離イベントとRaceClockで一元管理します。打鐘前の9車は一列・同一レーン・一定速度を基本とし、旧来のバネ追従による伸縮を排除しています。
+`race plan -> live position -> threat detection -> rider decision -> block/defend/switch/bante-makuri -> energy/fatigue -> achievable movement -> finish`
 
-## 実装済み
+## Implemented in this build
 
-- 9車一列の初期隊列と一定速度スタート
-- 左回り（6時→3時→12時→9時）のバンク描画
-- RaceClockとClockOwner（PACER → LEADER）
-- `PacerLeaveLine → Bell → PacerExit → FinalLap → FinalBack → Finish`
-- ベルの一度だけの発火
-- 誘導員の退避演出
-- 0.5x〜3.0xの再生速度
-- RESET、完走、着順表示
-- 400mバンク用RaceProfile
+- 3-3-3 line structure
+- osae-senko / makuri / nakadan-makuri foundations
+- front rider resistance when attacked
+- bante block when a late makuri approaches
+- block pressure that can actually alter the attacking rider's race
+- bante-makuri when the front rider has spent too much energy
+- dynamic switch after a line is broken
+- separate `lineId` and `followTargetNumber`
+- drafting / energy / fatigue / outside-lane load
+- final sprint foundation
+- deterministic 0.5x / 1x / 2x / 3x regression checks
+- counterfactual tests proving that changing block/strength/endurance changes the result
 
-## 未実装
+## Important
 
-- POSITION_BATTLEの戦術行動（抑え・突っ張り・引き）
-- 逃げ・捲り・差し・追込の戦術AI
-- バンク別の直線長・コーナー半径・カント
-- 実レース映像に基づくイベント距離の最終調整
+The finish order is never hard-coded.  The same race plan can produce different results when rider capability or interaction settings change.
 
-## ファイル構成
-
-- `index.html`
-- `style.css`
-- `main.js`
-- `engine.js`
-- `ui.js`
-- `ai.js`
-- `foundation-check.mjs`
-- `README.md`
-- `CHANGELOG.md`
-
-## 動作確認
-
-ブラウザ確認はGitHub Pagesへ全ファイルを同じ階層でアップロードしてください。
-
-ローカル品質チェック：
+Run:
 
 ```bash
-node foundation-check.mjs
+node decision-check.mjs
 ```
-
-期待結果：`10/10 checks passed`
-
-## 次フェーズ
-
-v2.4.0では、実機映像を基準に誘導員の動きから順番に検証し、POSITION_BATTLEの「誘導切り・抑え・突っ張り」を最小差分で追加します。

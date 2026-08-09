@@ -19,6 +19,8 @@ export const ACTION = Object.freeze({
     ATTACK: 'ATTACK',
     LEAD: 'LEAD',
     DEFEND: 'DEFEND',
+    BLOCK: 'BLOCK',
+    BANTE_MAKURI: 'BANTE_MAKURI',
     SWITCH: 'SWITCH',
     DETACHED: 'DETACHED',
     FINAL_SPRINT: 'FINAL_SPRINT'
@@ -28,9 +30,12 @@ export const FOLLOW_STATUS = Object.freeze({
     LEADER: 'LEADER',
     ATTACHED: 'ATTACHED',
     STRETCHED: 'STRETCHED',
-    DETACHED: 'DETACHED'
+    DETACHED: 'DETACHED',
+    SWITCHED: 'SWITCHED'
 });
 
+// These are simulator coefficients. They are intentionally separated from
+// tactics so real rider data can replace them later without rewriting race logic.
 export const DEFAULT_RIDER_CAPABILITY = Object.freeze({
     formationSpeed: 10.5,
     acceleration: 3.2,
@@ -39,18 +44,13 @@ export const DEFAULT_RIDER_CAPABILITY = Object.freeze({
     endurance: 1.0,
     dash: 1.0,
     topSpeed: 21.0,
-
-    // Causal race model:
-    // energy is normalized 0..1.  The numbers are simulation coefficients,
-    // not claims about physiological watts.
     energyCapacity: 1.0,
-    recoveryRate: 0.0018,
-    draftSaving: 0.30,
-    outerLaneCost: 0.16,
-    attackCost: 0.0120,
-    defendCost: 0.0130,
-    leadCost: 0.0068,
-    cruiseCost: 0.0025,
-    fatigueStart: 0.55,
-    fatigueFloor: 0.56
+    recoveryRate: 0.0014,
+    draftSaving: 0.28,
+    outerLaneCost: 0.15,
+    fatigueStart: 0.52,
+    fatigueFloor: 0.54,
+    blockSkill: 1.0,
+    switchSkill: 1.0,
+    positioning: 1.0
 });

@@ -1,0 +1,17 @@
+$ node --check engine.js
+
+
+$ node --check tactics.js
+
+
+$ node --check race-plan.js
+
+
+$ node causal-check.mjs
+PASS 0.5x finish=4-1-5-2-6-3-7-8-9 E7=0.339 E8=0.810
+PASS 1x finish=4-1-5-2-6-3-7-8-9 E7=0.339 E8=0.810
+PASS 2x finish=4-1-5-2-6-3-7-8-9 E7=0.339 E8=0.810
+PASS 3x finish=4-1-5-2-6-3-7-8-9 E7=0.339 E8=0.810
+PASS counterfactual harder resistance costs energy: 0.339 -> 0.204
+PASS counterfactual timing changes energy/state: early E4=0.739 finish=4-1-5-2-6-3-7-8-9; late E4=0.653 finish=4-1-5-2-6-3-7-8-9
+Causal race engine checks passed

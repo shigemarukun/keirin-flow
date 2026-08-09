@@ -121,6 +121,15 @@ export class PhysicsEngine {
                     followStatus: lineOrder === 0 ? FOLLOW_STATUS.LEADER : FOLLOW_STATUS.ATTACHED,
                     detachedTime: 0,
                     attackCompleted: false,
+
+                    // Causal race state.  Strategy asks for an action; these
+                    // values determine how strongly the rider can actually execute it.
+                    energy: capability.energyCapacity,
+                    fatigue: 0,
+                    effort: 0,
+                    drafting: false,
+                    load: 0,
+
                     finished: false,
                     finishTime: null,
                     history: []
@@ -148,6 +157,11 @@ export class PhysicsEngine {
             rider.followStatus = rider.isLeader ? FOLLOW_STATUS.LEADER : FOLLOW_STATUS.ATTACHED;
             rider.detachedTime = 0;
             rider.attackCompleted = false;
+            rider.energy = rider.capability.energyCapacity;
+            rider.fatigue = 0;
+            rider.effort = 0;
+            rider.drafting = false;
+            rider.load = 0;
             rider.finished = false;
             rider.finishTime = null;
             rider.history = [];
@@ -263,38 +277,110 @@ export class PhysicsEngine {
         return candidates[0]?.other ?? null;
     }
 
+    _draftFactor(rider) {
+        const target = rider.followTargetNumber ? this._rider(rider.followTargetNumber) : null;
+        if (!target || target.finished || target.distance <= rider.distance) return 0;
+        const gap = target.distance - rider.distance;
+        const laneGap = Math.abs(target.laneOffset - rider.laneOffset);
+        if (gap < 4.5 || gap > 13.5 || laneGap > 16) return 0;
+
+        // Best shelter is around a normal following gap.  It fades smoothly
+        // toward the edge of the usable pocket.
+        const gapQuality = 1 - Math.min(1, Math.abs(gap - 8.5) / 5.0);
+        const laneQuality = 1 - Math.min(1, laneGap / 16);
+        return clamp(gapQuality * laneQuality, 0, 1);
+    }
+
+    _fatigueFactor(rider) {
+        const c = rider.capability;
+        const start = c.fatigueStart ?? 0.55;
+        if (rider.energy >= start) return 1;
+        const ratio = clamp(rider.energy / Math.max(start, 1e-6), 0, 1);
+        return (c.fatigueFloor ?? 0.56) + (1 - (c.fatigueFloor ?? 0.56)) * ratio;
+    }
+
+    _effectiveTopSpeed(rider) {
+        const c = rider.capability;
+        const fatigue = this._fatigueFactor(rider);
+        // A tired rider loses both peak speed and the ability to keep adding speed.
+        return Math.max(this.profile.FORMATION_SPEED * 0.90, c.topSpeed * (0.72 + 0.28 * fatigue));
+    }
+
+    _updateEnergy(rider, desiredSpeed, dt) {
+        const c = rider.capability;
+        const base = this.profile.FORMATION_SPEED;
+        const draft = this._draftFactor(rider);
+        rider.drafting = draft > 0.12;
+
+        const speedDemand = Math.max(0, desiredSpeed - base) / Math.max(base, 1);
+        const accelerationDemand = Math.max(0, desiredSpeed - rider.speed) / Math.max(c.acceleration, 0.1);
+
+        let actionCost = c.cruiseCost ?? 0.0025;
+        if (rider.action === ACTION.ATTACK || rider.action === ACTION.MOVE_UP) actionCost = c.attackCost ?? 0.0120;
+        else if (rider.action === ACTION.DEFEND) actionCost = c.defendCost ?? 0.0130;
+        else if (rider.action === ACTION.LEAD) actionCost = c.leadCost ?? 0.0068;
+        else if (rider.action === ACTION.FOLLOW || rider.action === ACTION.SWITCH) actionCost = c.cruiseCost ?? 0.0025;
+
+        // Riding wider than the normal line has a small but real simulation cost.
+        const outerExposure = Math.max(0, rider.laneOffset - (-18)) / 48;
+        const outerCost = outerExposure * (c.outerLaneCost ?? 0.16);
+
+        let load = actionCost * (
+            1 +
+            1.55 * speedDemand * speedDemand +
+            0.65 * accelerationDemand +
+            outerCost
+        );
+
+        // Following in the pocket saves energy.  The line can therefore shelter
+        // a rider without welding the riders together spatially.
+        load *= 1 - draft * (c.draftSaving ?? 0.30);
+        load /= Math.max(0.55, c.endurance ?? 1);
+
+        const isEasy = desiredSpeed <= base * 1.08 && rider.action !== ACTION.ATTACK && rider.action !== ACTION.DEFEND;
+        const recovery = isEasy ? (c.recoveryRate ?? 0.0018) * (0.35 + 0.65 * draft) : 0;
+
+        rider.load = load;
+        rider.effort = clamp(speedDemand + accelerationDemand * 0.35, 0, 2);
+        rider.energy = clamp(rider.energy - load * dt + recovery * dt, 0, c.energyCapacity ?? 1);
+        rider.fatigue = 1 - rider.energy / Math.max(c.energyCapacity ?? 1, 1e-6);
+    }
+
     _desiredSpeed(rider) {
         const p = rider.plan;
         const base = this.profile.FORMATION_SPEED;
-        const top = rider.capability.topSpeed;
+        const top = this._effectiveTopSpeed(rider);
 
-        if (rider.action === ACTION.MOVE_UP || rider.action === ACTION.ATTACK) return Math.min(top, p.attackSpeed ?? base * 1.65);
-        if (rider.action === ACTION.DEFEND) return Math.min(top, p.defendSpeed ?? base * 1.58);
-        if (rider.action === ACTION.LEAD) return Math.min(top, p.leadSpeed ?? base * 1.40);
-
-        const target = rider.followTargetNumber ? this._rider(rider.followTargetNumber) : null;
-        if (rider.action === ACTION.FOLLOW || rider.action === ACTION.SWITCH) {
-            if (!target || target.finished) return Math.min(top, base * 1.35);
-            const gap = target.distance - rider.distance;
-            const desiredGap = rider.lineOrder >= 2 ? 10.5 : 9.0;
-            const lower = desiredGap - 2.0;
-            const upper = desiredGap + 3.5;
-            if (gap >= lower && gap <= upper) return target.speed;
-            const correction = gap < lower ? (gap - lower) * 0.20 : (gap - upper) * 0.24;
-            return clamp(target.speed + correction, Math.max(0, target.speed - 1.0), Math.min(top, target.speed + 4.2));
+        let requested;
+        if (rider.action === ACTION.MOVE_UP || rider.action === ACTION.ATTACK) requested = p.attackSpeed ?? base * 1.65;
+        else if (rider.action === ACTION.DEFEND) requested = p.defendSpeed ?? base * 1.58;
+        else if (rider.action === ACTION.LEAD) requested = p.leadSpeed ?? base * 1.40;
+        else {
+            const target = rider.followTargetNumber ? this._rider(rider.followTargetNumber) : null;
+            if (rider.action === ACTION.FOLLOW || rider.action === ACTION.SWITCH) {
+                if (!target || target.finished) requested = base * 1.35;
+                else {
+                    const gap = target.distance - rider.distance;
+                    const desiredGap = rider.lineOrder >= 2 ? 10.5 : 9.0;
+                    const lower = desiredGap - 2.0;
+                    const upper = desiredGap + 3.5;
+                    if (gap >= lower && gap <= upper) requested = target.speed;
+                    else {
+                        const correction = gap < lower ? (gap - lower) * 0.20 : (gap - upper) * 0.24;
+                        requested = clamp(target.speed + correction, Math.max(0, target.speed - 1.0), target.speed + 4.2);
+                    }
+                }
+            } else if (rider.isLeader) {
+                const gapError = (this.pacer.distance - 14) - rider.distance;
+                requested = clamp(this.pacer.speed + gapError * 0.06, this.pacer.speed - 0.4, this.pacer.speed + 0.6);
+            } else if (target) {
+                const gap = target.distance - rider.distance;
+                const desiredGap = rider.lineOrder >= 2 ? 10.5 : 9.0;
+                requested = clamp(target.speed + (gap - desiredGap) * 0.18, target.speed - 0.7, target.speed + 1.6);
+            } else requested = base;
         }
 
-        // formation leader follows pacer; formation followers follow current target
-        if (rider.isLeader) {
-            const gapError = (this.pacer.distance - 14) - rider.distance;
-            return clamp(this.pacer.speed + gapError * 0.06, this.pacer.speed - 0.4, this.pacer.speed + 0.6);
-        }
-        if (target) {
-            const gap = target.distance - rider.distance;
-            const desiredGap = rider.lineOrder >= 2 ? 10.5 : 9.0;
-            return clamp(target.speed + (gap - desiredGap) * 0.18, target.speed - 0.7, target.speed + 1.6);
-        }
-        return base;
+        return clamp(requested, 0, top);
     }
 
     _targetLane(rider) {
@@ -308,7 +394,8 @@ export class PhysicsEngine {
 
     _move(rider, desiredSpeed, dt) {
         const previousSpeed = rider.speed;
-        const accel = rider.capability.acceleration * rider.capability.response;
+        const fatigueFactor = this._fatigueFactor(rider);
+        const accel = rider.capability.acceleration * rider.capability.response * (0.58 + 0.42 * fatigueFactor);
         const decel = rider.capability.deceleration;
         if (rider.speed < desiredSpeed) rider.speed = Math.min(desiredSpeed, rider.speed + accel * dt);
         else if (rider.speed > desiredSpeed) rider.speed = Math.max(desiredSpeed, rider.speed - decel * dt);
@@ -358,7 +445,12 @@ export class PhysicsEngine {
                 position: positions.get(rider.number),
                 action: rider.action,
                 followTargetNumber: rider.followTargetNumber,
-                followStatus: rider.followStatus
+                followStatus: rider.followStatus,
+                energy: rider.energy,
+                fatigue: rider.fatigue,
+                effort: rider.effort,
+                drafting: rider.drafting,
+                load: rider.load
             });
             if (rider.history.length > 1200) rider.history.shift();
         }
@@ -377,7 +469,9 @@ export class PhysicsEngine {
                 if (rider.finished) continue;
                 const previousDistance = rider.distance;
                 this._updateActionAndFollow(rider, stepDt);
-                this._move(rider, this._desiredSpeed(rider), stepDt);
+                const desiredSpeed = this._desiredSpeed(rider);
+                this._updateEnergy(rider, desiredSpeed, stepDt);
+                this._move(rider, desiredSpeed, stepDt);
                 if (previousDistance < this.totalDistance && rider.distance >= this.totalDistance) this._recordFinish(rider);
             }
             const leader = this.riders.reduce((max, r) => r.distance > max.distance ? r : max, this.riders[0]);

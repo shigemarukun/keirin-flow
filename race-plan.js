@@ -1,8 +1,9 @@
 import { TACTIC } from './tactics.js';
 
-// Validation scenario only.  The engine consumes a data plan rather than
-// hard-coding rider numbers into movement logic.  AI/user editing can later
-// replace this object without changing the movement engine.
+// Validation scenario.
+// IMPORTANT: this describes intended tactics and trigger opportunities.
+// It does NOT prescribe the finishing order.  Finish order must emerge from
+// position, remaining energy, acceleration, drafting and the timing of attacks.
 export const DEFAULT_RACE_PLAN = Object.freeze({
     1: {
         tactic: TACTIC.MAKURI,
@@ -20,8 +21,10 @@ export const DEFAULT_RACE_PLAN = Object.freeze({
         preFollowNumber: 9,
         preFollowTriggerRemaining: 640,
         triggerRemaining: 120,
+        attackTargetNumber: 1,
         attackLane: 30,
-        attackSpeed: 20.6
+        attackSpeed: 20.6,
+        settleAfterPassMeters: 5
     },
     5: { tactic: TACTIC.MARK, followNumber: 4 },
     6: { tactic: TACTIC.MARK, followNumber: 5 },
@@ -33,7 +36,6 @@ export const DEFAULT_RACE_PLAN = Object.freeze({
         attackLane: 26,
         attackSpeed: 16.2,
         leadSpeed: 13.1,
-        // resistance phase against the later 1-line makuri
         defendAgainstNumber: 1,
         defendFromRemaining: 360,
         defendUntilRemaining: 200,

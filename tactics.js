@@ -38,5 +38,19 @@ export const DEFAULT_RIDER_CAPABILITY = Object.freeze({
     response: 1.0,
     endurance: 1.0,
     dash: 1.0,
-    topSpeed: 21.0
+    topSpeed: 21.0,
+
+    // Causal race model:
+    // energy is normalized 0..1.  The numbers are simulation coefficients,
+    // not claims about physiological watts.
+    energyCapacity: 1.0,
+    recoveryRate: 0.0018,
+    draftSaving: 0.30,
+    outerLaneCost: 0.16,
+    attackCost: 0.0120,
+    defendCost: 0.0130,
+    leadCost: 0.0068,
+    cruiseCost: 0.0025,
+    fatigueStart: 0.55,
+    fatigueFloor: 0.56
 });

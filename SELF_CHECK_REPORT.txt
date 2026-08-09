@@ -1,0 +1,6 @@
+PASS 0.5x finish=4-5-6-1-2-3-7-8-9
+PASS 1x finish=4-5-6-1-2-3-7-8-9
+PASS 2x finish=4-5-6-1-2-3-7-8-9
+PASS 3x finish=4-5-6-1-2-3-7-8-9
+PASS dynamic follow candidate without changing line affiliation
+Race Tactics Architecture v1 checks passed

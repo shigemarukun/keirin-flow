@@ -121,16 +121,12 @@ export class PhysicsEngine {
         this.lineGroups = lineGroups.map(group => [...group]);
         this.lineOffsets = [...lineOffsets];
 
-        // CR-0003: POSITION_BATTLEの最小実装テスト。
-        // AI導入前のため、複数車で構成される最後方側のラインを1本だけ固定的に仕掛けラインとして扱う。
-        // 将来はAIのDecision結果で置き換える。
-        const multiMemberLineIds = this.lineGroups
-            .map((group, lineId) => ({ lineId, memberCount: group.length }))
-            .filter(item => item.memberCount >= 2)
-            .map(item => item.lineId);
-        this.positionBattleAttackLineId = multiMemberLineIds.length
-            ? multiMemberLineIds[multiMemberLineIds.length - 1]
-            : Math.max(0, this.lineGroups.length - 1);
+
+        // CR-0003B: 3-3-3固定シナリオ検証。
+        // AI判断へ進む前に、競輪らしいライン移動・抑え・捲り・抵抗が
+        // 1本の決め打ちシナリオとして成立することを確認する。
+        this.scriptedScenarioEnabled = true;
+        this.scriptedLineGap = 6;
 
         this.profile = profile;
         this.totalDistance = profile.RACE_DISTANCE;
@@ -281,35 +277,157 @@ export class PhysicsEngine {
         }
     }
 
-    _decision(rider) {
-        if (this.currentState === RACE_STATE.POSITION_BATTLE) {
-            const attackActive = this.pacer.state === PACER_STATE.EXITING;
-            const isAttackLine = rider.lineId === this.positionBattleAttackLineId;
+    _scriptedPhase() {
+        const remaining = this.raceClock.remainingDistance;
 
-            // CR-0003:
-            // 誘導員が退避を開始したら、最後方側の1ラインだけを仕掛けラインとして前へ上げる。
-            // AI判断はまだ入れず、ラインがまとまって上昇できるかだけを検証する。
-            if (attackActive && isAttackLine) {
-                if (rider.isLeader) {
-                    // 先頭車は誘導員より少し高い目標速度で前方へ上がる。
-                    return this.pacer.speed + 1.8;
-                }
+        if (remaining > 720) return 'FORMATION';
+        if (remaining > 640) return 'LINE_789_RISE';
+        if (remaining > 560) return 'LINE_456_FOLLOW';
+        if (remaining > 400) return 'LINE_789_FRONT';
+        if (remaining > 120) return 'LINE_123_ATTACK';
+        return 'LINE_456_ATTACK';
+    }
 
-                // 同ラインの後続車は、そのラインの前走者を追従する。
-                const front = rider.frontRider;
-                if (!front) return this.pacer.speed + 1.0;
+    _rider(number) {
+        return this.riders.find(rider => rider.number === number) ?? null;
+    }
 
-                const idealGap = 17;
-                const actualGap = front.distance - rider.distance;
-                const gapError = actualGap - idealGap;
+    _followLineFront(rider, fallbackSpeed = this.profile.FORMATION_SPEED, gain = 0.22) {
+        const front = rider.frontRider;
+        if (!front || front.finished) return fallbackSpeed;
 
-                let desired = front.speed;
-                if (gapError < -0.8) desired -= 0.3;
-                else if (gapError > 0.8) desired += 0.5;
-                return desired;
+        const actualGap = front.distance - rider.distance;
+        const gapError = actualGap - this.scriptedLineGap;
+        return front.speed + clamp(gapError * gain, -1.2, 2.0);
+    }
+
+    _chaseTarget(rider, targetDistance, baseSpeed, gain = 0.10, minAdjust = -1.0, maxAdjust = 6.0) {
+        const error = targetDistance - rider.distance;
+        return baseSpeed + clamp(error * gain, minAdjust, maxAdjust);
+    }
+
+    _scriptedDecision(rider) {
+        const phase = this._scriptedPhase();
+        const v = this.profile.FORMATION_SPEED;
+
+        if (phase === 'FORMATION') {
+            if (rider.globalIndex === 0) {
+                return this._chaseTarget(rider, this.pacer.distance - 14, this.pacer.speed, 0.10, -0.5, 0.5);
             }
+            const front = rider.formationFrontRider;
+            if (!front) return this.pacer.speed;
+            const gapError = (front.distance - rider.distance) - 17;
+            return front.speed + clamp(gapError * 0.18, -0.4, 0.4);
+        }
 
-            // 仕掛け対象外は、従来どおりFormationロジックを維持する。
+        // 同ライン2・3番手は、各フェーズで必ずライン先頭についていく。
+        if (!rider.isLeader) {
+            return this._followLineFront(rider, v, 0.40);
+        }
+
+        const seven = this._rider(7);
+        const nine = this._rider(9);
+        const one = this._rider(1);
+        const three = this._rider(3);
+
+        if (phase === 'LINE_789_RISE') {
+            if (rider.lineId === 2) {
+                // 7-8-9が外を一気に上がり、ベル手前で誘導員へ並びかける。
+                return this._chaseTarget(rider, this.pacer.distance + 10, v + 3.0, 0.12, 0, 8.0);
+            }
+            return v;
+        }
+
+        if (phase === 'LINE_456_FOLLOW') {
+            if (rider.lineId === 2) {
+                return this._chaseTarget(rider, this.pacer.distance + 30, v + 3.5, 0.14, -0.5, 9.0);
+            }
+            if (rider.lineId === 1 && nine) {
+                // 4-5-6は7-8-9の後ろを目掛けて上昇。
+                return this._chaseTarget(rider, nine.distance - 1, v + 5.0, 0.28, -0.5, 12.0);
+            }
+            return v;
+        }
+
+        if (phase === 'LINE_789_FRONT') {
+            if (rider.lineId === 2) {
+                // 誘導が切れた後は7-8-9が先頭で主導権。
+                return v * 1.48;
+            }
+            if (rider.lineId === 1 && nine) {
+                return this._chaseTarget(rider, nine.distance - 7, v * 1.38, 0.18, -1.0, 4.0);
+            }
+            if (rider.lineId === 0) {
+                const six = this._rider(6);
+                if (six) return this._chaseTarget(rider, six.distance - 7, v * 1.28, 0.18, -1.0, 3.5);
+                return v * 1.16;
+            }
+        }
+
+        if (phase === 'LINE_123_ATTACK') {
+            if (rider.lineId === 0) {
+                // 1-2-3が外から捲る。
+                return v * 2.18;
+            }
+            if (rider.lineId === 2) {
+                // 7-8-9は先行ラインとして抵抗。
+                return v * 1.66;
+            }
+            // 4-5-6は1-2-3の後ろに入り、最終捲りまで追走する。
+            if (three) {
+                return this._chaseTarget(rider, three.distance - 7, v * 1.55, 0.20, -1.0, 5.0);
+            }
+            return v * 1.55;
+        }
+
+        // 9時付近から4-5-6が最後の捲り。
+        if (phase === 'LINE_456_ATTACK') {
+            if (rider.lineId === 1) return v * 3.00;
+            if (rider.lineId === 0) return v * 1.80;
+            return v * 1.55;
+        }
+
+        return v;
+    }
+
+    _scriptedLaneTarget(rider) {
+        const phase = this._scriptedPhase();
+
+        if (phase === 'FORMATION') return rider.initialLaneOffset;
+
+        if (phase === 'LINE_789_RISE') {
+            return rider.lineId === 2 ? 26 : -18;
+        }
+
+        if (phase === 'LINE_456_FOLLOW') {
+            if (rider.lineId === 2) return 26;
+            if (rider.lineId === 1) return 8;
+            return -18;
+        }
+
+        if (phase === 'LINE_789_FRONT') {
+            return -18;
+        }
+
+        if (phase === 'LINE_123_ATTACK') {
+            return rider.lineId === 0 ? 28 : -18;
+        }
+
+        if (phase === 'LINE_456_ATTACK') {
+            if (rider.lineId === 1) return 30;
+            if (rider.lineId === 0) return -8;
+            return -18;
+        }
+
+        return rider.initialLaneOffset;
+    }
+
+    _decision(rider) {
+        if (this.scriptedScenarioEnabled) {
+            return this._scriptedDecision(rider);
+        }
+
+        if (this.currentState === RACE_STATE.POSITION_BATTLE) {
             if (rider.globalIndex === 0) {
                 const targetDistance = this.pacer.distance - 14;
                 const gapError = targetDistance - rider.distance;
@@ -317,43 +435,32 @@ export class PhysicsEngine {
                 if (gapError < -0.5) desired -= 0.4;
                 else if (gapError > 0.5) desired += 0.4;
                 return desired;
-            } else {
-                const front = rider.formationFrontRider;
-                if (!front) return this.pacer.speed;
-
-                const idealGap = 17;
-                const actualGap = front.distance - rider.distance;
-                const gapError = actualGap - idealGap;
-
-                let desired = front.speed;
-                if (gapError < -0.8) desired -= 0.3;
-                else if (gapError > 0.8) desired += 0.3;
-                return desired;
             }
-        } else {
-            const targetCeiling = this._targetSpeedFor(rider) * 1.25;
-            if (rider.isLeader) {
-                return this._targetSpeedFor(rider);
-            } else {
-                const front = rider.frontRider;
-                if (!front) return this.pacer.speed;
-                if (front.finished) return targetCeiling;
 
-                const idealGap = 17;
-                const actualGap = front.distance - rider.distance;
-                const gapError = actualGap - idealGap;
-
-                let desired = front.speed;
-                if (gapError < -0.6) desired -= 0.4;
-                else if (gapError > 0.6) desired += 0.4;
-                return desired;
-            }
+            const front = rider.formationFrontRider;
+            if (!front) return this.pacer.speed;
+            const gapError = (front.distance - rider.distance) - 17;
+            let desired = front.speed;
+            if (gapError < -0.8) desired -= 0.3;
+            else if (gapError > 0.8) desired += 0.3;
+            return desired;
         }
+
+        const targetCeiling = this._targetSpeedFor(rider) * 1.25;
+        if (rider.isLeader) return this._targetSpeedFor(rider);
+        const front = rider.frontRider;
+        if (!front) return this.pacer.speed;
+        if (front.finished) return targetCeiling;
+        const gapError = (front.distance - rider.distance) - 17;
+        let desired = front.speed;
+        if (gapError < -0.6) desired -= 0.4;
+        else if (gapError > 0.6) desired += 0.4;
+        return desired;
     }
 
     _move(rider, desiredSpeed, dt) {
         const previousSpeed = rider.speed;
-        const stepAccel = 3.0 * dt;
+        const stepAccel = 4.2 * dt;
 
         if (rider.speed < desiredSpeed) {
             rider.speed = Math.min(desiredSpeed, rider.speed + stepAccel);
@@ -361,41 +468,29 @@ export class PhysicsEngine {
             rider.speed = Math.max(desiredSpeed, rider.speed - stepAccel);
         }
 
-        // TODO:// 将来はDecisionがLaneTargetを返す設計に変更する（現在はState依存）
-        const attackActive =
-            this.currentState === RACE_STATE.POSITION_BATTLE &&
-            this.pacer.state === PACER_STATE.EXITING &&
-            rider.lineId === this.positionBattleAttackLineId;
+        const targetLane = this.scriptedScenarioEnabled
+            ? this._scriptedLaneTarget(rider)
+            : (this.currentState === RACE_STATE.POSITION_BATTLE ? rider.initialLaneOffset : rider.baseLaneOffset);
 
-        // CR-0003:
-        // 仕掛けラインだけは外側の本来レーンへ移動しながら前へ上がる。
-        // それ以外は従来どおり一列の初期レーンを維持する。
-        const targetLane = this.currentState === RACE_STATE.POSITION_BATTLE
-            ? (attackActive ? rider.baseLaneOffset : rider.initialLaneOffset)
-            : rider.baseLaneOffset;
-
-        rider.laneOffset += (targetLane - rider.laneOffset) * clamp(2.6 * dt, 0, 1);
+        rider.laneOffset += (targetLane - rider.laneOffset) * clamp(2.8 * dt, 0, 1);
 
         const nextDistance = rider.distance + (rider.speed * dt);
-        const minimumGap = 5;
+        const minimumGap = 4.5;
+        const phase = this.scriptedScenarioEnabled ? this._scriptedPhase() : null;
 
-        if (this.currentState === RACE_STATE.POSITION_BATTLE) {
-            if (attackActive) {
-                // 仕掛けラインは他ラインのFormation順に縛らず、同ライン内だけで車間を守る。
-                if (rider.isLeader) {
-                    rider.distance = nextDistance;
-                } else {
-                    const front = rider.frontRider;
-                    if (front) {
-                        rider.distance = Math.min(nextDistance, front.distance - minimumGap);
-                        if (rider.distance === front.distance - minimumGap && rider.speed > front.speed) {
-                            rider.speed = front.speed;
-                        }
-                    } else {
-                        rider.distance = nextDistance;
-                    }
+        if (this.scriptedScenarioEnabled && phase !== 'FORMATION') {
+            // シナリオ開始後は他ラインを追い越せる。同ライン内だけ最低車間を守る。
+            const front = rider.frontRider;
+            if (!rider.isLeader && front && !front.finished) {
+                rider.distance = Math.min(nextDistance, front.distance - minimumGap);
+                if (rider.distance === front.distance - minimumGap && rider.speed > front.speed) {
+                    rider.speed = front.speed;
                 }
-            } else if (rider.globalIndex === 0) {
+            } else {
+                rider.distance = nextDistance;
+            }
+        } else if (this.currentState === RACE_STATE.POSITION_BATTLE) {
+            if (rider.globalIndex === 0) {
                 rider.distance = nextDistance;
             } else {
                 const front = rider.formationFrontRider;

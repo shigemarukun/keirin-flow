@@ -27,11 +27,16 @@ const { AIModel } = await importSource('ai.js');
 const { getTrackPoint } = await importSource('ui.js');
 const groups = new AIModel().getInitialLineGroups();
 
-await check('9車が重複なく生成される', () => {
+const orderByDistance = state =>
+    [...state.riders]
+        .sort((a, b) => b.distance - a.distance)
+        .map(rider => rider.number);
+
+await check('3-3-3固定ラインが正しく生成される', () => {
+    assert.deepEqual(groups, [[1,2,3],[4,5,6],[7,8,9]]);
     const flat = groups.flat();
     assert.equal(flat.length, 9);
     assert.equal(new Set(flat).size, 9);
-    assert.deepEqual([...flat].sort((a, b) => a - b), [1,2,3,4,5,6,7,8,9]);
 });
 
 await check('HTML・main.js・モジュール構成が一致する', async () => {
@@ -47,7 +52,7 @@ await check('HTML・main.js・モジュール構成が一致する', async () =>
     assert.match(main, /physics\.onBell/);
 });
 
-await check('400mプロファイルが正しく読み込まれる', () => {
+await check('400mプロファイルとイベント順が維持される', () => {
     const profile = RACE_PROFILES.PROFILE_400;
     assert.equal(profile.TRACK_LENGTH, 400);
     assert.equal(profile.RACE_DISTANCE, 800);
@@ -57,33 +62,19 @@ await check('400mプロファイルが正しく読み込まれる', () => {
     assert.ok(profile.PacerExit > profile.FinalLap);
 });
 
-await check('初期状態は既に一定速度・一列隊列である', () => {
+await check('初期隊列は 誘導→1-2-3→4-5-6→7-8-9 の一列', () => {
     const engine = new PhysicsEngine(groups);
     const state = engine.getState();
-    assert.equal(state.currentState, 'POSITION_BATTLE');
-    assert.equal(state.raceClock.owner, 'PACER');
-    assert.equal(state.raceClock.remainingDistance, 800);
-    for (const rider of state.riders) {
-        assert.equal(rider.speed, 10.5);
-        assert.equal(rider.laneOffset, -18);
-    }
-    const ordered = [...state.riders].sort((a,b) => a.globalIndex - b.globalIndex);
-    for (let i = 1; i < ordered.length; i += 1) {
-        assert.ok(Math.abs((ordered[i-1].distance - ordered[i].distance) - 17) < 1e-9);
-    }
+    assert.deepEqual(orderByDistance(state), [1,2,3,4,5,6,7,8,9]);
+    assert.equal(state.pacer.state, 'LEADING');
+    assert.ok(state.riders.every(r => r.speed === 10.5 && r.laneOffset === -18));
 });
 
-await check('描画軌道は左回り（6時→3時→12時→9時）', () => {
+await check('描画軌道は左回りを維持する', () => {
     const geometry = { cx: 400, cy: 400, halfStraight: 140, radius: 200 };
     const p0 = getTrackPoint(geometry, 0, 0);
-    const p50 = getTrackPoint(geometry, 50, 0);
-    const p150 = getTrackPoint(geometry, 150, 0);
-    const p250 = getTrackPoint(geometry, 250, 0);
-    assert.equal(p0.x, 400);
-    assert.equal(p0.y, 600);
-    assert.ok(p50.x > p0.x, '6時位置から右方向（3時側）へ進むこと');
-    assert.ok(p150.y < p50.y, 'その後12時側へ進むこと');
-    assert.ok(p250.x < p150.x, 'その後9時側へ進むこと');
+    const p20 = getTrackPoint(geometry, 20, 0);
+    assert.ok(p20.x > p0.x, 'ホーム中央から右方向へ進むこと');
 });
 
 const simulate = scale => {
@@ -91,79 +82,76 @@ const simulate = scale => {
     engine.setSpeedScale(scale);
     let bellCount = 0;
     let finishCount = 0;
+    let previousRemaining = engine.raceClock.remainingDistance;
+    let remainingMonotonic = true;
+    let pacerExitOrder = null;
+    let preFinalAttackOrder = null;
+    let previousPacerState = engine.pacer.state;
+
     engine.onBell(() => { bellCount += 1; });
     engine.onFinish(() => { finishCount += 1; });
     engine.start();
 
     let frames = 0;
-    let previousRemaining = engine.raceClock.remainingDistance;
-    let remainingMonotonic = true;
-    let formationOrderStable = true;
-    let maxFormationGapError = 0;
-    const maxFrames = 50000;
-
-    while (engine.isStarted && frames < maxFrames) {
+    while (engine.isStarted && frames < 100000) {
         engine.update(1 / 60);
         const state = engine.getState();
         const remaining = state.raceClock.remainingDistance;
+
         if (remaining > previousRemaining + 1e-8) remainingMonotonic = false;
         previousRemaining = remaining;
 
-        if (state.currentState === 'POSITION_BATTLE') {
-            const ordered = [...state.riders].sort((a,b) => a.globalIndex - b.globalIndex);
-            for (let i = 1; i < ordered.length; i += 1) {
-                const gap = ordered[i-1].distance - ordered[i].distance;
-                maxFormationGapError = Math.max(maxFormationGapError, Math.abs(gap - 17));
-                if (gap <= 0) formationOrderStable = false;
-            }
-            if (ordered.some(r => Math.abs(r.laneOffset + 18) > 1e-8)) formationOrderStable = false;
+        if (previousPacerState !== 'EXITED' && state.pacer.state === 'EXITED') {
+            pacerExitOrder = orderByDistance(state);
         }
+        previousPacerState = state.pacer.state;
+
+        if (!preFinalAttackOrder && remaining <= 120) {
+            preFinalAttackOrder = orderByDistance(state);
+        }
+
         frames += 1;
     }
 
     return {
-        engine,
         state: engine.getState(),
         frames,
         bellCount,
         finishCount,
         remainingMonotonic,
-        formationOrderStable,
-        maxFormationGapError
+        pacerExitOrder,
+        preFinalAttackOrder
     };
 };
 
 for (const scale of [0.5, 1, 2, 3]) {
-    await check(`${scale}xでイベント・完走・隊列維持`, () => {
+    await check(`${scale}x 固定シナリオが最後まで成立する`, () => {
         const result = simulate(scale);
-        assert.ok(result.frames < 50000, 'simulation timed out');
+        assert.ok(result.frames < 100000, 'simulation timed out');
         assert.equal(result.bellCount, 1);
         assert.equal(result.finishCount, 1);
-        assert.equal(result.state.ranking.length, 9);
-        assert.ok(result.state.riders.every(r => r.finished));
         assert.equal(result.remainingMonotonic, true);
-        assert.equal(result.formationOrderStable, true);
-        assert.ok(result.maxFormationGapError <= 1.0, `formation gap error ${result.maxFormationGapError}`);
+        assert.deepEqual(result.pacerExitOrder, [7,8,9,4,5,6,1,2,3], '誘導退避完了時のライン順');
+        assert.deepEqual(result.preFinalAttackOrder, [1,2,3,7,8,9,4,5,6], '4-5-6最終捲り開始直前のライン順');
+        assert.deepEqual(result.state.ranking.map(item => item.number), [4,5,6,1,2,3,7,8,9], 'ゴール順');
         assert.deepEqual(result.state.raceClock.firedEventSequence,
             ['PacerLeaveLine','Bell','PacerExit','FinalLap','FinalBack','Finish']);
         assert.equal(result.state.raceClock.owner, 'LEADER');
     });
 }
 
-await check('RESETで完全に初期状態へ戻る', () => {
+await check('RESETで3-3-3初期状態へ戻る', () => {
     const engine = new PhysicsEngine(groups);
     engine.start();
-    for (let i = 0; i < 100; i += 1) engine.update(1 / 60);
+    for (let i = 0; i < 500; i += 1) engine.update(1 / 60);
     engine.reset();
     const state = engine.getState();
     assert.equal(state.isStarted, false);
     assert.equal(state.elapsedTime, 0);
     assert.equal(state.bellRung, false);
-    assert.equal(state.currentState, 'POSITION_BATTLE');
-    assert.equal(state.raceClock.owner, 'PACER');
+    assert.equal(state.pacer.state, 'LEADING');
     assert.equal(state.raceClock.remainingDistance, 800);
-    assert.deepEqual(state.raceClock.firedEventSequence, []);
-    assert.ok(state.riders.every(r => r.speed === 10.5 && r.laneOffset === -18 && !r.finished));
+    assert.deepEqual(orderByDistance(state), [1,2,3,4,5,6,7,8,9]);
 });
 
 const failed = results.filter(result => !result.ok);

@@ -1,13 +1,6 @@
-export class AIModel {
-    constructor() {
-        this.defaultLineGroups = [
-            [1, 2, 3],
-            [4, 5, 6],
-            [7, 8, 9]
-        ];
-    }
-
-    getInitialLineGroups() {
-        return this.defaultLineGroups.map(group => [...group]);
-    }
+import { DEFAULT_RACE_SETUP, normalizeRaceSetup } from './race-plan.js';
+export class AIModel{
+ constructor(setup=DEFAULT_RACE_SETUP){this.setup=normalizeRaceSetup(setup);}
+ getInitialRaceSetup(){return structuredClone(this.setup);}
+ getInitialLineGroups(){return this.setup.lines.map(line=>[...line.members]);}
 }

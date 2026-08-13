@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+const html=await readFile(new URL('./index.html',import.meta.url),'utf8');
+const main=await readFile(new URL('./main.js',import.meta.url),'utf8');
+const ui=await readFile(new URL('./ui.js',import.meta.url),'utf8');
+for(const id of ['bankCanvas','btn-start','btn-pause','btn-reset','speedRange','speedVal','line-list-ui']) assert.match(html,new RegExp(`id=["']${id}["']`));
+assert.match(main,/new PhysicsEngine\(setup\)/);
+assert.match(main,/KEIRIN_FLOW_APPLY_SETUP/);
+assert.match(main,/renderRaceSetup/);
+assert.match(ui,/renderRaceSetup\(setup\)/);
+console.log('PASS browser/UI RaceSetup interface');

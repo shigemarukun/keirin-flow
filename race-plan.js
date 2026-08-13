@@ -1,11 +1,126 @@
-export const DEFAULT_RACE_PLAN = Object.freeze({
-    1:{role:'TSUPPARI',topSpeed:22.8,acceleration:4.10,endurance:1.05,formation:10.5,defend1:20.0,defend2:20.5,final:19.4,leadLoadMultiplier:2.15,defendLoadMultiplier:2.65,finalFadeEnergy:0.34,finalFadeRemaining:58,finalFadeSpeed:14.8,finalFadeBrake:4.6},
-    2:{role:'BANTE',topSpeed:23.4,acceleration:4.25,endurance:1.18,final:22.4,finalKick:24.2,leaderReleaseEnergy:0.38,blockLaneRate:0.96,blockTargetLane:28},
-    3:{role:'THIRD',topSpeed:21.5,acceleration:3.55,endurance:1.04,final:18.9},
-    4:{role:'MIDDLE_MAKURI',topSpeed:28.2,acceleration:5.85,endurance:1.18,makuri:27.2,blocked:15.2,postBlockKick:26.4,blockRecoveryFactor:0.88,overtakeLookahead:34,overtakeSpeedDelta:1.8,laneSearchMin:-12,laneSearchMax:46,laneSearchStep:6},
-    5:{role:'BLOCK_DIVE',topSpeed:27.0,acceleration:5.30,endurance:1.20,dive:26.2,diveReaction:0.27,diveFeintLane:18},
-    6:{role:'THIRD',topSpeed:23.0,acceleration:4.05,endurance:1.12,final:21.2},
-    7:{role:'DOUBLE_ATTACK',topSpeed:25.0,acceleration:5.00,endurance:0.88,attack1:22.8,contest1:21.2,retreat:6.5,resetSpeed:15.0,attack2:24.6,contest2:23.2,fade:11.6,fadeLane:42,fadeBrake:3.15,retreatBrake:4.2,secondAttackLoad:2.30,collapseWithLeader:true},
-    8:{role:'MARK',topSpeed:21.0,acceleration:3.60,endurance:0.88,final:14.8,fadeLane:44,secondAttackLoad:2.05,collapseWithLeader:true},
-    9:{role:'MARK',topSpeed:21.7,acceleration:3.80,endurance:0.92,final:16.2,fadeLane:46,secondAttackLoad:1.95,collapseWithLeader:true}
+export const ROLE = Object.freeze({
+  LEADER: 'LEADER',
+  BANTE: 'BANTE',
+  THIRD: 'THIRD',
+  LINE_MEMBER: 'LINE_MEMBER',
+  SOLO: 'SOLO'
 });
+
+export const MINDSET = Object.freeze({
+  TSUPPARI: 'TSUPPARI',
+  YIELD_AND_ROLL: 'YIELD_AND_ROLL',
+  CONTAIN: 'CONTAIN'
+});
+
+export const SOLO_MINDSET = Object.freeze({
+  ATTACH_AND_STRIKE: 'ATTACH_AND_STRIKE',
+  SAVE_AND_SPRINT: 'SAVE_AND_SPRINT',
+  FLOW_RIDE: 'FLOW_RIDE'
+});
+
+export const ACTION = Object.freeze({
+  FORMATION: 'FORMATION',
+  CONTROL_PACE: 'CONTROL_PACE',
+  MOVE_UP: 'MOVE_UP',
+  ATTACK: 'ATTACK',
+  DEFEND: 'DEFEND',
+  CONTEST: 'CONTEST',
+  FULL_CONTEST: 'FULL_CONTEST',
+  YIELD: 'YIELD',
+  RETREAT: 'RETREAT',
+  FOLLOW: 'FOLLOW',
+  BLOCK: 'BLOCK',
+  SWITCH_TO_SELF_POWER: 'SWITCH_TO_SELF_POWER',
+  SAVE_ENERGY: 'SAVE_ENERGY',
+  FINAL_SPRINT: 'FINAL_SPRINT',
+  FADE: 'FADE'
+});
+
+export const DEFAULT_RIDER_PROFILE = Object.freeze({
+  power: 0.80,
+  acceleration: 0.80,
+  endurance: 0.80,
+  tacticalIQ: 0.80,
+  aggression: 0.65,
+  riskTolerance: 0.50,
+  attackEnergyFloor: 0.30,
+  contestEnergyFloor: 0.24,
+  idealGap: 17,
+  topSpeed: 22.0,
+  baseAcceleration: 4.0,
+  sprintBonus: 3.0,
+  blockSkill: 0.75,
+  draftSkill: 0.75
+});
+
+export const DEFAULT_RACE_SETUP = Object.freeze({
+  trackProfile: 'PROFILE_400',
+  lines: [
+    { id: 'LINE_A', members: [1, 2, 3], leader: 1 },
+    { id: 'LINE_B', members: [4, 5, 6], leader: 4 },
+    { id: 'LINE_C', members: [7, 8, 9], leader: 7 }
+  ],
+  riders: {
+    1: { mindset: MINDSET.TSUPPARI, power: 0.88, acceleration: 0.90, endurance: 0.82, tacticalIQ: 0.80, aggression: 0.78, riskTolerance: 0.62 },
+    2: { power: 0.82, acceleration: 0.82, endurance: 0.88, tacticalIQ: 0.88, blockSkill: 0.90 },
+    3: { power: 0.78, acceleration: 0.78, endurance: 0.86, tacticalIQ: 0.80 },
+    4: { mindset: MINDSET.YIELD_AND_ROLL, power: 0.92, acceleration: 0.95, endurance: 0.90, tacticalIQ: 0.88, aggression: 0.72, riskTolerance: 0.58 },
+    5: { power: 0.85, acceleration: 0.88, endurance: 0.90, tacticalIQ: 0.84, blockSkill: 0.80 },
+    6: { power: 0.80, acceleration: 0.82, endurance: 0.88, tacticalIQ: 0.78 },
+    7: { mindset: MINDSET.CONTAIN, power: 0.86, acceleration: 0.86, endurance: 0.84, tacticalIQ: 0.84, aggression: 0.75, riskTolerance: 0.64 },
+    8: { power: 0.82, acceleration: 0.82, endurance: 0.86, tacticalIQ: 0.82, blockSkill: 0.78 },
+    9: { power: 0.79, acceleration: 0.80, endurance: 0.84, tacticalIQ: 0.78 }
+  }
+});
+
+export function mergeRiderProfile(profile = {}) {
+  return { ...DEFAULT_RIDER_PROFILE, ...profile };
+}
+
+export function normalizeRaceSetup(input = DEFAULT_RACE_SETUP) {
+  const lines = Array.isArray(input.lines) ? input.lines.map((line, index) => ({
+    id: line.id ?? `LINE_${index + 1}`,
+    members: [...line.members],
+    leader: line.leader ?? line.members[0]
+  })) : [];
+
+  const seen = new Set();
+  for (const line of lines) {
+    if (line.members.length < 2) {
+      throw new Error(`Single-rider line ${line.id} is invalid. Register that rider as solo instead.`);
+    }
+    if (!line.members.includes(line.leader)) {
+      throw new Error(`Line leader ${line.leader} must be a member of ${line.id}.`);
+    }
+    for (const number of line.members) {
+      if (!Number.isInteger(number) || number < 1 || number > 9) {
+        throw new Error(`Invalid rider number ${number} in ${line.id}.`);
+      }
+      if (seen.has(number)) {
+        throw new Error(`Rider ${number} appears in more than one line.`);
+      }
+      seen.add(number);
+    }
+  }
+
+  const assigned = new Set(lines.flatMap(line => line.members));
+  const riders = {};
+
+  for (let number = 1; number <= 9; number += 1) {
+    const raw = input.riders?.[number] ?? {};
+    const solo = raw.solo === true || !assigned.has(number);
+    riders[number] = {
+      ...mergeRiderProfile(raw),
+      number,
+      solo,
+      soloMindset: raw.soloMindset ?? SOLO_MINDSET.FLOW_RIDE,
+      mindset: raw.mindset ?? (solo ? null : MINDSET.YIELD_AND_ROLL)
+    };
+  }
+
+  return {
+    trackProfile: input.trackProfile ?? 'PROFILE_400',
+    lines,
+    riders
+  };
+}

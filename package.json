@@ -1,8 +1,10 @@
 {
-  "type":"module",
-  "scripts":{
-    "check:realism":"node cr0004-realism-check.mjs",
-    "check:final-corner":"node cr0005-final-corner-check.mjs",
-    "check":"node cr0004-realism-check.mjs && node cr0005-final-corner-check.mjs"
+  "type": "module",
+  "scripts": {
+    "check:hardcode": "node cr0007-no-hardcode-check.mjs",
+    "check:autonomous": "node cr0007-autonomous-check.mjs",
+    "check:teacher": "node scenario-b-autonomous-regression.mjs",
+    "check:interface": "node cr0007-interface-check.mjs",
+    "check": "node cr0007-no-hardcode-check.mjs && node cr0007-autonomous-check.mjs && node scenario-b-autonomous-regression.mjs && node cr0007-interface-check.mjs"
   }
 }

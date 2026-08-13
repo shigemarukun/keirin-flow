@@ -1,0 +1,32 @@
+npm warn invalid config registry="https:///" set in /etc/npmrc
+npm warn invalid config Must be full url with "http://"
+
+> check
+> node cr0007-no-hardcode-check.mjs && node cr0007-autonomous-check.mjs && node scenario-b-autonomous-regression.mjs && node cr0007-interface-check.mjs
+
+PASS no production scenario hardcode: engine.js
+PASS no production scenario hardcode: tactical-ai.js
+PASS no production scenario hardcode: tactical-sensor.js
+PASS no production scenario hardcode: autonomous-decision-engine.js
+PASS no production scenario hardcode: line-manager.js
+CR-0007 hardcode ban passed
+PASS default 0.5x finish=2-3-1-4-5-8-7-9-6
+PASS default 1x finish=2-3-1-4-5-8-7-9-6
+PASS default 2x finish=2-3-1-4-5-8-7-9-6
+PASS default 3x finish=2-3-1-4-5-8-7-9-6
+PASS dynamic+solo 0.5x finish=1-8-2-7-5-6-4-3-9
+PASS dynamic+solo 1x finish=1-8-2-7-5-6-4-3-9
+PASS dynamic+solo 2x finish=1-8-2-7-5-6-4-3-9
+PASS dynamic+solo 3x finish=1-8-2-7-5-6-4-3-9
+PASS 4split+solo 0.5x finish=2-1-8-7-6-5-4-3-9
+PASS 4split+solo 1x finish=2-1-8-7-6-5-4-3-9
+PASS 4split+solo 2x finish=2-1-8-7-6-5-4-3-9
+PASS 4split+solo 3x finish=2-1-8-7-6-5-4-3-9
+PASS solo abstraction + arbitrary line lengths
+PASS applyRaceSetup + reset interface
+PASS autonomous Scenario-B-like tactical branch coverage
+PASS one-rider line rejected; SOLO abstraction enforced
+CR-0007 AUTONOMOUS ENGINE: all checks passed
+PASS Scenario-B teacher motifs emerged autonomously
+finish=2-3-1-4-5-8-7-9-6
+PASS browser/UI RaceSetup interface

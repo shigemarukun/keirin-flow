@@ -698,4 +698,30 @@ export class UIRenderer {
                 )
                 .join('');
     }
+
+    renderRaceSetup(setup) {
+        const container = document.getElementById('line-list-ui');
+        if (!container) return;
+
+        const lineRows = (setup?.lines ?? []).map((line, index) => `
+            <div class="line-row">
+                <span class="line-name">${line.id ?? `ライン${index + 1}`}</span>
+                <span class="line-members">${line.members.join(' - ')}</span>
+            </div>
+        `);
+
+        const soloNumbers = Object.entries(setup?.riders ?? {})
+            .filter(([, rider]) => rider?.solo === true)
+            .map(([number]) => Number(number))
+            .sort((a, b) => a - b);
+
+        const soloRows = soloNumbers.map(number => `
+            <div class="line-row">
+                <span class="line-name">単騎</span>
+                <span class="line-members">${number}</span>
+            </div>
+        `);
+
+        container.innerHTML = [...lineRows, ...soloRows].join('');
+    }
 }

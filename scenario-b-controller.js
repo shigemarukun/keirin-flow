@@ -9,6 +9,7 @@ export const SCENARIO_PHASE = Object.freeze({
     LINE7_FADE: 'LINE7_FADE',
     LINE4_MAKURI: 'LINE4_MAKURI',
     BANTE_BLOCK: 'BANTE_BLOCK',
+    FIVE_REACTION: 'FIVE_REACTION',
     FIVE_DIVE: 'FIVE_DIVE',
     FINAL: 'FINAL'
 });
@@ -22,6 +23,7 @@ export class ScenarioBController {
         this.firstContestTime = 0;
         this.secondContestTime = 0;
         this.blockTime = 0;
+        this.fiveReactionTime = 0;
         this.firstAlongside = false;
         this.secondAlongside = false;
         this.flags = {
@@ -34,6 +36,7 @@ export class ScenarioBController {
             sevenFadedBehindMiddle: false,
             fourAttackStarted: false,
             blockStarted: false,
+            fiveReactionStarted: false,
             fiveDiveStarted: false,
             blockContactCompleted: false
         };
@@ -128,8 +131,10 @@ export class ScenarioBController {
                 break;
 
             case SCENARIO_PHASE.LINE4_MAKURI: {
-                const gap4to1 = one.distance - four.distance;
-                if (gap4to1 <= 65 && rem <= 130 && this.phaseTime >= 0.35) {
+                const gap4to2 = two.distance - four.distance;
+                // The block phase begins only when 4's actual makuri reaches the
+                // bante's defensive window. No pre-programmed early lane slide.
+                if (gap4to2 <= 36 && gap4to2 >= -4 && four.laneOffset > 8 && rem <= 115 && this.phaseTime >= 0.35) {
                     this.flags.blockStarted = true;
                     this.setPhase(SCENARIO_PHASE.BANTE_BLOCK, engine);
                 }
@@ -137,11 +142,21 @@ export class ScenarioBController {
             }
 
             case SCENARIO_PHASE.BANTE_BLOCK:
-                // Do not advance just because time passed. The phase ends only after
-                // 2 has actually sensed 4, moved out and performed a real block.
+                // Weighty bante block: 2 must actually move outward and spend time
+                // alongside the threat before the following rider can react.
                 if (two.action === 'BLOCK') this.blockTime += dt;
-                if (this.blockTime >= 0.80) {
+                if (two.action === 'BLOCK' && two.laneOffset >= 10 && this.blockTime >= 1.10) {
                     this.flags.blockContactCompleted = true;
+                    this.flags.fiveReactionStarted = true;
+                    this.setPhase(SCENARIO_PHASE.FIVE_REACTION, engine);
+                }
+                break;
+
+            case SCENARIO_PHASE.FIVE_REACTION:
+                // Human reaction delay. 5 first reads 2 moving out, briefly mirrors
+                // the outside motion, then commits to the open inside course.
+                this.fiveReactionTime += dt;
+                if (this.fiveReactionTime >= (five?.plan?.diveReaction ?? 0.24)) {
                     this.flags.fiveDiveStarted = true;
                     this.setPhase(SCENARIO_PHASE.FIVE_DIVE, engine);
                 }

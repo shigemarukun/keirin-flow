@@ -60,7 +60,7 @@ export class RaceClock{
     name:'PacerLeaveLine',
     fired:false,
     firedAtRemaining:null,
-    condition:clock=>clock.remainingDistance<=clock.config.PacerLeaveLine
+    condition:(clock,engine)=>engine?.shouldPacerLeaveLine?.()===true
    },
    Bell:{
     name:'Bell',
@@ -185,6 +185,22 @@ export class PhysicsEngine{
  start(){if(this.riders.every(r=>r.finished))this.reset();this.isStarted=true;} pause(){this.isStarted=false;} setSpeedScale(v){this.timeScale=clamp(Number(v)||1,.5,3);} onBell(cb){this.onBellCallback=cb;} onFinish(cb){this.onFinishCallback=cb;}
  rider(n){return this.riders.find(r=>r.number===n)??null;} leader(){return [...this.riders].filter(r=>!r.finished).sort((a,b)=>b.distance-a.distance)[0]??null;}
  emitRaceEvent(type,data={}){this.raceEvents.push({time:this.elapsedTime,remaining:this.raceClock.remainingDistance,type,...data});}
+ shouldPacerLeaveLine(){
+  // CR-0004 realism: the pacer reacts to the actual pressure at the front, not
+  // a fixed remaining-distance cue. Find the current front line leader and any
+  // outside line leader that is actively advancing toward it.
+  const leaders=this.riders.filter(r=>r.isLeader&&!r.finished);
+  const front=[...leaders].sort((a,b)=>b.distance-a.distance)[0]??null;
+  if(!front)return false;
+  return leaders.some(challenger=>{
+   if(challenger===front)return false;
+   const gap=front.distance-challenger.distance;
+   const outside=challenger.laneOffset>=front.laneOffset+12;
+   const advancing=['MOVE_UP','ATTACK','CONTEST'].includes(challenger.action);
+   const speedPressure=challenger.speed>=front.speed-0.5;
+   return advancing&&outside&&speedPressure&&gap<=18&&gap>=-4;
+  });
+ }
  updatePacer(dt){
   if(this.pacer.state===PACER_STATE.EXITED)return;
 
@@ -233,12 +249,41 @@ export class PhysicsEngine{
   r.load=load;r.drafting=draft>0;r.effort=demand;r.energy=clamp(r.energy-load*dt+recovery*dt,0,1);r.fatigue=1-r.energy;
  }
  move(r,desired,dt){
-  let top=((r.plan.topSpeed??21)+(r.action.endsWith('_FOLLOW')?3.0:0))*(r.energy<.45?.72+.28*(r.energy/.45):1);desired=Math.min(desired,top);
-  const prev=r.speed,followBoost=r.action.endsWith('_FOLLOW')?1.45:1,acc=(r.plan.acceleration??3.2)*followBoost*(.62+.38*Math.max(.30,r.energy));if(r.speed<desired)r.speed=Math.min(desired,r.speed+acc*dt);else { const braking=['RETREAT','FADE'].includes(r.action)?7.2:3.8; r.speed=Math.max(desired,r.speed-braking*dt); }
-  const lt=this.laneTarget(r);const leader4Attack=r.lineId===1&&[SCENARIO_PHASE.LINE4_MAKURI,SCENARIO_PHASE.BANTE_BLOCK,SCENARIO_PHASE.FIVE_DIVE,SCENARIO_PHASE.FINAL].includes(this.scenario.phase);const lr=['MOVE_UP','ATTACK','CONTEST','BLOCK','DIVE'].includes(r.action)?3.4:(leader4Attack?3.6:2.0);r.laneOffset+=(lt-r.laneOffset)*clamp(lr*dt,0,1);
+  const finalDynamic=['FINAL_SPRINT','DIVE','SWITCH_TO_SELF_POWER'].includes(r.action);
+  let top=finalDynamic
+   ? (r.plan.topSpeed??21)+2.2+clamp(r.energy,0,1)*4.8
+   : ((r.plan.topSpeed??21)+(r.action.endsWith('_FOLLOW')?3.0:0))*(r.energy<.45?.72+.28*(r.energy/.45):1);
+  desired=Math.min(desired,top);
+  const prev=r.speed,followBoost=r.action.endsWith('_FOLLOW')?(r.action.startsWith('ATTACK')||r.action.startsWith('CONTEST')?1.58:1.18):1;
+  const sprintBoost=finalDynamic?(1.10+0.85*clamp(r.energy,0,1)):1;
+  const acc=(r.plan.acceleration??3.2)*followBoost*sprintBoost*(.62+.38*Math.max(.30,r.energy));
+  if(r.speed<desired)r.speed=Math.min(desired,r.speed+acc*dt);
+  else {
+   const braking=r.action==='RETREAT'?(r.plan.retreatBrake??2.9):r.action==='FADE'?3.6:finalDynamic?(2.6+5.0*(1-r.energy)):3.8;
+   r.speed=Math.max(desired,r.speed-braking*dt);
+  }
+  const lt=this.laneTarget(r);
+  const leader4Attack=r.lineId===1&&[SCENARIO_PHASE.LINE4_MAKURI,SCENARIO_PHASE.BANTE_BLOCK,SCENARIO_PHASE.FIVE_REACTION,SCENARIO_PHASE.FIVE_DIVE,SCENARIO_PHASE.FINAL].includes(this.scenario.phase);
+  let lr=['MOVE_UP','ATTACK','CONTEST','DIVE'].includes(r.action)?3.2:(leader4Attack?3.2:1.85);
+  if(r.action==='BLOCK')lr=r.plan.blockLaneRate??1.10;
+  if(r.action==='DIVE_FEINT')lr=1.35;
+  r.laneOffset+=(lt-r.laneOffset)*clamp(lr*dt,0,1);
   let next=r.distance+r.speed*dt,target=r.followTargetNumber?this.rider(r.followTargetNumber):null;
   if(target&&!target.finished&&target.distance>r.distance&&!['MOVE_UP','ATTACK','CONTEST','BLOCK','DIVE','FINAL_SPRINT'].includes(r.action)){if(next>target.distance-5.8){next=target.distance-5.8;r.speed=Math.min(r.speed,target.speed);}}
-  for(const o of this.riders){if(o===r||o.finished)continue;if(Math.abs(o.distance-next)<4&&Math.abs(o.laneOffset-r.laneOffset)<8){const out=['MOVE_UP','ATTACK','CONTEST','BLOCK','DIVE','FINAL_SPRINT'].includes(r.action);r.laneOffset+=(clamp(o.laneOffset+(out?11:-11),-18,46)-r.laneOffset)*clamp(5*dt,0,1);}}
+  for(const o of this.riders){
+   if(o===r||o.finished)continue;
+   if(Math.abs(o.distance-next)<4.8&&Math.abs(o.laneOffset-r.laneOffset)<9.5){
+    const out=['MOVE_UP','ATTACK','CONTEST','BLOCK','DIVE','FINAL_SPRINT','SWITCH_TO_SELF_POWER'].includes(r.action);
+    const lateralTarget=clamp(o.laneOffset+(out?13:-13),-18,46);
+    r.laneOffset+=(lateralTarget-r.laneOffset)*clamp(7.5*dt,0,1);
+    // If two riders are still almost in the same slot, the trailing rider yields
+    // longitudinally instead of visually passing through the other marker.
+    if(Math.abs(o.laneOffset-r.laneOffset)<8.5&&Math.abs(o.distance-next)<4.2&&o.distance>=r.distance){
+     next=Math.min(next,o.distance-4.2);
+     r.speed=Math.min(r.speed,o.speed);
+    }
+   }
+  }
   r.distance=next;r.acceleration=(r.speed-prev)/Math.max(dt,1e-6);
  }
  recordFinish(r){r.distance=this.totalDistance;r.finished=true;r.finishTime=this.elapsedTime;this.ranking.push({rank:0,number:r.number,lineId:r.lineId,time:r.finishTime,margin:''});}
@@ -246,7 +291,7 @@ export class PhysicsEngine{
  recordHistory(){const s=[...this.riders].sort((a,b)=>b.distance-a.distance),pm=new Map(s.map((r,i)=>[r.number,i+1]));for(const r of this.riders){r.history.push({time:this.elapsedTime,distance:r.distance,speed:r.speed,acceleration:r.acceleration,laneOffset:r.laneOffset,position:pm.get(r.number),action:r.action,tacticalMode:r.tacticalMode,followTargetNumber:r.followTargetNumber,energy:r.energy,fatigue:r.fatigue,drafting:r.drafting,scenarioPhase:this.scenario.phase});if(r.history.length>2000)r.history.shift();}}
  update(dt){
   if(!this.isStarted)return;const fd=clamp(Number(dt)||0,0,.1)*this.timeScale,steps=Math.max(1,Math.ceil(fd/(1/120))),sd=fd/steps;
-  for(let k=0;k<steps;k++){this.elapsedTime+=sd;this.updatePacer(sd);this.scenario.update(sd,this);const desired=new Map();for(const r of this.riders)if(!r.finished)desired.set(r.number,this.actionAndSpeed(r));for(const r of this.riders){if(r.finished)continue;this.updateEnergy(r,desired.get(r.number),sd);const before=r.distance;this.move(r,desired.get(r.number),sd);if(before<this.totalDistance&&r.distance>=this.totalDistance)this.recordFinish(r);}const ld=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),tr=this.raceClock.update(this.pacer.distance,ld,this);if(tr.includes('Bell')){this.bellRung=true;this.onBellCallback?.();}}
+  for(let k=0;k<steps;k++){this.lastSubstepDt=sd;this.elapsedTime+=sd;this.updatePacer(sd);this.scenario.update(sd,this);const desired=new Map();for(const r of this.riders)if(!r.finished)desired.set(r.number,this.actionAndSpeed(r));for(const r of this.riders){if(r.finished)continue;this.updateEnergy(r,desired.get(r.number),sd);const before=r.distance;this.move(r,desired.get(r.number),sd);if(before<this.totalDistance&&r.distance>=this.totalDistance)this.recordFinish(r);}const ld=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),tr=this.raceClock.update(this.pacer.distance,ld,this);if(tr.includes('Bell')){this.bellRung=true;this.onBellCallback?.();}}
   this.recordHistory();if(this.riders.every(r=>r.finished)){this.isStarted=false;this.currentState='FINISHED';this.finalize();this.onFinishCallback?.(this.ranking.map(x=>({...x})));}
  }
  getDiagnostics(){const gaps=[];for(const r of this.riders){const f=r.followTargetNumber?this.rider(r.followTargetNumber):null;if(f&&!r.finished&&!f.finished&&f.distance>r.distance)gaps.push({number:r.number,frontNumber:f.number,gap:f.distance-r.distance});}return{gaps,minGap:gaps.length?Math.min(...gaps.map(x=>x.gap)):null,maxGap:gaps.length?Math.max(...gaps.map(x=>x.gap)):null};}

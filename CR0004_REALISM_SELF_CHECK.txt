@@ -1,0 +1,5 @@
+PASS 0.5x pacerGap=17.9 retreat=14.8-17.7 blockSlide=0.84 reaction=0.24 minSpatial=4.21 finish=1-2-3-7-5-8-6-9-4
+PASS 1x pacerGap=17.9 retreat=14.8-17.7 blockSlide=0.83 reaction=0.25 minSpatial=4.21 finish=1-2-3-7-5-8-6-9-4
+PASS 2x pacerGap=17.7 retreat=14.8-17.7 blockSlide=0.83 reaction=0.23 minSpatial=4.21 finish=1-2-3-7-5-8-6-9-4
+PASS 3x pacerGap=17.9 retreat=14.8-17.7 blockSlide=0.85 reaction=0.25 minSpatial=4.21 finish=1-2-3-7-5-8-6-9-4
+CR-0004 REALISM: all checks passed

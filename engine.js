@@ -246,6 +246,13 @@ export class PhysicsEngine{
   const target=r.followTargetNumber?this.rider(r.followTargetNumber):null,g=target?target.distance-r.distance:999,draft=target&&g>5&&g<14&&Math.abs(target.laneOffset-r.laneOffset)<14?.28:0;
   const demand=Math.max(0,desired-10.5)/10.5;let factor=1;if(['MOVE_UP','ATTACK','CONTEST','DEFEND'].includes(r.action))factor=1.65;if(r.action==='BLOCK')factor=1.35;if(['RETREAT','FADE'].includes(r.action))factor=.50;if(['DIVE','FINAL_SPRINT'].includes(r.action))factor=1.40;
   let load=(.0024+.011*demand*demand)*factor*(1-draft)/(r.plan.endurance??1);
+
+  // CR-0006 stamina accounting: a front-running rider carries wind resistance for
+  // a long time, while a tsuppari/contest costs even more. These multipliers are
+  // rider-plan parameters so the same engine can model a strong or weak senko rider.
+  if(r.action==='LEAD') load*=r.plan.leadLoadMultiplier??1;
+  if(r.action==='DEFEND') load*=r.plan.defendLoadMultiplier??1;
+
   // Repeated attacks cost more than the first one. This is parameter-driven rather
   // than a forced speed drop, so the eventual fade is an energy consequence.
   if(['SECOND_MOVE','SECOND_CONTEST'].includes(this.scenario.phase)) load*=r.plan.secondAttackLoad??1;
@@ -263,7 +270,7 @@ export class PhysicsEngine{
   const acc=(r.plan.acceleration??3.2)*followBoost*sprintBoost*(.62+.38*Math.max(.30,r.energy));
   if(r.speed<desired)r.speed=Math.min(desired,r.speed+acc*dt);
   else {
-   const braking=r.action==='RETREAT'?(r.plan.retreatBrake??2.9):r.action==='FADE'?(r.plan.fadeBrake??3.6):finalDynamic?(2.6+5.0*(1-r.energy)):3.8;
+   const braking=r.action==='RETREAT'?(r.plan.retreatBrake??2.9):r.action==='FADE'?(r.plan.fadeBrake??3.6):r.action==='LEAD_FADE'?(r.plan.finalFadeBrake??4.6):finalDynamic?(2.6+5.0*(1-r.energy)):3.8;
    r.speed=Math.max(desired,r.speed-braking*dt);
   }
   const lt=this.laneTarget(r);
@@ -273,7 +280,7 @@ export class PhysicsEngine{
   if(r.action==='DIVE_FEINT')lr=1.35;
   r.laneOffset+=(lt-r.laneOffset)*clamp(lr*dt,0,1);
   let next=r.distance+r.speed*dt,target=r.followTargetNumber?this.rider(r.followTargetNumber):null;
-  if(target&&!target.finished&&target.distance>r.distance&&!['MOVE_UP','ATTACK','OVERTAKE','CONTEST','BLOCK','DIVE','FINAL_SPRINT'].includes(r.action)){if(next>target.distance-5.8){next=target.distance-5.8;r.speed=Math.min(r.speed,target.speed);}}
+  if(target&&!target.finished&&target.distance>r.distance&&!['MOVE_UP','ATTACK','OVERTAKE','CONTEST','BLOCK','DIVE','FINAL_SPRINT','SWITCH_TO_SELF_POWER'].includes(r.action)){if(next>target.distance-5.8){next=target.distance-5.8;r.speed=Math.min(r.speed,target.speed);}}
   // Emergency safety cage only. TacticalAI should have chosen a free lane before
   // reaching a slower rider. If two markers still converge, the trailing rider yields
   // longitudinally; we never 'bounce' riders sideways like billiard balls.

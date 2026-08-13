@@ -1,21 +1,17 @@
-# KEIRIN FLOW — CR-0005 Dynamic Overtake
+# KEIRIN FLOW — CR-0006 STAMINA CLIMAX
 
-GitHub Pages rootへ、このフォルダ内のファイルをすべて同一階層でアップロードしてください。
-サブフォルダはありません。
+GitHub Pages用フラット構成。
 
-## 今回の主な修正
-
-- 2回目の仕掛け失敗後、7-8-9が明確にFADEして大外側へ沈む
-- 4が前方の速度差とレーン密度を見て動的に追越コースを選ぶ
-- 衝突時の横方向「ビリヤード跳ね返り」を廃止
-- 4が実際に接近してから2がギリギリでブロック
-- 2のブロックは約1秒かけて外へ持ち出す
-- CR-0004で改善した誘導員退避、789後退、5の反応遅延、アコーディオンを維持
+今回の基準シナリオでは、
+「789失速 → 456捲り → 2番ブロック → 1番スタミナ切れ → 2番自力切替 → 4番再加速」
+までを最終局面の因果として実装しています。
 
 ## セルフチェック
 
 ```bash
-npm run check
+node cr0004-realism-check.mjs
+node cr0005-final-corner-check.mjs
+node cr0006-stamina-climax-check.mjs
 ```
 
-0.5x / 1x / 2x / 3x の全速度で `CR-0004 REALISM` と `CR-0005 FINAL CORNER / DYNAMIC OVERTAKE` を通過します。
+詳細は `CR0006_STAMINA_CLIMAX_RELEASE.md` を参照してください。

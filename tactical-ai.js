@@ -162,6 +162,21 @@ export class TacticalAI {
     return base+1.8+(e*4.2);
   }
 
+  leaderIsSpent(rider,engine){
+    const p=rider.plan??{};
+    const rem=engine.raceClock.remainingDistance;
+    const energyGate=p.finalFadeEnergy??0.30;
+    const distanceGate=p.finalFadeRemaining??55;
+    return rem<=distanceGate && (rider.energy??1)<=energyGate;
+  }
+
+  leaderFadeSpeed(rider){
+    const p=rider.plan??{};
+    const e=clamp(rider.energy??0,0,1);
+    // A spent leader still pedals; the fade is progressive rather than a brake-to-zero.
+    return Math.max(12.8,(p.finalFadeSpeed??15.0)+(e-0.20)*2.2);
+  }
+
   decide(rider, engine){
     const s=this.sense(rider,engine), ph=s.phase, p=rider.plan??{};
     const phase=(...xs)=>xs.includes(ph);
@@ -170,6 +185,15 @@ export class TacticalAI {
       if(rider.number===1){
         const seven=engine.rider(7); const pressure=seven?Math.max(0,20-(rider.distance-seven.distance)):0;
         if(phase('FIRST_CONTEST','SECOND_CONTEST')) return {mode:TACTICAL_MODE.DEFEND,action:'DEFEND',speed:phase('FIRST_CONTEST')?p.defend1:p.defend2,lane:-18,followTargetNumber:null};
+
+        // CR-0006: the long tsuppari is not free. Once the leader reaches the
+        // final corner with depleted energy, he goes "ippai" and progressively
+        // loses speed. This gives the bante and the incoming makuri a real chance
+        // to pass instead of preserving an immortal 20 m/s leader to the line.
+        if(phase('BANTE_BLOCK','FIVE_REACTION','FIVE_DIVE','FINAL') && this.leaderIsSpent(rider,engine)){
+          return {mode:TACTICAL_MODE.RECOVER,action:'LEAD_FADE',speed:this.leaderFadeSpeed(rider),lane:-18,followTargetNumber:null};
+        }
+
         const leadSpeed=phase('FIRST_RETREAT')?21.4:phase('RESET_LINEUP')?15.8:phase('SECOND_MOVE')?12.6:phase('LINE7_FADE','LINE4_MAKURI','BANTE_BLOCK','FIVE_REACTION','FIVE_DIVE')?p.final:phase('FINAL')?this.finalSprintSpeed(rider):10.5+Math.min(.3,pressure*.01);
         return {mode:TACTICAL_MODE.FOLLOW,action:'LEAD',speed:leadSpeed,lane:-18,followTargetNumber:null};
       }
@@ -190,12 +214,17 @@ export class TacticalAI {
         if(phase('LINE4_MAKURI','BANTE_BLOCK','FIVE_REACTION','FIVE_DIVE','FINAL')){
           const blocker=engine.rider(2);
           const liveBlock=blocker && blocker.laneOffset>4 && Math.abs(blocker.distance-rider.distance)<14;
-          const completedBlock=engine.scenario.flags.blockContactCompleted && phase('FIVE_REACTION','FIVE_DIVE','FINAL');
+          const completedBlock=engine.scenario.flags.blockContactCompleted && phase('FIVE_REACTION','FIVE_DIVE');
           const blockActive=liveBlock||completedBlock;
           if(blockActive){
             return {mode:TACTICAL_MODE.RECOVER,action:'BLOCKED',speed:p.blocked,lane:rider.laneOffset,followTargetNumber:null};
           }
-          if(phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:this.finalSprintSpeed(rider),lane:rider.laneOffset,followTargetNumber:null};
+          if(phase('FINAL')){
+            // The block checks 4's momentum but does not delete his legs.
+            // If energy remains, he re-accelerates into the straight.
+            const kick=Math.max(p.postBlockKick??0,this.finalSprintSpeed(rider)*(p.blockRecoveryFactor??0.88));
+            return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:kick,lane:rider.laneOffset,followTargetNumber:null};
+          }
 
           const threshold=p.overtakeSpeedDelta??2.2;
           const slow=s.slowObstacle && (rider.speed-s.slowObstacle.speed)>=threshold;
@@ -221,10 +250,18 @@ export class TacticalAI {
 
     if(rider.number===2){
       const four=engine.rider(4);
+      const one=engine.rider(1);
       // Entering BANTE_BLOCK already means 4 crossed the real proximity gate in the
-      // scenario controller. Once 2 commits to the block, he carries the move through
-      // instead of cancelling it every frame when 4 changes relative position.
-      if(phase('BANTE_BLOCK')&&four) return {mode:TACTICAL_MODE.BLOCK,action:'BLOCK',speed:Math.max(engine.rider(1)?.speed??0,19.4),lane:p.blockTargetLane??28,followTargetNumber:1};
+      // scenario controller. Once 2 commits to the block, he carries the move through.
+      if(phase('BANTE_BLOCK')&&four) return {mode:TACTICAL_MODE.BLOCK,action:'BLOCK',speed:Math.max(one?.speed??0,19.4),lane:p.blockTargetLane??28,followTargetNumber:1};
+
+      // Once the long-leading 1 goes ippai, the bante must not remain chained to
+      // his rear wheel. 2 releases into self power and becomes part of the finish.
+      const leaderSpent=one && ((one.action==='LEAD_FADE') || ((one.energy??1)<=(p.leaderReleaseEnergy??0.38) && engine.raceClock.remainingDistance<=58));
+      if(phase('FIVE_REACTION','FIVE_DIVE','FINAL')&&leaderSpent){
+        const kick=phase('FINAL')?Math.max(p.finalKick??0,this.finalSprintSpeed(rider)):(p.finalKick??24.2);
+        return {mode:TACTICAL_MODE.SELF_POWER,action:'SWITCH_TO_SELF_POWER',speed:kick,lane:Math.min(rider.laneOffset,6),followTargetNumber:null};
+      }
       if(phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:this.finalSprintSpeed(rider),lane:rider.laneOffset,followTargetNumber:null};
     }
 

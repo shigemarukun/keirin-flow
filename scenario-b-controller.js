@@ -34,7 +34,8 @@ export class ScenarioBController {
             sevenFadedBehindMiddle: false,
             fourAttackStarted: false,
             blockStarted: false,
-            fiveDiveStarted: false
+            fiveDiveStarted: false,
+            blockContactCompleted: false
         };
     }
 
@@ -49,7 +50,7 @@ export class ScenarioBController {
         this.phaseTime += dt;
         const rem = engine.raceClock.remainingDistance;
         const r = n => engine.rider(n);
-        const one = r(1), four = r(4), six = r(6), seven = r(7), nine = r(9);
+        const one = r(1), two = r(2), four = r(4), five = r(5), six = r(6), seven = r(7), nine = r(9);
 
         switch (this.phase) {
             case SCENARIO_PHASE.FORMATION:
@@ -76,7 +77,7 @@ export class ScenarioBController {
                 if (this.firstAlongside) this.firstContestTime += dt;
                 // In this reference race 1 wins only after the two leaders have
                 // genuinely reached a side-by-side contest.
-                if ((this.firstAlongside && this.firstContestTime >= 1.8) || rem <= 535) {
+                if (this.firstAlongside && this.firstContestTime >= 1.10) {
                     this.setPhase(SCENARIO_PHASE.FIRST_RETREAT, engine);
                 }
                 break;
@@ -84,7 +85,7 @@ export class ScenarioBController {
 
             case SCENARIO_PHASE.FIRST_RETREAT:
                 // Retreat is complete only when the full 7-line is behind the middle line.
-                if (seven.distance < six.distance - 8 && nine.distance < six.distance - 10) {
+                if (seven.distance < six.distance - 2 && nine.distance < six.distance - 10) {
                     this.flags.firstRetreatCompleted = true;
                     this.setPhase(SCENARIO_PHASE.RESET_LINEUP, engine);
                 }
@@ -100,7 +101,7 @@ export class ScenarioBController {
             case SCENARIO_PHASE.SECOND_MOVE: {
                 this.flags.secondAttackStarted = true;
                 const gapToOne = one.distance - seven.distance;
-                if (gapToOne <= 18) {
+                if (gapToOne <= 8) {
                     this.flags.secondContestStarted = true;
                     this.setPhase(SCENARIO_PHASE.SECOND_CONTEST, engine);
                 }
@@ -111,7 +112,7 @@ export class ScenarioBController {
                 const overlap = Math.abs(one.distance - seven.distance) <= 5.5;
                 if (overlap) this.secondAlongside = true;
                 if (this.secondAlongside) this.secondContestTime += dt;
-                if ((this.secondAlongside && this.secondContestTime >= 2.8) || (rem <= 105 && this.phaseTime >= 0.65)) {
+                if (this.secondAlongside && this.secondContestTime >= 2.8) {
                     this.setPhase(SCENARIO_PHASE.LINE7_FADE, engine);
                 }
                 break;
@@ -128,7 +129,7 @@ export class ScenarioBController {
 
             case SCENARIO_PHASE.LINE4_MAKURI: {
                 const gap4to1 = one.distance - four.distance;
-                if (gap4to1 <= 45 && rem <= 120 && this.phaseTime >= 0.45) {
+                if (gap4to1 <= 65 && rem <= 130 && this.phaseTime >= 0.35) {
                     this.flags.blockStarted = true;
                     this.setPhase(SCENARIO_PHASE.BANTE_BLOCK, engine);
                 }
@@ -136,15 +137,18 @@ export class ScenarioBController {
             }
 
             case SCENARIO_PHASE.BANTE_BLOCK:
-                this.blockTime += dt;
-                if (this.blockTime >= 0.50) {
+                // Do not advance just because time passed. The phase ends only after
+                // 2 has actually sensed 4, moved out and performed a real block.
+                if (two.action === 'BLOCK') this.blockTime += dt;
+                if (this.blockTime >= 0.80) {
+                    this.flags.blockContactCompleted = true;
                     this.flags.fiveDiveStarted = true;
                     this.setPhase(SCENARIO_PHASE.FIVE_DIVE, engine);
                 }
                 break;
 
             case SCENARIO_PHASE.FIVE_DIVE:
-                if (rem <= 45) this.setPhase(SCENARIO_PHASE.FINAL, engine);
+                if (rem <= 32 && this.phaseTime >= 0.45) this.setPhase(SCENARIO_PHASE.FINAL, engine);
                 break;
 
             case SCENARIO_PHASE.FINAL:

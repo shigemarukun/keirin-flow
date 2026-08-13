@@ -48,9 +48,12 @@ export class TacticalAI {
     speed=clamp(speed, Math.max(0,front.speed-3.0), front.speed+4.2);
     const lane=front.laneOffset;
     let mode=TACTICAL_MODE.FOLLOW;
-    if(['MOVE_UP','ATTACK'].includes(front.action)) mode=TACTICAL_MODE.ATTACK;
-    else if(front.action==='CONTEST') mode=TACTICAL_MODE.CONTEST;
-    else if(['RETREAT','FADE'].includes(front.action)) mode=TACTICAL_MODE.RETREAT;
+    // Propagate tactical intent through the whole line. A third rider follows
+    // the second rider's ATTACK_FOLLOW / RETREAT_FOLLOW state instead of losing
+    // the leader's intent one hop down the chain.
+    if(front.action.includes('MOVE_UP')||front.action.includes('ATTACK')) mode=TACTICAL_MODE.ATTACK;
+    else if(front.action.includes('CONTEST')) mode=TACTICAL_MODE.CONTEST;
+    else if(front.action.includes('RETREAT')||front.action.includes('FADE')) mode=TACTICAL_MODE.RETREAT;
     return {mode,action:`${mode}_FOLLOW`,speed,lane,followTargetNumber:front.number,idealGap};
   }
 
@@ -64,7 +67,7 @@ export class TacticalAI {
       if(rider.number===1){
         const seven=engine.rider(7); const pressure=seven?Math.max(0,20-(rider.distance-seven.distance)):0;
         if(phase('FIRST_CONTEST','SECOND_CONTEST')) return {mode:TACTICAL_MODE.DEFEND,action:'DEFEND',speed:phase('FIRST_CONTEST')?p.defend1:p.defend2,lane:-18,followTargetNumber:null};
-        return {mode:TACTICAL_MODE.FOLLOW,action:'LEAD',speed:phase('SECOND_MOVE')?12.6:phase('FINAL')?p.final:10.5+Math.min(.3,pressure*.01),lane:-18,followTargetNumber:null};
+        return {mode:TACTICAL_MODE.FOLLOW,action:'LEAD',speed:phase('SECOND_MOVE')?12.6:phase('LINE7_FADE','LINE4_MAKURI','BANTE_BLOCK','FIVE_DIVE','FINAL')?p.final:10.5+Math.min(.3,pressure*.01),lane:-18,followTargetNumber:null};
       }
       if(rider.number===7){
         if(phase('FIRST_MOVE')) return {mode:TACTICAL_MODE.ATTACK,action:'MOVE_UP',speed:p.attack1,lane:36,followTargetNumber:null};
@@ -77,8 +80,23 @@ export class TacticalAI {
       }
       if(rider.number===4){
         if(phase('LINE4_MAKURI','BANTE_BLOCK','FIVE_DIVE','FINAL')){
-          const blocker=engine.rider(2); const blockActive=blocker && blocker.laneOffset>4 && Math.abs(blocker.distance-rider.distance)<14;
+          const blocker=engine.rider(2);
+          const liveBlock=blocker && blocker.laneOffset>4 && Math.abs(blocker.distance-rider.distance)<14;
+          const completedBlock=engine.scenario.flags.blockContactCompleted && phase('FIVE_DIVE','FINAL');
+          const blockActive=liveBlock||completedBlock;
           return {mode:blockActive?TACTICAL_MODE.RECOVER:TACTICAL_MODE.ATTACK,action:blockActive?'BLOCKED':'ATTACK',speed:blockActive?p.blocked:p.makuri,lane:blockActive?42:36,followTargetNumber:null};
+        }
+        // Middle-line leader: keep a real tactical middle position behind the
+        // front line instead of idling at formation speed. This is a sensed
+        // target, not a timer: 4 follows the current third rider of the front line.
+        const three=engine.rider(3);
+        if(three&&!three.finished){
+          const idealGap=17;
+          const gap=three.distance-rider.distance;
+          const gapError=gap-idealGap;
+          const relative=three.speed-rider.speed;
+          const speed=clamp(three.speed+gapError*0.30+relative*0.45,Math.max(0,three.speed-2.2),three.speed+4.8);
+          return {mode:TACTICAL_MODE.FOLLOW,action:'FOLLOW',speed,lane:three.laneOffset,followTargetNumber:3,idealGap};
         }
       }
     }
@@ -90,9 +108,9 @@ export class TacticalAI {
     }
     if(rider.number===5&&phase('FIVE_DIVE','FINAL')) return {mode:TACTICAL_MODE.SELF_POWER,action:'DIVE',speed:p.dive,lane:-2,followTargetNumber:null};
     if(rider.number===6&&phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:p.final,lane:10,followTargetNumber:null};
-    if([8,9].includes(rider.number)&&phase('LINE4_MAKURI','BANTE_BLOCK','FIVE_DIVE','FINAL')){
+    if([8,9].includes(rider.number)&&phase('BANTE_BLOCK','FIVE_DIVE','FINAL')){
       // When the leader has collapsed, followers are allowed to detach and ride for themselves.
-      const leader=engine.rider(7); const leaderCollapsed=leader && leader.speed+2<rider.speed;
+      const leader=engine.rider(7); const leaderCollapsed=leader && (leader.action==='FADE'||leader.energy<0.22||leader.speed+2<rider.speed);
       if(leaderCollapsed) return {mode:TACTICAL_MODE.SWITCH,action:'SWITCH_TO_SELF_POWER',speed:p.final,lane:rider.number===9?36:16,followTargetNumber:null};
     }
 

@@ -1,0 +1,24 @@
+KEIRIN FLOW — CR-0003 DYNAMIC TACTICAL INTERACTION FOUNDATION
+Date: 2026-08-13
+
+PASS JavaScript syntax
+PASS CR-0002 timeline at 0.5x
+PASS CR-0002 timeline at 1.0x
+PASS CR-0002 timeline at 2.0x
+PASS CR-0002 timeline at 3.0x
+PASS Bell one-shot
+PASS PACER -> LEADER only after physical pacer exit
+PASS Remaining-distance monotonicity
+PASS 7-8-9 first attack observed
+PASS 7-8-9 retreat observed
+PASS 7-8-9 second attack observed
+PASS leader contest observed
+PASS 7-8-9 order preserved during attack phases
+PASS maximum 7-8 / 8-9 attack gap <= 21.78m at all playback speeds
+PASS no same-slot collapse
+PASS SWITCH_TO_SELF_POWER observed after line-leader collapse
+PASS all 9 riders finish at all playback speeds
+
+IMPORTANT
+The old Scenario B exact-ranking regression is archived under legacy/ because CR-0003 changes the movement model.
+It is no longer a release gate. CR-0003 is a tactical-layer migration foundation, not the final generic race AI.

@@ -84,7 +84,7 @@ export class ScenarioBController {
 
             case SCENARIO_PHASE.FIRST_RETREAT:
                 // Retreat is complete only when the full 7-line is behind the middle line.
-                if (seven.distance < six.distance - 8 && nine.distance < six.distance - 20) {
+                if (seven.distance < six.distance - 8 && nine.distance < six.distance - 10) {
                     this.flags.firstRetreatCompleted = true;
                     this.setPhase(SCENARIO_PHASE.RESET_LINEUP, engine);
                 }
@@ -111,7 +111,7 @@ export class ScenarioBController {
                 const overlap = Math.abs(one.distance - seven.distance) <= 5.5;
                 if (overlap) this.secondAlongside = true;
                 if (this.secondAlongside) this.secondContestTime += dt;
-                if ((this.secondAlongside && this.secondContestTime >= 2.8) || (rem <= 190 && this.phaseTime >= 0.65)) {
+                if ((this.secondAlongside && this.secondContestTime >= 2.8) || (rem <= 105 && this.phaseTime >= 0.65)) {
                     this.setPhase(SCENARIO_PHASE.LINE7_FADE, engine);
                 }
                 break;

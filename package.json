@@ -1,1 +1,8 @@
-{"type":"module","scripts":{"check:timeline":"node cr0002-timeline-check.mjs","check:tactics":"node dynamic-tactical-check.mjs","check":"node cr0002-timeline-check.mjs && node dynamic-tactical-check.mjs"}}
+{
+  "type":"module",
+  "scripts":{
+    "check:realism":"node cr0004-realism-check.mjs",
+    "check:final-corner":"node cr0005-final-corner-check.mjs",
+    "check":"node cr0004-realism-check.mjs && node cr0005-final-corner-check.mjs"
+  }
+}

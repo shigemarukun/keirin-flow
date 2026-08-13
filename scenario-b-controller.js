@@ -94,12 +94,17 @@ export class ScenarioBController {
                 }
                 break;
 
-            case SCENARIO_PHASE.RESET_LINEUP:
-                if (rem <= 405 && this.phaseTime >= 0.55) {
+            case SCENARIO_PHASE.RESET_LINEUP: {
+                const eight = r(8);
+                // Re-form the line at a usable rolling speed before launching again.
+                // This avoids a second attack that begins from an artificial 6 km/h crawl.
+                const lineRecovered = seven.speed >= 13.2 && eight.speed >= 12.8 && nine.speed >= 12.6;
+                if (rem <= 405 && lineRecovered) {
                     this.flags.finalLapReset = true;
                     this.setPhase(SCENARIO_PHASE.SECOND_MOVE, engine);
                 }
                 break;
+            }
 
             case SCENARIO_PHASE.SECOND_MOVE: {
                 this.flags.secondAttackStarted = true;
@@ -115,26 +120,32 @@ export class ScenarioBController {
                 const overlap = Math.abs(one.distance - seven.distance) <= 5.5;
                 if (overlap) this.secondAlongside = true;
                 if (this.secondAlongside) this.secondContestTime += dt;
-                if (this.secondAlongside && this.secondContestTime >= 2.8) {
+                if (this.secondAlongside && this.secondContestTime >= 2.0) {
                     this.setPhase(SCENARIO_PHASE.LINE7_FADE, engine);
                 }
                 break;
 
-            case SCENARIO_PHASE.LINE7_FADE:
-                // Middle line does not launch merely because a distance threshold was crossed.
-                // It launches once the spent outside line has physically fallen behind it.
-                if (rem <= 165 && seven.speed < four.speed + 0.5) {
+            case SCENARIO_PHASE.LINE7_FADE: {
+                // The failed second attack must visibly collapse before the middle line launches.
+                // No remaining-distance shortcut: 4 reacts to the actual loss of speed and the
+                // spent line drifting outside, then attacks through the emerging space.
+                const eight = r(8);
+                const lineSpent = seven.speed <= 16.4 && eight.speed <= 17.2 && nine.speed <= 18.0;
+                const lineOutside = seven.laneOffset >= 34 && eight.laneOffset >= 34;
+                const fadeVisible = this.phaseTime >= 0.48;
+                if (fadeVisible && lineSpent && lineOutside) {
                     this.flags.sevenFadedBehindMiddle = true;
                     this.flags.fourAttackStarted = true;
                     this.setPhase(SCENARIO_PHASE.LINE4_MAKURI, engine);
                 }
                 break;
+            }
 
             case SCENARIO_PHASE.LINE4_MAKURI: {
                 const gap4to2 = two.distance - four.distance;
                 // The block phase begins only when 4's actual makuri reaches the
                 // bante's defensive window. No pre-programmed early lane slide.
-                if (gap4to2 <= 36 && gap4to2 >= -4 && four.laneOffset > 8 && rem <= 115 && this.phaseTime >= 0.35) {
+                if (gap4to2 <= 24 && gap4to2 >= -4 && ['ATTACK','OVERTAKE'].includes(four.action) && this.phaseTime >= 0.25) {
                     this.flags.blockStarted = true;
                     this.setPhase(SCENARIO_PHASE.BANTE_BLOCK, engine);
                 }

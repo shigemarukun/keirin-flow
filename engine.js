@@ -22,8 +22,8 @@ const CLOCK_OWNER=Object.freeze({
 /**
  * CR-0002
  * RedBoard is a physical/reference marker, not a one-shot event.
- * The one-shot race timeline is:
- * PacerLeaveLine -> Bell -> PacerExit -> FinalLap -> FinalBack -> Finish
+ * The shared clock landmarks remain Bell / PacerExit / FinalLap / FinalBack / Finish.
+ * PacerLeaveLine is interaction-driven (front pressure) and may occur after Bell.
  */
 export const RACE_PROFILES=Object.freeze({
  PROFILE_400:Object.freeze({
@@ -206,7 +206,8 @@ export class PhysicsEngine{
 
   this.pacer.distance+=this.pacer.speed*dt;
 
-  // PacerLeaveLine: leave the racing line BEFORE the bell.
+  // PacerLeaveLine is interaction-driven: leave only after a challenger reaches
+  // the front-pressure window. It is intentionally not tied to a fixed Bell order.
   if(this.raceClock.events.PacerLeaveLine.fired&&this.pacer.state===PACER_STATE.LEADING){
    this.pacer.state=PACER_STATE.EXITING;
    this.emitRaceEvent('PACER_EXIT_START',{distance:this.pacer.distance});
@@ -244,7 +245,10 @@ export class PhysicsEngine{
  updateEnergy(r,desired,dt){
   const target=r.followTargetNumber?this.rider(r.followTargetNumber):null,g=target?target.distance-r.distance:999,draft=target&&g>5&&g<14&&Math.abs(target.laneOffset-r.laneOffset)<14?.28:0;
   const demand=Math.max(0,desired-10.5)/10.5;let factor=1;if(['MOVE_UP','ATTACK','CONTEST','DEFEND'].includes(r.action))factor=1.65;if(r.action==='BLOCK')factor=1.35;if(['RETREAT','FADE'].includes(r.action))factor=.50;if(['DIVE','FINAL_SPRINT'].includes(r.action))factor=1.40;
-  const load=(.0024+.011*demand*demand)*factor*(1-draft)/(r.plan.endurance??1);
+  let load=(.0024+.011*demand*demand)*factor*(1-draft)/(r.plan.endurance??1);
+  // Repeated attacks cost more than the first one. This is parameter-driven rather
+  // than a forced speed drop, so the eventual fade is an energy consequence.
+  if(['SECOND_MOVE','SECOND_CONTEST'].includes(this.scenario.phase)) load*=r.plan.secondAttackLoad??1;
   const recovery=(r.action==='RETREAT'||(r.action==='FOLLOW'&&desired<=12.0))?0.010:0;
   r.load=load;r.drafting=draft>0;r.effort=demand;r.energy=clamp(r.energy-load*dt+recovery*dt,0,1);r.fatigue=1-r.energy;
  }
@@ -259,29 +263,27 @@ export class PhysicsEngine{
   const acc=(r.plan.acceleration??3.2)*followBoost*sprintBoost*(.62+.38*Math.max(.30,r.energy));
   if(r.speed<desired)r.speed=Math.min(desired,r.speed+acc*dt);
   else {
-   const braking=r.action==='RETREAT'?(r.plan.retreatBrake??2.9):r.action==='FADE'?3.6:finalDynamic?(2.6+5.0*(1-r.energy)):3.8;
+   const braking=r.action==='RETREAT'?(r.plan.retreatBrake??2.9):r.action==='FADE'?(r.plan.fadeBrake??3.6):finalDynamic?(2.6+5.0*(1-r.energy)):3.8;
    r.speed=Math.max(desired,r.speed-braking*dt);
   }
   const lt=this.laneTarget(r);
   const leader4Attack=r.lineId===1&&[SCENARIO_PHASE.LINE4_MAKURI,SCENARIO_PHASE.BANTE_BLOCK,SCENARIO_PHASE.FIVE_REACTION,SCENARIO_PHASE.FIVE_DIVE,SCENARIO_PHASE.FINAL].includes(this.scenario.phase);
-  let lr=['MOVE_UP','ATTACK','CONTEST','DIVE'].includes(r.action)?3.2:(leader4Attack?3.2:1.85);
+  let lr=['MOVE_UP','ATTACK','OVERTAKE','CONTEST','DIVE'].includes(r.action)?3.2:(leader4Attack?3.2:1.85);
   if(r.action==='BLOCK')lr=r.plan.blockLaneRate??1.10;
   if(r.action==='DIVE_FEINT')lr=1.35;
   r.laneOffset+=(lt-r.laneOffset)*clamp(lr*dt,0,1);
   let next=r.distance+r.speed*dt,target=r.followTargetNumber?this.rider(r.followTargetNumber):null;
-  if(target&&!target.finished&&target.distance>r.distance&&!['MOVE_UP','ATTACK','CONTEST','BLOCK','DIVE','FINAL_SPRINT'].includes(r.action)){if(next>target.distance-5.8){next=target.distance-5.8;r.speed=Math.min(r.speed,target.speed);}}
+  if(target&&!target.finished&&target.distance>r.distance&&!['MOVE_UP','ATTACK','OVERTAKE','CONTEST','BLOCK','DIVE','FINAL_SPRINT'].includes(r.action)){if(next>target.distance-5.8){next=target.distance-5.8;r.speed=Math.min(r.speed,target.speed);}}
+  // Emergency safety cage only. TacticalAI should have chosen a free lane before
+  // reaching a slower rider. If two markers still converge, the trailing rider yields
+  // longitudinally; we never 'bounce' riders sideways like billiard balls.
   for(const o of this.riders){
    if(o===r||o.finished)continue;
-   if(Math.abs(o.distance-next)<4.8&&Math.abs(o.laneOffset-r.laneOffset)<9.5){
-    const out=['MOVE_UP','ATTACK','CONTEST','BLOCK','DIVE','FINAL_SPRINT','SWITCH_TO_SELF_POWER'].includes(r.action);
-    const lateralTarget=clamp(o.laneOffset+(out?13:-13),-18,46);
-    r.laneOffset+=(lateralTarget-r.laneOffset)*clamp(7.5*dt,0,1);
-    // If two riders are still almost in the same slot, the trailing rider yields
-    // longitudinally instead of visually passing through the other marker.
-    if(Math.abs(o.laneOffset-r.laneOffset)<8.5&&Math.abs(o.distance-next)<4.2&&o.distance>=r.distance){
-     next=Math.min(next,o.distance-4.2);
-     r.speed=Math.min(r.speed,o.speed);
-    }
+   const longitudinal=o.distance-next;
+   const lateral=Math.abs(o.laneOffset-r.laneOffset);
+   if(longitudinal>=-0.5&&longitudinal<4.4&&lateral<8.5){
+    next=Math.min(next,o.distance-4.4);
+    r.speed=Math.min(r.speed,Math.max(0,o.speed-0.15));
    }
   }
   r.distance=next;r.acceleration=(r.speed-prev)/Math.max(dt,1e-6);

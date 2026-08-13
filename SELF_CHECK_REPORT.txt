@@ -1,15 +1,16 @@
-$ node --check engine.js
+npm warn invalid config registry="https:///" set in /etc/npmrc
+npm warn invalid config Must be full url with "http://"
 
+> check
+> node cr0004-realism-check.mjs && node cr0005-final-corner-check.mjs
 
-$ node --check race-plan.js
-
-
-$ node --check scenario-b-controller.js
-
-
-$ node scenario-b-check.mjs
-PASS 0.5x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.0 minSpatial=1.285
-PASS 1x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.2 minSpatial=1.289
-PASS 2x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.4 minSpatial=1.289
-PASS 3x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.4 minSpatial=1.296
-SCENARIO B V2: all movement/contest/block checkpoints passed
+PASS 0.5x pacerGap=17.8 retreat=14.8-17.7 blockSlide=0.97 reaction=0.27 minSpatial=4.42 finish=1-2-3-5-4-6-7-8-9
+PASS 1x pacerGap=17.7 retreat=14.8-17.7 blockSlide=0.97 reaction=0.27 minSpatial=4.45 finish=1-2-3-5-4-6-7-8-9
+PASS 2x pacerGap=17.7 retreat=14.8-17.7 blockSlide=0.97 reaction=0.27 minSpatial=4.53 finish=1-2-3-5-4-6-7-8-9
+PASS 3x pacerGap=17.3 retreat=14.8-17.7 blockSlide=0.95 reaction=0.25 minSpatial=4.53 finish=1-2-3-5-4-6-7-8-9
+CR-0004 REALISM: all checks passed
+PASS 0.5x fade@131.4 makuri@121.2 block@51.2 blockGap=23.9 spent=11.6/11.2/10.7 avoid=11.38 blockSlide=0.97 finish=1-2-3-5-4-6-7-8-9
+PASS 1x fade@131.2 makuri@121.2 block@51.2 blockGap=23.9 spent=11.6/11.2/10.7 avoid=11.38 blockSlide=0.97 finish=1-2-3-5-4-6-7-8-9
+PASS 2x fade@130.9 makuri@120.8 block@50.8 blockGap=23.9 spent=11.6/11.2/10.7 avoid=11.39 blockSlide=0.97 finish=1-2-3-5-4-6-7-8-9
+PASS 3x fade@130.5 makuri@120.5 block@50.5 blockGap=23.8 spent=11.6/11.2/10.7 avoid=11.39 blockSlide=0.95 finish=1-2-3-5-4-6-7-8-9
+CR-0005 FINAL CORNER / DYNAMIC OVERTAKE: all strict checks passed

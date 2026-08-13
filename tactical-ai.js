@@ -1,7 +1,7 @@
 export const TACTICAL_MODE = Object.freeze({
   FOLLOW:'FOLLOW', ATTACK:'ATTACK', CONTEST:'CONTEST', RETREAT:'RETREAT',
   DEFEND:'DEFEND', BLOCK:'BLOCK', SWITCH:'SWITCH', SELF_POWER:'SELF_POWER',
-  RECOVER:'RECOVER', FINAL_SPRINT:'FINAL_SPRINT'
+  RECOVER:'RECOVER', FINAL_SPRINT:'FINAL_SPRINT', OVERTAKE:'OVERTAKE'
 });
 
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
@@ -14,10 +14,10 @@ export class TacticalAI {
     if(!this.memory.has(rider.number)){
       this.memory.set(rider.number,{
         perceivedFrontSpeed:null,
-        followLag:0,
         accordionPhase:rider.number*0.83,
         lastFrontAction:'',
-        blockSeenAt:null
+        lastOvertakeLane:null,
+        overtakeHoldUntil:0
       });
     }
     return this.memory.get(rider.number);
@@ -32,13 +32,17 @@ export class TacticalAI {
     const lineFront=rider.lineOrder>0?sameLine.find(x=>x.lineOrder===rider.lineOrder-1)??null:null;
     const nearestAhead=ahead[0]??null;
     const nearestBehind=behind[0]??null;
+    const corridorAhead=ahead
+      .filter(x=>x.distance-rider.distance<=34 && Math.abs(x.laneOffset-rider.laneOffset)<=12)
+      .sort((a,b)=>(a.distance-rider.distance)-(b.distance-rider.distance));
+    const slowObstacle=corridorAhead.find(x=>(rider.speed-x.speed)>=2.0)??null;
     const lateralThreat=others
       .filter(x=>Math.abs(x.distance-rider.distance)<=7 && Math.abs(x.laneOffset-rider.laneOffset)<=22)
       .sort((a,b)=>Math.abs(a.distance-rider.distance)-Math.abs(b.distance-rider.distance))[0]??null;
     return {
       remaining:engine.raceClock.remainingDistance,
       pacerState:engine.pacer.state,
-      lineLeader,lineFront,nearestAhead,nearestBehind,lateralThreat,
+      lineLeader,lineFront,nearestAhead,nearestBehind,lateralThreat,corridorAhead,slowObstacle,
       gapToFront:lineFront?lineFront.distance-rider.distance:Infinity,
       speedDeltaToFront:lineFront?lineFront.speed-rider.speed:0,
       lineCohesion:sameLine.length<2?1:Math.min(...sameLine.slice(1).map((x,i)=>{
@@ -49,24 +53,70 @@ export class TacticalAI {
     };
   }
 
+  laneDensity(rider,engine,lane,lookahead=30){
+    let score=0;
+    for(const other of engine.riders){
+      if(other===rider||other.finished)continue;
+      const longitudinal=other.distance-rider.distance;
+      if(longitudinal<-7||longitudinal>lookahead)continue;
+      const lateral=Math.abs(other.laneOffset-lane);
+      const lateralWeight=Math.max(0,1-lateral/15);
+      if(lateralWeight<=0)continue;
+      const forwardWeight=longitudinal>=0?1.2+Math.max(0,lookahead-longitudinal)/lookahead:0.65;
+      const speedPenalty=longitudinal>=0&&other.speed<rider.speed-1.5?1.4:0.35;
+      const overlapPenalty=Math.abs(longitudinal)<6&&lateral<9?5.5:0;
+      score += lateralWeight*(forwardWeight+speedPenalty)+overlapPenalty;
+    }
+    return score;
+  }
+
+  chooseOvertakeLane(rider,engine,{preferOutside=true}={}){
+    const p=rider.plan??{};
+    const minLane=p.laneSearchMin??-12;
+    const maxLane=p.laneSearchMax??46;
+    const step=p.laneSearchStep??6;
+    const lookahead=p.overtakeLookahead??30;
+    const mem=this.mem(rider);
+    const candidates=[];
+    for(let lane=minLane;lane<=maxLane+1e-9;lane+=step)candidates.push(lane);
+    if(!candidates.some(x=>Math.abs(x-rider.laneOffset)<1)) candidates.push(rider.laneOffset);
+
+    let best={lane:rider.laneOffset,score:Infinity,density:Infinity};
+    for(const lane of candidates){
+      const density=this.laneDensity(rider,engine,lane,lookahead);
+      const laneChangePenalty=Math.abs(lane-rider.laneOffset)*0.028;
+      // A makuri normally wants to keep momentum outside, but this is only a weak
+      // preference. A genuinely open inner/middle course will beat a crowded outside.
+      const directionBias=preferOutside&&lane>rider.laneOffset?-0.22*(lane-rider.laneOffset)/12:0;
+      const edgePenalty=(lane<=minLane+1||lane>=maxLane-1)?0.18:0;
+      const score=density+laneChangePenalty+directionBias+edgePenalty;
+      if(score<best.score)best={lane,score,density};
+    }
+
+    // Hysteresis prevents left-right flicker while threading a fading line.
+    const now=engine.elapsedTime??0;
+    if(mem.lastOvertakeLane!=null && now<mem.overtakeHoldUntil){
+      const oldDensity=this.laneDensity(rider,engine,mem.lastOvertakeLane,lookahead);
+      if(oldDensity<=best.density+0.9)return {lane:mem.lastOvertakeLane,density:oldDensity};
+    }
+    mem.lastOvertakeLane=best.lane;
+    mem.overtakeHoldUntil=now+0.34;
+    return best;
+  }
+
   followerCommand(rider, sensor, leaderCommand, idealGap=9.8, engine=null){
     const front=sensor.lineFront;
     if(!front) return {...leaderCommand};
     const mem=this.mem(rider);
     const retreatIntent=front.action.includes('RETREAT')||front.action.includes('FADE');
-    const attackIntent=front.action.includes('MOVE_UP')||front.action.includes('ATTACK')||front.action.includes('CONTEST');
+    const attackIntent=front.action.includes('MOVE_UP')||front.action.includes('ATTACK')||front.action.includes('CONTEST')||front.action.includes('OVERTAKE');
 
-    // Human-like perception: normal following has a short lag. A clear retreat/fade
-    // signal is recognised much faster, so the follower rolls off before the gap
-    // physically collapses (predictive braking / no accordion pile-up).
     const dt=engine?.lastSubstepDt??(1/120);
-    const tau=retreatIntent?0.07:attackIntent?0.10:0.26;
+    const tau=retreatIntent?0.055:attackIntent?0.10:0.26;
     const alpha=1-Math.exp(-dt/Math.max(0.02,tau));
     if(mem.perceivedFrontSpeed==null) mem.perceivedFrontSpeed=front.speed;
     mem.perceivedFrontSpeed += (front.speed-mem.perceivedFrontSpeed)*alpha;
 
-    // Accordion effect: target gap breathes slightly and stretches when the front
-    // accelerates. Deterministic oscillation keeps all playback speeds reproducible.
     const t=engine?.elapsedTime??0;
     const breathing=0.55*Math.sin(t*2.0+mem.accordionPhase);
     const accelerationStretch=clamp((front.acceleration??0)*0.32,0,1.45);
@@ -76,26 +126,28 @@ export class TacticalAI {
     const gap=front.distance-rider.distance;
     const gapError=gap-liveIdealGap;
     const rel=mem.perceivedFrontSpeed-rider.speed;
-
-    // Softer PD than the previous 'perfect rope' controller. This intentionally lets
-    // a small gap open before the follower closes it again.
     let speed=mem.perceivedFrontSpeed + gapError*(attackIntent?0.40:0.22) + rel*(attackIntent?0.62:0.38);
 
     if(retreatIntent){
-      // Feed-forward deceleration: react to intent, not only to a shrinking gap.
-      speed=Math.min(speed, front.speed-0.35);
-      speed=clamp(speed,Math.max(0,front.speed-2.4),front.speed+0.4);
+      // Intent feed-forward: the follower rolls off immediately when the front rider
+      // declares fade/retreat; it does not wait for the wheel gap to disappear.
+      speed=Math.min(speed,front.speed-0.45);
+      speed=clamp(speed,Math.max(0,front.speed-2.0),front.speed+0.2);
     }else if(attackIntent){
-      // During a coordinated line launch the followers read the leader's intent
-      // quickly enough to prevent the leader from becoming a lone attacker.
       speed=clamp(speed,Math.max(0,front.speed-1.4),front.speed+5.8);
     }else{
       speed=clamp(speed,Math.max(0,front.speed-2.2),front.speed+3.6);
     }
 
-    const lane=front.laneOffset;
+    let lane=front.laneOffset;
+    // When a spent line deliberately drifts outside, keep the three riders slightly
+    // staggered outward instead of stacking them onto one radial coordinate.
+    if(retreatIntent && rider.plan?.collapseWithLeader){
+      lane=rider.plan.fadeLane??clamp(front.laneOffset+2,-18,46);
+    }
+
     let mode=TACTICAL_MODE.FOLLOW;
-    if(front.action.includes('MOVE_UP')||front.action.includes('ATTACK')) mode=TACTICAL_MODE.ATTACK;
+    if(front.action.includes('MOVE_UP')||front.action.includes('ATTACK')||front.action.includes('OVERTAKE')) mode=TACTICAL_MODE.ATTACK;
     else if(front.action.includes('CONTEST')) mode=TACTICAL_MODE.CONTEST;
     else if(retreatIntent) mode=TACTICAL_MODE.RETREAT;
     mem.lastFrontAction=front.action;
@@ -105,8 +157,6 @@ export class TacticalAI {
   finalSprintSpeed(rider){
     const p=rider.plan??{};
     const e=clamp(rider.energy??0,0,1);
-    // The normal tactical top-speed limiter is intentionally exceeded in the final
-    // straight. Riders with reserve can kick violently; empty riders gain little.
     const base=p.topSpeed??21;
     if(e<0.18)return base*(0.78+e*1.05);
     return base+1.8+(e*4.2);
@@ -123,30 +173,46 @@ export class TacticalAI {
         const leadSpeed=phase('FIRST_RETREAT')?21.4:phase('RESET_LINEUP')?15.8:phase('SECOND_MOVE')?12.6:phase('LINE7_FADE','LINE4_MAKURI','BANTE_BLOCK','FIVE_REACTION','FIVE_DIVE')?p.final:phase('FINAL')?this.finalSprintSpeed(rider):10.5+Math.min(.3,pressure*.01);
         return {mode:TACTICAL_MODE.FOLLOW,action:'LEAD',speed:leadSpeed,lane:-18,followTargetNumber:null};
       }
+
       if(rider.number===7){
         if(phase('FIRST_MOVE')) return {mode:TACTICAL_MODE.ATTACK,action:'MOVE_UP',speed:p.attack1,lane:36,followTargetNumber:null};
         if(phase('FIRST_CONTEST')) return {mode:TACTICAL_MODE.CONTEST,action:'CONTEST',speed:p.contest1,lane:36,followTargetNumber:null};
-        if(phase('FIRST_RETREAT','RESET_LINEUP')) return {mode:TACTICAL_MODE.RETREAT,action:'RETREAT',speed:p.retreat,lane:ph==='RESET_LINEUP'?-18:34,followTargetNumber:null};
+        if(phase('FIRST_RETREAT')) return {mode:TACTICAL_MODE.RETREAT,action:'RETREAT',speed:p.retreat,lane:34,followTargetNumber:null};
+        if(phase('RESET_LINEUP')) return {mode:TACTICAL_MODE.RECOVER,action:'RECOVER_LINE',speed:p.resetSpeed??15.0,lane:-18,followTargetNumber:null};
         if(phase('SECOND_MOVE')) return {mode:TACTICAL_MODE.ATTACK,action:'ATTACK',speed:p.attack2,lane:38,followTargetNumber:null};
-        if(phase('SECOND_CONTEST')) return {mode:TACTICAL_MODE.CONTEST,action:'CONTEST',speed:Math.max(p.contest2,24.4),lane:38,followTargetNumber:null};
-        if(phase('LINE7_FADE','LINE4_MAKURI','BANTE_BLOCK','FIVE_REACTION','FIVE_DIVE')) return {mode:TACTICAL_MODE.RECOVER,action:'FADE',speed:p.fade,lane:38,followTargetNumber:null};
-        if(phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:this.finalSprintSpeed(rider),lane:-8,followTargetNumber:null};
+        if(phase('SECOND_CONTEST')) return {mode:TACTICAL_MODE.CONTEST,action:'CONTEST',speed:Math.max(p.contest2,24.0),lane:38,followTargetNumber:null};
+        if(phase('LINE7_FADE','LINE4_MAKURI','BANTE_BLOCK','FIVE_REACTION','FIVE_DIVE')) return {mode:TACTICAL_MODE.RECOVER,action:'FADE',speed:p.fade,lane:p.fadeLane??42,followTargetNumber:null};
+        if(phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:this.finalSprintSpeed(rider),lane:p.fadeLane??42,followTargetNumber:null};
         return {mode:TACTICAL_MODE.FOLLOW,action:'FORMATION',speed:10.5,lane:30,followTargetNumber:null};
       }
+
       if(rider.number===4){
         if(phase('LINE4_MAKURI','BANTE_BLOCK','FIVE_REACTION','FIVE_DIVE','FINAL')){
           const blocker=engine.rider(2);
           const liveBlock=blocker && blocker.laneOffset>4 && Math.abs(blocker.distance-rider.distance)<14;
           const completedBlock=engine.scenario.flags.blockContactCompleted && phase('FIVE_REACTION','FIVE_DIVE','FINAL');
           const blockActive=liveBlock||completedBlock;
-          return {mode:blockActive?TACTICAL_MODE.RECOVER:phase('FINAL')?TACTICAL_MODE.FINAL_SPRINT:TACTICAL_MODE.ATTACK,action:blockActive?'BLOCKED':phase('FINAL')?'FINAL_SPRINT':'ATTACK',speed:blockActive?p.blocked:phase('FINAL')?this.finalSprintSpeed(rider):p.makuri,lane:blockActive?42:36,followTargetNumber:null};
+          if(blockActive){
+            return {mode:TACTICAL_MODE.RECOVER,action:'BLOCKED',speed:p.blocked,lane:rider.laneOffset,followTargetNumber:null};
+          }
+          if(phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:this.finalSprintSpeed(rider),lane:rider.laneOffset,followTargetNumber:null};
+
+          const threshold=p.overtakeSpeedDelta??2.2;
+          const slow=s.slowObstacle && (rider.speed-s.slowObstacle.speed)>=threshold;
+          const route=this.chooseOvertakeLane(rider,engine,{preferOutside:true});
+          return {
+            mode:slow?TACTICAL_MODE.OVERTAKE:TACTICAL_MODE.ATTACK,
+            action:slow?'OVERTAKE':'ATTACK',
+            speed:p.makuri,
+            lane:route.lane,
+            followTargetNumber:null,
+            avoidNumber:slow?s.slowObstacle.number:null,
+            laneDensity:route.density
+          };
         }
         const three=engine.rider(3);
         if(three&&!three.finished){
-          const idealGap=17;
-          const gap=three.distance-rider.distance;
-          const gapError=gap-idealGap;
-          const relative=three.speed-rider.speed;
+          const idealGap=17,gap=three.distance-rider.distance,gapError=gap-idealGap,relative=three.speed-rider.speed;
           const speed=clamp(three.speed+gapError*0.25+relative*0.38,Math.max(0,three.speed-2.0),three.speed+4.2);
           return {mode:TACTICAL_MODE.FOLLOW,action:'FOLLOW',speed,lane:three.laneOffset,followTargetNumber:3,idealGap};
         }
@@ -154,28 +220,36 @@ export class TacticalAI {
     }
 
     if(rider.number===2){
-      const four=engine.rider(4); const threat=four && four.distance>rider.distance-39 && four.distance<rider.distance+8 && four.laneOffset>8;
-      if(phase('BANTE_BLOCK')&&threat) return {mode:TACTICAL_MODE.BLOCK,action:'BLOCK',speed:Math.max(engine.rider(1)?.speed??0,19.4),lane:p.blockTargetLane??28,followTargetNumber:1};
+      const four=engine.rider(4);
+      // Entering BANTE_BLOCK already means 4 crossed the real proximity gate in the
+      // scenario controller. Once 2 commits to the block, he carries the move through
+      // instead of cancelling it every frame when 4 changes relative position.
+      if(phase('BANTE_BLOCK')&&four) return {mode:TACTICAL_MODE.BLOCK,action:'BLOCK',speed:Math.max(engine.rider(1)?.speed??0,19.4),lane:p.blockTargetLane??28,followTargetNumber:1};
       if(phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:this.finalSprintSpeed(rider),lane:rider.laneOffset,followTargetNumber:null};
     }
 
     if(rider.number===3&&phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:this.finalSprintSpeed(rider),lane:rider.laneOffset,followTargetNumber:null};
 
     if(rider.number===5){
-      if(phase('FIVE_REACTION')){
-        // The rider first reads the bante moving outward and makes a small outward
-        // preparation before committing inside. This removes the 'clairvoyant' cut-in.
-        return {mode:TACTICAL_MODE.FOLLOW,action:'DIVE_FEINT',speed:Math.min(p.dive,engine.rider(4)?.speed+0.8??p.dive),lane:p.diveFeintLane??18,followTargetNumber:4};
-      }
+      if(phase('FIVE_REACTION')) return {mode:TACTICAL_MODE.FOLLOW,action:'DIVE_FEINT',speed:Math.min(p.dive,(engine.rider(4)?.speed??p.dive)+0.8),lane:p.diveFeintLane??18,followTargetNumber:4};
       if(phase('FIVE_DIVE')) return {mode:TACTICAL_MODE.SELF_POWER,action:'DIVE',speed:p.dive,lane:-2,followTargetNumber:null};
       if(phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:this.finalSprintSpeed(rider),lane:-2,followTargetNumber:null};
     }
 
     if(rider.number===6&&phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:this.finalSprintSpeed(rider),lane:10,followTargetNumber:null};
-    if([8,9].includes(rider.number)&&phase('BANTE_BLOCK','FIVE_REACTION','FIVE_DIVE','FINAL')){
-      const leader=engine.rider(7); const leaderCollapsed=leader && (leader.action==='FADE'||leader.energy<0.22||leader.speed+2<rider.speed);
-      if(leaderCollapsed) return {mode:phase('FINAL')?TACTICAL_MODE.FINAL_SPRINT:TACTICAL_MODE.SWITCH,action:phase('FINAL')?'FINAL_SPRINT':'SWITCH_TO_SELF_POWER',speed:phase('FINAL')?this.finalSprintSpeed(rider):p.final,lane:rider.number===9?36:16,followTargetNumber:null};
+
+    // A line that has genuinely gone "ippai" does not magically re-form and attack
+    // again in the same corner. 8/9 read 7's collapse and fade with him to the outer
+    // side; only the final straight gives them a small independent kick if any energy remains.
+    if([8,9].includes(rider.number) && rider.plan?.collapseWithLeader && phase('LINE7_FADE','LINE4_MAKURI','BANTE_BLOCK','FIVE_REACTION','FIVE_DIVE')){
+      const front=s.lineFront;
+      if(front){
+        const cmd=this.followerCommand(rider,s,{mode:TACTICAL_MODE.RETREAT,action:'FADE_FOLLOW',speed:front.speed,lane:rider.plan.fadeLane,followTargetNumber:front.number},17,engine);
+        cmd.mode=TACTICAL_MODE.RETREAT; cmd.action='FADE_FOLLOW'; cmd.lane=rider.plan.fadeLane??cmd.lane;
+        return cmd;
+      }
     }
+    if([8,9].includes(rider.number)&&phase('FINAL')) return {mode:TACTICAL_MODE.FINAL_SPRINT,action:'FINAL_SPRINT',speed:this.finalSprintSpeed(rider),lane:rider.plan.fadeLane??rider.laneOffset,followTargetNumber:null};
 
     const front=s.lineFront;
     if(front){

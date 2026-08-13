@@ -1,13 +1,21 @@
-# KEIRIN FLOW — Base Scenario B v1
+# KEIRIN FLOW — CR-0005 Dynamic Overtake
 
-基準シナリオBの忠実再現ビルドです。
+GitHub Pages rootへ、このフォルダ内のファイルをすべて同一階層でアップロードしてください。
+サブフォルダはありません。
 
-GitHub PagesへはZIP内のファイルを同じ階層へまとめて上書きしてください。
+## 今回の主な修正
 
-ローカル確認:
+- 2回目の仕掛け失敗後、7-8-9が明確にFADEして大外側へ沈む
+- 4が前方の速度差とレーン密度を見て動的に追越コースを選ぶ
+- 衝突時の横方向「ビリヤード跳ね返り」を廃止
+- 4が実際に接近してから2がギリギリでブロック
+- 2のブロックは約1秒かけて外へ持ち出す
+- CR-0004で改善した誘導員退避、789後退、5の反応遅延、アコーディオンを維持
+
+## セルフチェック
 
 ```bash
-node scenario-b-check.mjs
+npm run check
 ```
 
-詳細は `BASE_SCENARIO_B.md` を参照してください。
+0.5x / 1x / 2x / 3x の全速度で `CR-0004 REALISM` と `CR-0005 FINAL CORNER / DYNAMIC OVERTAKE` を通過します。

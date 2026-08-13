@@ -1,0 +1,21 @@
+$ node --check engine.js
+
+
+$ node --check cr0002-timeline-check.mjs
+
+
+$ node cr0002-timeline-check.mjs
+PASS 0.5x events=PacerLeaveLine>Bell>PacerExit>FinalLap>FinalBack>Finish bell=1 owner=LEADER
+PASS 1x events=PacerLeaveLine>Bell>PacerExit>FinalLap>FinalBack>Finish bell=1 owner=LEADER
+PASS 2x events=PacerLeaveLine>Bell>PacerExit>FinalLap>FinalBack>Finish bell=1 owner=LEADER
+PASS 3x events=PacerLeaveLine>Bell>PacerExit>FinalLap>FinalBack>Finish bell=1 owner=LEADER
+PASS RESET restores RedBoard / pacer / bell timeline
+CR-0002: all timeline checks passed
+
+
+$ node scenario-b-check.mjs
+PASS 0.5x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.0 minSpatial=1.285
+PASS 1x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.2 minSpatial=1.289
+PASS 2x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.4 minSpatial=1.289
+PASS 3x finish=1-2-5-3-6-4-9-8-7 firstGap=102.0 secondGap=84.4 minSpatial=1.296
+SCENARIO B V2: all movement/contest/block checkpoints passed

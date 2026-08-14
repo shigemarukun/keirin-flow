@@ -662,7 +662,7 @@ export class UIRenderer {
 
 
         if (protocolStatus) {
-            protocolStatus.textContent = `Protocol: ${state.protocol?.state ?? 'FORMATION'}`;
+            protocolStatus.textContent = `Scenario: ${state.scenario?.currentPhase ?? 'PHASE_1_PACER_CUT'}`;
         }
 
         this.renderDecisionLog(state.decisionLogs ?? []);

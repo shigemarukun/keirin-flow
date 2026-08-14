@@ -1,8 +1,8 @@
 import { normalizeRaceSetup, DEFAULT_RACE_SETUP, ACTION, ROLE, PROTOCOL_STATE, LINE_FOLLOW_MODE, TRACK_LANE } from './race-plan.js';
 import { LineManager } from './line-manager.js';
-import { TacticalAI } from './tactical-ai.js';
 import { TenkaiPredictor } from './tenkai-predictor.js';
 import { KeirinProtocolController } from './keirin-protocol-controller.js';
+import { ScenarioPhaseManager } from './scenario-phase-manager.js';
 
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const PACER_STATE=Object.freeze({LEADING:'LEADING',EXITING:'EXITING',EXITED:'EXITED'});
@@ -35,9 +35,9 @@ class RaceClock{
 export class PhysicsEngine{
  constructor(setup=DEFAULT_RACE_SETUP){
   this.timeScale=1;this.onBellCallback=null;this.onFinishCallback=null;
-  this.tacticalAI=new TacticalAI();
   this.tenkaiPredictor=new TenkaiPredictor();
   this.keirinProtocol=new KeirinProtocolController();
+  this.scenarioPhaseManager=new ScenarioPhaseManager();
   this.applyRaceSetup(setup);
  }
 
@@ -69,10 +69,11 @@ export class PhysicsEngine{
 
  reset(setup=null){
   if(setup){this.applyRaceSetup(setup);return;}
-  this.isStarted=false;this.elapsedTime=0;this.ranking=[];this.raceEvents=[];this.decisionLogs=[];this.bellRung=false;this.establishedFrontLineId=null;this.settlingLineId=null;this.raceClock.reset();this.tacticalAI.reset();
+  this.isStarted=false;this.elapsedTime=0;this.ranking=[];this.raceEvents=[];this.decisionLogs=[];this.bellRung=false;this.establishedFrontLineId=null;this.settlingLineId=null;this.raceClock.reset();
   this.pacer={distance:0,speed:this.profile.FORMATION_SPEED,state:PACER_STATE.LEADING,laneOffset:-18,exitProgress:0};
   for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.history=[];r.raceIntent=null;r.lastDecisionAction=null;r.lastDecisionLogTime=null;}
   this.keirinProtocol.initialize(this,this.prediction);
+  this.scenarioPhaseManager.initialize(this);
  }
 
  start(){if(this.riders.every(r=>r.finished))this.reset();this.isStarted=true;}
@@ -223,17 +224,8 @@ export class PhysicsEngine{
  }
 
  _canPacerExit(){
-  const protocol=this.keirinProtocol;
-  if(!protocol||!protocol.initialized)return false;
-  const attacker=this.rider(protocol.pacerCutLeaderNumber);
-  const defender=this.rider(protocol.frontLeaderNumber);
-  if(!attacker||!defender)return false;
-  const active=attacker.raceIntent==='CUT_PACER'||protocol.state===PROTOCOL_STATE.FRONT_CONTEST||protocol.state===PROTOCOL_STATE.PACER_CUT_SUCCESS;
-  if(!active)return false;
-  const gap=defender.distance-attacker.distance;
-  return gap<=14;
+  return this.scenarioPhaseManager?.canPacerExit(this) ?? false;
  }
-
  _updatePacer(dt){
   if(this.pacer.state===PACER_STATE.EXITED)return;
   this.pacer.distance+=this.pacer.speed*dt;
@@ -268,29 +260,46 @@ export class PhysicsEngine{
  _move(rider,plan,dt){
   rider.action=plan.action;rider.followTargetNumber=plan.followTargetNumber??null;
   let desired=plan.targetSpeed;
-  if(rider.energy<.18)desired=Math.min(desired,rider.profile.topSpeed*(.72+1.2*rider.energy));
-  const prev=rider.speed,accelBase=(rider.profile.baseAcceleration??4)*(.65+.55*rider.profile.acceleration);
-  const braking=plan.action===ACTION.RETREAT?2.4:plan.action===ACTION.YIELD?2.0:3.7;
-  if(rider.speed<desired)rider.speed=Math.min(desired,rider.speed+accelBase*dt); else rider.speed=Math.max(desired,rider.speed-braking*dt);
+  // Scenario plans already encode the intended fatigue outcome. Do not let the
+  // legacy autonomous-energy limiter contradict the teacher scenario.
+  if(!plan.scenarioControlled && rider.energy<.18)
+    desired=Math.min(desired,rider.profile.topSpeed*(.72+1.2*rider.energy));
+  const prev=rider.speed;
+  const naturalAccel=(rider.profile.baseAcceleration??4)*(.65+.55*rider.profile.acceleration);
+  const accelBase=Math.min(plan.maxAccel??naturalAccel,naturalAccel*1.55);
+  const naturalBrake=plan.action===ACTION.RETREAT?2.4:plan.action===ACTION.YIELD?2.0:3.7;
+  const braking=Math.min(plan.maxBrake??naturalBrake,4.4);
+  // Inertial integration: targets may jump at a phase boundary, rider speed may not.
+  if(rider.speed<desired)rider.speed=Math.min(desired,rider.speed+accelBase*dt);
+  else rider.speed=Math.max(desired,rider.speed-braking*dt);
 
   const followMode=plan.followMode??this.getLineFollowMode(rider);
-  let laneRate=1.7;
-  if(followMode===LINE_FOLLOW_MODE.LOCKED_FOLLOW)laneRate=4.2;
-  else if(followMode===LINE_FOLLOW_MODE.SETTLING)laneRate=3.4;
-  else if(plan.action===ACTION.BLOCK)laneRate=.95;
-  else if([ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))laneRate=2.5;
+  let laneRate=plan.laneRate??1.7;
+  if(plan.laneRate==null){
+   if(followMode===LINE_FOLLOW_MODE.LOCKED_FOLLOW)laneRate=4.2;
+   else if(followMode===LINE_FOLLOW_MODE.SETTLING)laneRate=3.4;
+   else if(plan.action===ACTION.BLOCK)laneRate=.95;
+   else if([ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))laneRate=2.5;
+  }
   rider.laneOffset+=(plan.laneTarget-rider.laneOffset)*clamp(laneRate*dt,0,1);
 
   let next=rider.distance+rider.speed*dt;
   const target=rider.followTargetNumber?this.rider(rider.followTargetNumber):null;
   if(target&&!target.finished&&target.distance>rider.distance&&plan.action===ACTION.FOLLOW){
-   const minGap=5.5;if(next>target.distance-minGap){next=target.distance-minGap;rider.speed=Math.min(rider.speed,target.speed);}
+   // Line-follow safety envelope. The spring controller does the real work;
+   // this is only a sub-step guard and never changes speed instantaneously.
+   const minGap=10.0;
+   if(next>target.distance-minGap)next=target.distance-minGap;
   }
 
+  // Soft geometric guard: no billiard-style impulse and no instant speed rewrite.
+  // A sub-step may be shortened by at most the distance travelled in that sub-step.
   for(const other of this.riders){
    if(other.number===rider.number||other.finished)continue;
-   if(Math.abs(other.distance-next)<3.4&&Math.abs(other.laneOffset-rider.laneOffset)<7){
-    rider.speed=Math.min(rider.speed,Math.max(0,other.speed-.4));next=Math.min(next,other.distance-3.4);
+   const sameCorridor=Math.abs(other.laneOffset-rider.laneOffset)<7;
+   const otherAhead=other.distance>rider.distance;
+   if(sameCorridor&&otherAhead&&other.distance-next<7.0){
+    next=Math.min(next,other.distance-7.0);
    }
   }
 
@@ -305,20 +314,18 @@ export class PhysicsEngine{
   const frameDt=clamp(Number(dt)||0,0,.1)*this.timeScale,steps=Math.max(1,Math.ceil(frameDt/(1/120))),stepDt=frameDt/steps;
   for(let step=0;step<steps;step++){
    this.elapsedTime+=stepDt;
-   this.keirinProtocol.update(stepDt,this);
+   // CR-0010: scenario grammar owns tactical intent. Physics only interpolates it.
+   this.scenarioPhaseManager.update(this,stepDt);
    this._updatePacer(stepDt);
-   this.establishedFrontLineId=this.detectEstablishedFrontLine();
-   if(this.establishedFrontLineId===this.settlingLineId)this.settlingLineId=null;
    const plans=new Map();
-   for(const rider of this.riders)if(!rider.finished)plans.set(rider.number,this.tacticalAI.plan(rider,this,stepDt));
+   for(const rider of this.riders)if(!rider.finished)plans.set(rider.number,this.scenarioPhaseManager.plan(rider,this));
    for(const rider of this.riders){
     if(rider.finished)continue;
     const plan=plans.get(rider.number);this._applyEnergy(rider,plan,stepDt);const before=rider.distance;this._move(rider,plan,stepDt);
     if(before<this.totalDistance&&rider.distance>=this.totalDistance)this._recordFinish(rider);
    }
    const leaderDistance=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),triggered=this.raceClock.update(this.pacer.distance,leaderDistance,this);
-   if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:'打鐘。ここから通常の自律展開へ移行'});this.onBellCallback?.();}
-   this.keirinProtocol.update(0,this);
+   if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:'打鐘。フェーズ駆動シナリオを継続'});this.onBellCallback?.();}
   }
   if(this.riders.every(r=>r.finished)){this.isStarted=false;this._finalizeRanking();this.onFinishCallback?.(this.ranking.map(x=>({...x})));}
  }
@@ -335,5 +342,5 @@ export class PhysicsEngine{
   return {gaps,minGap:gaps.length?Math.min(...gaps.map(x=>x.gap)):null,maxGap:gaps.length?Math.max(...gaps.map(x=>x.gap)):null};
  }
 
- getState(){return{riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
+ getState(){return{riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,scenario:this.scenarioPhaseManager.state(),protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
 }

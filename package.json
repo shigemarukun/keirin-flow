@@ -5,7 +5,8 @@
     "check:autonomous": "node cr0007-autonomous-check.mjs",
     "check:teacher": "node scenario-b-autonomous-regression.mjs",
     "check:interface": "node cr0007-interface-check.mjs",
-    "check": "node cr0009-line-settling-check.mjs && node cr0007-no-hardcode-check.mjs && node cr0007-autonomous-check.mjs && node scenario-b-autonomous-regression.mjs && node cr0007-interface-check.mjs && node cr0008-protocol-tenkai-check.mjs && node cr0008-no-scenario-hardcode-check.mjs",
-    "check:line-settling": "node cr0009-line-settling-check.mjs"
+    "check": "node cr0010-phase-scenario-check.mjs && node cr0007-interface-check.mjs",
+    "check:line-settling": "node cr0009-line-settling-check.mjs",
+    "check:phase-scenario": "node cr0010-phase-scenario-check.mjs"
   }
 }

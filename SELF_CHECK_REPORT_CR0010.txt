@@ -1,0 +1,24 @@
+$ node --check engine.js
+
+
+$ node --check race-plan.js
+
+
+$ node --check scenario-phase-manager.js
+
+
+$ node --check main.js
+
+
+$ node --check ui.js
+
+
+$ node cr0010-phase-scenario-check.mjs
+PASS 0.5x ranking=4-5-2-6-1-3-7-8-9 minGap=13.63m maxAcc=6.50m/s2 sideBySide=0.70s flex=43.95>44.22>44.54 duel=0.108s
+PASS 1x ranking=4-5-2-6-1-3-7-8-9 minGap=13.63m maxAcc=6.50m/s2 sideBySide=0.70s flex=43.95>44.23>44.55 duel=0.108s
+PASS 2x ranking=4-5-2-6-1-3-7-8-9 minGap=13.63m maxAcc=6.50m/s2 sideBySide=0.70s flex=43.97>44.23>44.57 duel=0.108s
+PASS 3x ranking=4-5-2-6-1-3-7-8-9 minGap=13.63m maxAcc=6.50m/s2 sideBySide=0.70s flex=43.95>44.25>44.55 duel=0.108s
+CR-0010 TSUPPARI_MAKURI: ALL STRICT CHECKS PASSED
+
+
+PASS production invariants: deterministic / no autonomous tactical plan in runtime path

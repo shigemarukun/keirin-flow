@@ -8,8 +8,41 @@ export class TacticalAI {
   reset(){this.decisionEngine.reset();}
   plan(rider,engine,dt){
     const sensed=this.sensor.sense(rider,engine);
-    const decision=this.decisionEngine.decide(rider,sensed,engine,dt);
-    return this.translateDecision(rider,sensed,decision,engine);
+    const protocolDecision=engine.keirinProtocol?.getDirective(rider,engine)??null;
+    const decision=protocolDecision??this.decisionEngine.decide(rider,sensed,engine,dt);
+    const translated=this.translateDecision(rider,sensed,decision,engine);
+
+    // Decision Log: same action is not spammed every frame. Protocol transitions
+    // emit their detailed story separately; autonomous changes remain visible here.
+    const previous=rider.lastDecisionAction??null;
+    const storyActions=new Set(['ATTACK','DEFEND','CONTEST','FULL_CONTEST','RETREAT','BLOCK','SWITCH_TO_SELF_POWER','FINAL_SPRINT','YIELD']);
+    const shouldLog=protocolDecision ? previous!==translated.action : (previous!==translated.action && storyActions.has(translated.action));
+    if(shouldLog){
+      rider.lastDecisionAction=translated.action;
+      const now=engine.elapsedTime;
+      if(rider.lastDecisionLogTime==null||now-rider.lastDecisionLogTime>=.75||protocolDecision){
+        rider.lastDecisionLogTime=now;
+        engine.emitDecision({
+          riderNumber:rider.number,
+          category:protocolDecision?'PROTOCOL_ACTION':'AI_DECISION',
+          action:translated.action,
+          message:decision.reason??this.describeDecision(rider,translated,sensed)
+        });
+      }
+    }else if(previous!==translated.action){
+      rider.lastDecisionAction=translated.action;
+    }
+    return translated;
+  }
+
+  describeDecision(rider,decision,sensed){
+    const labels={
+      FOLLOW:'前走者との車間を見て追走',ATTACK:'前方の空きを見て仕掛け',DEFEND:'外圧を検知して主導権を防御',
+      CONTEST:'主導権争いを継続',FULL_CONTEST:'勝機ありと判断し全力で踏み合い',YIELD:'一旦出させて脚を温存',
+      RETREAT:'勝ち目と残脚を再評価して後退',BLOCK:'後方の強襲を検知して牽制',SWITCH_TO_SELF_POWER:'前走者の失速を察知して自力へ切替',
+      SAVE_ENERGY:'位置を保って脚を温存',FINAL_SPRINT:'残脚を使って最終スプリント',CONTROL_PACE:'前でペースを管理'
+    };
+    return labels[decision.action]??`${decision.action}を選択`;
   }
 
   translateDecision(rider,sensed,decision,engine){

@@ -1,0 +1,51 @@
+$ node cr0007-interface-check.mjs
+PASS browser/UI RaceSetup interface
+
+$ node cr0007-no-hardcode-check.mjs
+PASS no production scenario hardcode: engine.js
+PASS no production scenario hardcode: tactical-ai.js
+PASS no production scenario hardcode: tactical-sensor.js
+PASS no production scenario hardcode: autonomous-decision-engine.js
+PASS no production scenario hardcode: line-manager.js
+CR-0007 hardcode ban passed
+
+$ node cr0007-autonomous-check.mjs
+PASS default 0.5x finish=5-6-4-1-2-7-8-3-9
+PASS default 1x finish=5-6-4-1-2-7-8-3-9
+PASS default 2x finish=5-6-4-1-2-7-8-3-9
+PASS default 3x finish=5-6-4-1-2-7-8-3-9
+PASS dynamic+solo 0.5x finish=6-7-3-1-4-2-8-5-9
+PASS dynamic+solo 1x finish=6-7-3-1-4-2-8-5-9
+PASS dynamic+solo 2x finish=6-7-3-1-4-2-8-5-9
+PASS dynamic+solo 3x finish=6-7-3-1-4-2-8-5-9
+PASS 4split+solo 0.5x finish=1-6-2-3-7-4-8-5-9
+PASS 4split+solo 1x finish=1-6-2-3-7-4-8-5-9
+PASS 4split+solo 2x finish=1-6-2-3-7-4-8-5-9
+PASS 4split+solo 3x finish=1-6-2-3-7-4-8-5-9
+PASS solo abstraction + arbitrary line lengths
+PASS applyRaceSetup + reset interface
+PASS autonomous Scenario-B-like tactical branch coverage
+PASS one-rider line rejected; SOLO abstraction enforced
+CR-0007 AUTONOMOUS ENGINE: all checks passed
+
+$ node cr0008-no-scenario-hardcode-check.mjs
+PASS no scenario hardcode: engine.js
+PASS no scenario hardcode: tactical-ai.js
+PASS no scenario hardcode: tactical-sensor.js
+PASS no scenario hardcode: autonomous-decision-engine.js
+PASS no scenario hardcode: line-manager.js
+PASS no scenario hardcode: keirin-protocol-controller.js
+PASS no scenario hardcode: tenkai-predictor.js
+CR-0008 production hardcode ban passed
+
+$ node cr0008-protocol-tenkai-check.mjs
+PASS deterministic main prediction / newspaper summary
+PASS 0.5x protocol cut->response->pacer->result->bell finish=5-6-4-1-2-7-8-3-9
+PASS 1x protocol cut->response->pacer->result->bell finish=5-6-4-1-2-7-8-3-9
+PASS 2x protocol cut->response->pacer->result->bell finish=5-6-4-1-2-7-8-3-9
+PASS 3x protocol cut->response->pacer->result->bell finish=5-6-4-1-2-7-8-3-9
+PASS YIELD_AND_ROLL changes predicted and actual protocol causally
+PASS arbitrary lines + SOLO summary formatting
+PASS production prediction/protocol is random-free
+PASS summary + Decision Log UI wiring
+CR-0008 PROTOCOL / TENKAI PREDICTOR: all strict checks passed

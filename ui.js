@@ -563,6 +563,11 @@ export class UIRenderer {
                 'result-list'
             );
 
+        const protocolStatus =
+            document.getElementById(
+                'protocol-status'
+            );
+
 
         const remaining =
             Math.max(
@@ -656,6 +661,12 @@ export class UIRenderer {
         }
 
 
+        if (protocolStatus) {
+            protocolStatus.textContent = `Protocol: ${state.protocol?.state ?? 'FORMATION'}`;
+        }
+
+        this.renderDecisionLog(state.decisionLogs ?? []);
+
         if (resultList) {
 
             resultList.innerHTML =
@@ -670,6 +681,42 @@ export class UIRenderer {
         }
     }
 
+
+    renderTenkaiSummary(prediction) {
+        const container = document.getElementById('tenkai-summary-ui');
+        if (!container || !prediction) return;
+
+        const responseLabel = prediction.frontResponse === 'TSUPPARI'
+            ? '突っ張り想定'
+            : prediction.frontResponse === 'YIELD'
+                ? '出させて引く想定'
+                : '抑え・様子見想定';
+
+        container.innerHTML = `
+            <div class="tenkai-formation">${prediction.initialFormation}</div>
+            <div class="tenkai-grid">
+                <div class="tenkai-row"><span class="tenkai-key">誘導切り</span><span class="tenkai-value">${prediction.pacerCut.leaderNumber}番 / ${prediction.pacerCut.lineId}</span></div>
+                <div class="tenkai-row"><span class="tenkai-key">前受け対応</span><span class="tenkai-value">${prediction.initialFrontLeaderNumber}番：${responseLabel}</span></div>
+                <div class="tenkai-row"><span class="tenkai-key">主導権</span><span class="tenkai-value">${prediction.initiative.leaderNumber}番 / ${prediction.initiative.lineId}</span></div>
+                <div class="tenkai-row"><span class="tenkai-key">捲り候補</span><span class="tenkai-value">${prediction.makuriCandidate ? `${prediction.makuriCandidate.leaderNumber}番 / ${prediction.makuriCandidate.lineId}` : '--'}</span></div>
+            </div>
+            <ul class="tenkai-points">${prediction.points.map(point => `<li>${point}</li>`).join('')}</ul>
+        `;
+    }
+
+    renderDecisionLog(logs) {
+        const container = document.getElementById('decision-log-ui');
+        if (!container) return;
+        if (!logs.length) {
+            container.innerHTML = '<p class="empty-result">START後にAI判断を表示</p>';
+            return;
+        }
+        const latest = logs.slice(-18).reverse();
+        container.innerHTML = latest.map(item => {
+            const rider = item.riderNumber == null ? 'SYSTEM' : `${item.riderNumber}番`;
+            return `<div class="decision-entry"><span class="decision-meta">残${Math.max(0, Math.round(item.remaining))}m</span><strong>[${rider}]</strong> ${item.message}</div>`;
+        }).join('');
+    }
 
     renderLineList(
         lineGroups

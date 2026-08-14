@@ -3,8 +3,17 @@ import { PhysicsEngine } from './engine.js';
 import { UIRenderer } from './ui.js';
 
 window.addEventListener('DOMContentLoaded',()=>{
- const aiModel=new AIModel(),setup=aiModel.getInitialRaceSetup(),physics=new PhysicsEngine(setup),ui=new UIRenderer('bankCanvas');
- ui.renderRaceSetup?.(setup) ?? ui.renderLineList(setup.lines.map(line=>line.members));
+ const aiModel=new AIModel();
+ const setup=aiModel.getInitialRaceSetup();
+ const physics=new PhysicsEngine(setup);
+ const ui=new UIRenderer('bankCanvas');
+
+ const renderSetup=(applied)=>{
+  if(typeof ui.renderRaceSetup==='function')ui.renderRaceSetup(applied);
+  else ui.renderLineList(applied.lines.map(line=>line.members));
+  ui.renderTenkaiSummary?.(physics.getPrediction());
+ };
+ renderSetup(setup);
 
  let audioContext=null;
  const ensureAudioReady=async()=>{try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return false;audioContext??=new C();if(audioContext.state==='suspended')await audioContext.resume();return audioContext.state==='running';}catch{return false;}};
@@ -13,13 +22,24 @@ window.addEventListener('DOMContentLoaded',()=>{
 
  document.getElementById('btn-start')?.addEventListener('click',async()=>{await ensureAudioReady();physics.start();});
  document.getElementById('btn-pause')?.addEventListener('click',()=>physics.pause());
- document.getElementById('btn-reset')?.addEventListener('click',()=>physics.reset());
+ document.getElementById('btn-reset')?.addEventListener('click',()=>{physics.reset();renderSetup(physics.getState().setup);ui.renderDecisionLog?.([]);});
  const speed=document.getElementById('speedRange'),speedVal=document.getElementById('speedVal');
  speed?.addEventListener('input',event=>{const value=Number.parseFloat(event.target.value);physics.setSpeedScale(value);if(speedVal)speedVal.textContent=value.toFixed(1);});
 
- window.KEIRIN_FLOW_APPLY_SETUP=(newSetup)=>{physics.applyRaceSetup(newSetup);const applied=physics.getState().setup;ui.renderRaceSetup?.(applied) ?? ui.renderLineList(applied.lines.map(line=>line.members));};
+ // Future drag/drop or slider UI entry point.
+ window.KEIRIN_FLOW_APPLY_SETUP=(newSetup)=>{
+  physics.applyRaceSetup(newSetup);
+  renderSetup(physics.getState().setup);
+  ui.renderDecisionLog?.([]);
+ };
 
  let lastTime=performance.now();
- const frame=now=>{const dt=(now-lastTime)/1000;lastTime=now;physics.update(dt);const state=physics.getState();ui.drawBank();ui.drawRiders(state);ui.updateUI(state);requestAnimationFrame(frame);};
+ const frame=now=>{
+  const dt=(now-lastTime)/1000;lastTime=now;
+  physics.update(dt);
+  const state=physics.getState();
+  ui.drawBank();ui.drawRiders(state);ui.updateUI(state);
+  requestAnimationFrame(frame);
+ };
  requestAnimationFrame(frame);
 });

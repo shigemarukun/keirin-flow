@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#0f172a">
-    <title>KEIRIN FLOW - v2.3.0</title>
+    <title>KEIRIN FLOW - CR-0008</title>
     <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -22,13 +22,26 @@
                     <span id="lap-counter">残り2周 / 残り800m</span>
                     <span id="race-status">PRE-RACE</span>
                     <span id="gap-status">車間: --</span>
+                    <span id="protocol-status">Protocol: FORMATION</span>
                 </div>
             </section>
 
             <aside id="control-panel">
+                <section class="panel-section tenkai-panel">
+                    <h2>展開予想</h2>
+                    <div id="tenkai-summary-ui"></div>
+                </section>
+
                 <section class="panel-section">
                     <h2>ライン構成</h2>
                     <div id="line-list-ui"></div>
+                </section>
+
+                <section class="panel-section decision-panel">
+                    <h2>Decision Log</h2>
+                    <div id="decision-log-ui" class="decision-log">
+                        <p class="empty-result">START後にAI判断を表示</p>
+                    </div>
                 </section>
 
                 <section class="panel-section action-buttons">

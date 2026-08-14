@@ -19,6 +19,9 @@ export class ScenarioPhaseManager {
     this.phaseEnteredAt = 0;
     this.phaseHistory = [this.currentPhase];
     this.phase3SideBySideSeconds = 0;
+    this.phase4BlockActive = false;
+    this.phase4BlockStartedAt = null;
+    this.phase4BlockCompleted = false;
   }
 
   initialize(engine) {
@@ -75,7 +78,7 @@ export class ScenarioPhaseManager {
       const sideBySide =
         r1Now && r7Now &&
         Math.abs(r1Now.distance - r7Now.distance) <= 5 &&
-        Math.abs(r1Now.laneOffset - r7Now.laneOffset) >= 35;
+        Math.abs(r1Now.laneOffset - r7Now.laneOffset) >= d.phase3.contestLaneSeparation;
 
       if (sideBySide) this.phase3SideBySideSeconds += dt;
       else this.phase3SideBySideSeconds = Math.max(0, this.phase3SideBySideSeconds - dt * 0.5);
@@ -86,7 +89,7 @@ export class ScenarioPhaseManager {
 
       // Safety fallback is later than the final-back marker; normal operation
       // must prove a visible side-by-side contest before Phase 4.
-      const lateFallback = remaining <= 155;
+      const lateFallback = remaining <= 185;
 
       if (contestProven || lateFallback) {
         this._transition(
@@ -96,11 +99,51 @@ export class ScenarioPhaseManager {
         );
       }
     } else if (this.currentPhase === SCENARIO_PHASE.MAKURI) {
-      if (remaining <= d.phaseThresholds.phase4EndRemaining) {
+      const r2 = engine.rider(2);
+      const r4 = engine.rider(4);
+
+      if (!this.phase4BlockCompleted && r2 && r4) {
+        const blockGap = r2.distance - r4.distance;
+        const blockWindow = remaining <= d.phase4.blockStartRemaining;
+        const fourArrived = blockGap >= -2 && blockGap <= d.phase4.blockGap;
+
+        if (!this.phase4BlockActive && blockWindow && fourArrived) {
+          this.phase4BlockActive = true;
+          this.phase4BlockStartedAt = engine.elapsedTime;
+          engine.emitDecision({
+            riderNumber: 2,
+            category: 'BANTE_BLOCK',
+            action: ACTION.BLOCK,
+            message: '最終コーナー。2番が捲ってくる4番へ一瞬外に張って牽制'
+          });
+        }
+
+        if (
+          this.phase4BlockActive &&
+          engine.elapsedTime - this.phase4BlockStartedAt >= d.phase4.blockDuration
+        ) {
+          this.phase4BlockActive = false;
+          this.phase4BlockCompleted = true;
+          engine.emitDecision({
+            riderNumber: 4,
+            category: 'BLOCK_OVERCOME',
+            action: ACTION.ATTACK,
+            message: '4番が2番の牽制を勢いで乗り越え、直線へ向く'
+          });
+        }
+      }
+
+      // Never enter the finish phase before the intended final-corner block has
+      // either happened or the field has passed the final emergency point.
+      const finishReady =
+        remaining <= d.phaseThresholds.phase4EndRemaining &&
+        (this.phase4BlockCompleted || remaining <= 52);
+
+      if (finishReady) {
         this._transition(
           SCENARIO_PHASE.FINISH,
           engine,
-          '4-5が捲り切る最終直線。2番と6番が3着争い'
+          '4番が番手ブロックを乗り越えて直線へ。4-5ワンツー、2-6が3着争い'
         );
       }
     }
@@ -204,6 +247,19 @@ export class ScenarioPhaseManager {
       );
     }
 
+    // Phase 4 final-corner bante block: 2 temporarily releases from 1,
+    // drifts outward with inertia, then returns to the line after the check.
+    if (p === SCENARIO_PHASE.MAKURI && rider.number === 2 && this.phase4BlockActive) {
+      return this._leaderPlan(
+        rider,
+        Math.max(rider.speed, 22.6),
+        d.phase4.banteBlockLane,
+        ACTION.BLOCK,
+        '4番の捲りに対して一瞬外へ張る番手ブロック',
+        { maxAccel: 3.6, maxBrake: 2.4, laneRate: 2.0 }
+      );
+    }
+
     // Line followers never independently choose tactics in this teacher scenario.
     if (rider.frontLineMate) {
       let cap = null;
@@ -229,7 +285,7 @@ export class ScenarioPhaseManager {
         return this._leaderPlan(
           rider, speed, d.phase1.attackerLane, ACTION.ATTACK,
           clearOutside ? '誘導切りへ外上昇・前受けへ接近' : 'まず外へ持ち出して安全な上昇路を作る',
-          {maxAccel: clearOutside ? 4.4 : 2.4, laneRate: 3.0}
+          {maxAccel: clearOutside ? 5.4 : 2.4, laneRate: 3.0}
         );
       }
     }
@@ -246,19 +302,19 @@ export class ScenarioPhaseManager {
           return this._leaderPlan(
             rider, d.phase2.retreatSpeed, TRACK_LANE.OUTSIDE, ACTION.RETREAT,
             '突っ張られたため大外のまま速度を緩め、4-5-6の後方まで下がる',
-            {maxBrake: 3.8, laneRate: 1.6}
+            {maxBrake: 4.4, laneRate: 1.6}
           );
         }
         return this._dockLeaderPlan(
-          rider, engine, 6, d.phase2.retreatSpeed,
-          '4-5-6の最後尾まで下がったためインへ戻して三ライン再整列'
+          rider, engine, 6, d.phase2.middleSpeed,
+          '4-5-6の最後尾まで下がったため巡航速度へ戻し、インへ復帰して三ライン再整列'
         );
       }
     }
 
     if (p === SCENARIO_PHASE.SECOND_ATTACK) {
       if (rider.lineId === d.frontLineId)
-        return this._leaderPlan(rider, d.phase3.frontSpeed, TRACK_LANE.INNER, ACTION.FULL_CONTEST, '再仕掛けに対し突っ張り全開', {maxAccel: 3.8, laneRate: 3.2});
+        return this._leaderPlan(rider, d.phase3.frontSpeed, TRACK_LANE.INNER, ACTION.FULL_CONTEST, 'インを死守して7番のねじ込みを張り返す', {maxAccel: 4.0, maxBrake: 2.2, laneRate: 4.0});
       if (rider.lineId === d.middleLineId)
         return this._dockLeaderPlan(rider, engine, 3, d.phase3.middleSpeed, '4-5-6は最内中団で脚を温存');
       if (rider.lineId === d.rearLineId) {
@@ -281,17 +337,25 @@ export class ScenarioPhaseManager {
         const front = engine.rider(1);
         const clearOutside = rider.laneOffset >= -7;
         const gap = front ? front.distance - rider.distance : 999;
-        let speed = clearOutside ? d.phase3.attackerSpeed : d.phase3.frontSpeed;
-        let reason = clearOutside ? '大外から再仕掛け・前団へ強襲' : '再仕掛け前に外レーンへ持ち出す';
+        const reachedContest = clearOutside && front && gap <= d.phase3.squeezeGap;
 
-        if (clearOutside && front && gap <= 4.5) {
-          speed = Math.max(d.phase3.frontSpeed, front.speed + 0.10);
-          reason = '1-2-3と横並びで拮抗し脚を削り合う';
+        let speed = clearOutside ? d.phase3.attackerSpeed : d.phase3.frontSpeed;
+        let laneTarget = d.phase3.approachLane;
+        let reason = clearOutside ? '大外から再仕掛け・前団へ強襲' : '再仕掛け前に外レーンへ持ち出す';
+        let laneRate = 3.0;
+
+        if (reachedContest) {
+          // 7 wants the inner lane, but 1 remains fixed at -18. The 28px/m-ish
+          // lateral separation is retained; this is pressure, not collision.
+          speed = Math.max(d.phase3.frontSpeed, front.speed + 0.08);
+          laneTarget = d.phase3.squeezeLane;
+          laneRate = 1.65;
+          reason = '1番の横から内へねじ込むが、インを張られて入れず拮抗';
         }
 
         return this._leaderPlan(
-          rider, speed, d.phase3.attackerLane, ACTION.FULL_CONTEST, reason,
-          {maxAccel: clearOutside ? 6.5 : 3.0, maxBrake: 2.2, laneRate: 3.0}
+          rider, speed, laneTarget, ACTION.FULL_CONTEST, reason,
+          {maxAccel: clearOutside ? 6.5 : 3.0, maxBrake: reachedContest ? 4.4 : 2.2, laneRate}
         );
       }
     }
@@ -299,10 +363,20 @@ export class ScenarioPhaseManager {
     if (p === SCENARIO_PHASE.MAKURI) {
       if (rider.lineId === d.frontLineId)
         return this._leaderPlan(rider, d.phase4.frontFadeSpeed, TRACK_LANE.INNER, ACTION.FADE, '突っ張り消耗で失速', {maxBrake: 1.8, laneRate: 3.0});
-      if (rider.lineId === d.middleLineId)
-        return this._leaderPlan(rider, d.phase4.makuriSpeed, d.phase4.makuriLane, ACTION.ATTACK, '中団から大外捲り', {maxAccel: 5.2, laneRate: 2.5});
+      if (rider.lineId === d.middleLineId) {
+        const blockLane = this.phase4BlockActive ? d.phase4.makuriEvadeLane : d.phase4.makuriLane;
+        const blockBoost = this.phase4BlockActive ? 0.7 : 0;
+        return this._leaderPlan(
+          rider,
+          d.phase4.makuriSpeed + blockBoost,
+          blockLane,
+          ACTION.ATTACK,
+          this.phase4BlockActive ? '2番の外牽制をさらに外から勢いで乗り越える' : '中団から大外捲り',
+          {maxAccel: 5.4, maxBrake: 2.0, laneRate: this.phase4BlockActive ? 2.2 : 2.5}
+        );
+      }
       if (rider.lineId === d.rearLineId)
-        return this._leaderPlan(rider, d.phase4.attackerFadeSpeed, TRACK_LANE.OUTSIDE, ACTION.FADE, '二度の仕掛けで一杯', {maxBrake: 3.8, laneRate: 1.8});
+        return this._leaderPlan(rider, d.phase4.attackerFadeSpeed, d.phase4.failedAttackLane, ACTION.FADE, '二度の仕掛けで一杯', {maxBrake: 3.8, laneRate: 1.8});
     }
 
     const finishSpeed = d.phase5.speeds[rider.number] ?? 20;
@@ -311,7 +385,7 @@ export class ScenarioPhaseManager {
     let reason = '最終直線';
     if (rider.number === 4) { lane = 4; reason = '捲り切って1着へ'; }
     else if (rider.number === 1) { lane = TRACK_LANE.INNER; action = ACTION.FADE; reason = '突っ張り消耗で後退'; }
-    else if ([7,8,9].includes(rider.number)) { lane = TRACK_LANE.OUTSIDE; action = ACTION.FADE; reason = '仕掛け不発で後退'; }
+    else if ([7,8,9].includes(rider.number)) { lane = d.phase4.failedAttackLane; action = ACTION.FADE; reason = '仕掛け不発で大外へ退避しながら後退'; }
     return this._leaderPlan(rider, finishSpeed, lane, action, reason, {maxAccel: 5.8, maxBrake: 2.2, laneRate: 2.4});
   }
 
@@ -333,7 +407,10 @@ export class ScenarioPhaseManager {
       currentPhase: this.currentPhase,
       phaseHistory: [...this.phaseHistory],
       phaseEnteredAt: this.phaseEnteredAt,
-      phase3SideBySideSeconds: this.phase3SideBySideSeconds
+      phase3SideBySideSeconds: this.phase3SideBySideSeconds,
+      phase4BlockActive: this.phase4BlockActive,
+      phase4BlockCompleted: this.phase4BlockCompleted,
+      phase4BlockStartedAt: this.phase4BlockStartedAt
     };
   }
 }

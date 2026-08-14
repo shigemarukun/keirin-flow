@@ -288,7 +288,7 @@ export class PhysicsEngine{
   if(target&&!target.finished&&target.distance>rider.distance&&plan.action===ACTION.FOLLOW){
    // Line-follow safety envelope. The spring controller does the real work;
    // this is only a sub-step guard and never changes speed instantaneously.
-   const minGap=10.0;
+   const minGap=13.5;
    if(next>target.distance-minGap)next=target.distance-minGap;
   }
 

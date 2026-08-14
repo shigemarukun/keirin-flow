@@ -75,39 +75,48 @@ export const TSUPPARI_MAKURI_SCENARIO = Object.freeze({
   rearLineId: 'LINE_C',
   phaseThresholds: Object.freeze({
     phase1FallbackRemaining: 650,
-    phase2EndRemaining: 440,
-    phase3EndRemaining: 210,
-    phase4EndRemaining: 72
+    phase2EndRemaining: 410,
+    phase3EndRemaining: 200,
+    phase4EndRemaining: 68
   }),
   phase1: Object.freeze({
     frontSpeed: 11.4,
     middleSpeed: 11.0,
-    attackerSpeed: 19.0,
+    attackerSpeed: 24.5,
     attackerLane: TRACK_LANE.OUTSIDE,
     contestGap: 5
   }),
   phase2: Object.freeze({
     frontSpeed: 16.0,
     middleSpeed: 16.0,
-    retreatSpeed: 6.2,
+    retreatSpeed: 4.4,
     settleLane: TRACK_LANE.INNER
   }),
   phase3: Object.freeze({
-    frontSpeed: 16.8,
-    middleSpeed: 17.0,
-    attackerSpeed: 26.5,
-    attackerLane: TRACK_LANE.OUTSIDE
+    frontSpeed: 18.2,
+    middleSpeed: 16.7,
+    attackerSpeed: 31.0,
+    approachLane: TRACK_LANE.OUTSIDE,
+    squeezeLane: 10,
+    squeezeGap: 18.0,
+    contestLaneSeparation: 24
   }),
   phase4: Object.freeze({
-    frontFadeSpeed: 14.8,
-    makuriSpeed: 28.0,
-    attackerFadeSpeed: 10.8,
-    makuriLane: 24
+    frontFadeSpeed: 14.4,
+    makuriSpeed: 27.0,
+    attackerFadeSpeed: 10.4,
+    makuriLane: 28,
+    blockStartRemaining: 112,
+    blockGap: 28,
+    blockDuration: 0.62,
+    banteBlockLane: 12,
+    makuriEvadeLane: 32,
+    failedAttackLane: 46
   }),
   phase5: Object.freeze({
     speeds: Object.freeze({
       1: 17.0, 2: 27.2, 3: 20.0,
-      4: 29.2, 5: 28.7, 6: 25.5,
+      4: 29.2, 5: 28.7, 6: 25.6,
       7: 12.0, 8: 12.2, 9: 12.4
     })
   })

@@ -65,7 +65,19 @@ export const SCENARIO_PHASE = Object.freeze({
 });
 
 export const SCENARIO_TYPE = Object.freeze({
-  TSUPPARI_MAKURI: 'TSUPPARI_MAKURI'
+  TSUPPARI_MAKURI: 'TSUPPARI_MAKURI',
+  YIELD_KAMASI: 'YIELD_KAMASI'
+});
+
+export const START_BLOCK = Object.freeze({ TSUPPARI: 'TSUPPARI', YIELD: 'YIELD' });
+export const MIDDLE_BLOCK = Object.freeze({ SECOND_ATTACK: 'SECOND_ATTACK', KAMASI: 'KAMASI', PACE_HOLD: 'PACE_HOLD' });
+export const FINISH_BLOCK = Object.freeze({ MAKURI: 'MAKURI', NIGERIKIRI: 'NIGERIKIRI' });
+export const GENERIC_PHASE = Object.freeze({
+  PACER_CUT: 'PACER_CUT',
+  START_RESOLUTION: 'START_RESOLUTION',
+  MIDDLE_ACTION: 'MIDDLE_ACTION',
+  FRONT_ESTABLISHED: 'FRONT_ESTABLISHED',
+  FINISH_ACTION: 'FINISH_ACTION'
 });
 
 export const TSUPPARI_MAKURI_SCENARIO = Object.freeze({
@@ -122,6 +134,25 @@ export const TSUPPARI_MAKURI_SCENARIO = Object.freeze({
   })
 });
 
+
+export const YIELD_KAMASI_SCENARIO = Object.freeze({
+  id: SCENARIO_TYPE.YIELD_KAMASI,
+  blocks: Object.freeze({ start: START_BLOCK.YIELD, middle: MIDDLE_BLOCK.KAMASI, finish: FINISH_BLOCK.NIGERIKIRI }),
+  roles: Object.freeze({ receivingLineId: 'LINE_A', middleLineId: 'LINE_B', pacerCutLineId: 'LINE_C', kamasiLineId: 'LINE_A' }),
+  thresholds: Object.freeze({ pacerCutFallbackRemaining: 650, yieldSettleRemaining: 565, kamasiStartRemaining: 535, kamasiClearance: 7, finishStartRemaining: 125 }),
+  speeds: Object.freeze({ receive: 11.4, pacerCut: 23.5, controlFront: 13.2, yield: 8.2, middle: 13.0, kamasi: 28.4, chase: 20.0, finishLeader: 25.2, finishBante: 26.4, finishFollower: 23.2 }),
+  lanes: Object.freeze({ inner: TRACK_LANE.INNER, attack: TRACK_LANE.OUTSIDE, kamasi: 30 })
+});
+
+export const SCENARIO_LIBRARY = Object.freeze({
+  [SCENARIO_TYPE.TSUPPARI_MAKURI]: TSUPPARI_MAKURI_SCENARIO,
+  [SCENARIO_TYPE.YIELD_KAMASI]: YIELD_KAMASI_SCENARIO
+});
+
+export function getScenarioDefinition(id = SCENARIO_TYPE.TSUPPARI_MAKURI) {
+  return SCENARIO_LIBRARY[id] ?? SCENARIO_LIBRARY[SCENARIO_TYPE.TSUPPARI_MAKURI];
+}
+
 export const ACTION = Object.freeze({
   FORMATION: 'FORMATION',
   CONTROL_PACE: 'CONTROL_PACE',
@@ -137,7 +168,8 @@ export const ACTION = Object.freeze({
   SWITCH_TO_SELF_POWER: 'SWITCH_TO_SELF_POWER',
   SAVE_ENERGY: 'SAVE_ENERGY',
   FINAL_SPRINT: 'FINAL_SPRINT',
-  FADE: 'FADE'
+  FADE: 'FADE',
+  KIRIKAE: 'KIRIKAE'
 });
 
 export const DEFAULT_RIDER_PROFILE = Object.freeze({
@@ -158,6 +190,7 @@ export const DEFAULT_RIDER_PROFILE = Object.freeze({
 });
 
 export const DEFAULT_RACE_SETUP = Object.freeze({
+  scenarioId: SCENARIO_TYPE.TSUPPARI_MAKURI,
   trackProfile: 'PROFILE_400',
   lines: [
     { id: 'LINE_A', members: [1, 2, 3], leader: 1 },
@@ -190,9 +223,7 @@ export function normalizeRaceSetup(input = DEFAULT_RACE_SETUP) {
 
   const seen = new Set();
   for (const line of lines) {
-    if (line.members.length < 2) {
-      throw new Error(`Single-rider line ${line.id} is invalid. Register that rider as solo instead.`);
-    }
+    if (line.members.length < 1) throw new Error(`Line ${line.id} must contain at least one rider.`);
     if (!line.members.includes(line.leader)) {
       throw new Error(`Line leader ${line.leader} must be a member of ${line.id}.`);
     }
@@ -223,6 +254,8 @@ export function normalizeRaceSetup(input = DEFAULT_RACE_SETUP) {
   }
 
   return {
+    scenarioId: input.scenarioId ?? SCENARIO_TYPE.TSUPPARI_MAKURI,
+    scenarioConfig: input.scenarioConfig ?? null,
     trackProfile: input.trackProfile ?? 'PROFILE_400',
     lines,
     riders

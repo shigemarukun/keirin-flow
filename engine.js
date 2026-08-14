@@ -1,4 +1,4 @@
-import { normalizeRaceSetup, DEFAULT_RACE_SETUP, ACTION, ROLE, PROTOCOL_STATE, LINE_FOLLOW_MODE, TRACK_LANE } from './race-plan.js';
+import { normalizeRaceSetup, DEFAULT_RACE_SETUP, ACTION, ROLE, PROTOCOL_STATE, LINE_FOLLOW_MODE, TRACK_LANE, getScenarioDefinition } from './race-plan.js';
 import { LineManager } from './line-manager.js';
 import { TenkaiPredictor } from './tenkai-predictor.js';
 import { KeirinProtocolController } from './keirin-protocol-controller.js';
@@ -46,6 +46,9 @@ export class PhysicsEngine{
   this.profile=RACE_PROFILES[this.setup.trackProfile]??RACE_PROFILES.PROFILE_400;
   this.totalDistance=this.profile.RACE_DISTANCE;
   this.lineManager=new LineManager(this.setup);
+  this.scenarioPhaseManager.configure(
+    this.setup.scenarioConfig ?? getScenarioDefinition(this.setup.scenarioId)
+  );
   this.raceClock=new RaceClock(this.profile);
   this.prediction=this.tenkaiPredictor.predict(this.setup,this.lineManager);
   this._buildRiders();

@@ -43,6 +43,18 @@ export const SOLO_MINDSET = Object.freeze({
   FLOW_RIDE: 'FLOW_RIDE'
 });
 
+export const LINE_FOLLOW_MODE = Object.freeze({
+  LOCKED_FOLLOW: 'LOCKED_FOLLOW',
+  SETTLING: 'SETTLING',
+  FREE: 'FREE'
+});
+
+export const TRACK_LANE = Object.freeze({
+  INNER: -18,
+  ATTACK: 30,
+  OUTSIDE: 38
+});
+
 export const ACTION = Object.freeze({
   FORMATION: 'FORMATION',
   CONTROL_PACE: 'CONTROL_PACE',

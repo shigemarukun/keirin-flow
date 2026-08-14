@@ -62,7 +62,7 @@ export class TacticalAI {
     else if(decision.action===ACTION.BLOCK)targetSpeed=Math.max(rider.speed,sensed.lineLeader?.speed??rider.speed);
     else if(decision.action===ACTION.FOLLOW){
       const target=decision.followTargetNumber?engine.rider(decision.followTargetNumber):sensed.frontRider;
-      targetSpeed=target?engine.followDesiredSpeed(rider,target):engine.profile.FORMATION_SPEED;
+      targetSpeed=target?engine.followDesiredSpeed(rider,target,decision.followMode??null):engine.profile.FORMATION_SPEED;
     }
 
     return {...decision,targetSpeed,laneTarget:decision.laneTarget??rider.laneOffset,followTargetNumber:decision.followTargetNumber??null};

@@ -1,0 +1,19 @@
+KEIRIN FLOW CR-0009 SELF CHECK
+Date: 2026-08-14
+
+PASS JavaScript syntax checks
+PASS CR-0009 persistent ESTABLISH_FRONT state
+PASS inside-close continues after action changes to CONTROL_PACE
+PASS INNER arrival completes HOLD_FRONT transition
+PASS established-front requires inside + clearance + integrity
+PASS line-level docking selects nearest preceding line tail
+PASS LOCKED_FOLLOW / SETTLING / FREE state machine
+PASS CR-0007 hardcode ban
+PASS CR-0007 autonomous tests at 0.5x / 1x / 2x / 3x
+PASS arbitrary line + SOLO regression
+PASS Scenario-B teacher motif regression
+PASS CR-0008 protocol / predictor tests at 0.5x / 1x / 2x / 3x
+PASS CR-0008 production hardcode ban
+
+NOTE
+Automated tests verify state transitions, deterministic simulation, protocol compatibility, and regression safety. Browser visual motion should still be reviewed on GitHub Pages because visual realism is a practical acceptance criterion, not fully provable by headless logic tests.

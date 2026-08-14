@@ -1,4 +1,4 @@
-import { normalizeRaceSetup, DEFAULT_RACE_SETUP, ACTION, ROLE, PROTOCOL_STATE } from './race-plan.js';
+import { normalizeRaceSetup, DEFAULT_RACE_SETUP, ACTION, ROLE, PROTOCOL_STATE, LINE_FOLLOW_MODE, TRACK_LANE } from './race-plan.js';
 import { LineManager } from './line-manager.js';
 import { TacticalAI } from './tactical-ai.js';
 import { TenkaiPredictor } from './tenkai-predictor.js';
@@ -69,7 +69,7 @@ export class PhysicsEngine{
 
  reset(setup=null){
   if(setup){this.applyRaceSetup(setup);return;}
-  this.isStarted=false;this.elapsedTime=0;this.ranking=[];this.raceEvents=[];this.decisionLogs=[];this.bellRung=false;this.raceClock.reset();this.tacticalAI.reset();
+  this.isStarted=false;this.elapsedTime=0;this.ranking=[];this.raceEvents=[];this.decisionLogs=[];this.bellRung=false;this.establishedFrontLineId=null;this.settlingLineId=null;this.raceClock.reset();this.tacticalAI.reset();
   this.pacer={distance:0,speed:this.profile.FORMATION_SPEED,state:PACER_STATE.LEADING,laneOffset:-18,exitProgress:0};
   for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.history=[];r.raceIntent=null;r.lastDecisionAction=null;r.lastDecisionLogTime=null;}
   this.keirinProtocol.initialize(this,this.prediction);
@@ -109,6 +109,44 @@ export class PhysicsEngine{
    .sort((a,b)=>(rider.distance-a.distance)-(rider.distance-b.distance))[0]??null;
  }
  positionRank(rider){return [...this.riders].filter(r=>!r.finished).sort((a,b)=>b.distance-a.distance).findIndex(r=>r.number===rider.number)+1;}
+ getRaceLeader(){return [...this.riders].filter(r=>!r.finished).sort((a,b)=>b.distance-a.distance)[0]??null;}
+ hasClearedField(rider,clearance=6){
+  const active=[...this.riders].filter(r=>!r.finished).sort((a,b)=>b.distance-a.distance);
+  if(active[0]?.number!==rider.number)return false;
+  const nearestOpponent=active.find(other=>other.number!==rider.number&&other.lineId!==rider.lineId);
+  if(!nearestOpponent)return true;
+  return rider.distance-nearestOpponent.distance>=clearance;
+ }
+ detectEstablishedFrontLine(){
+  const leader=this.getRaceLeader();
+  if(!leader?.lineId)return null;
+  if(Math.abs(leader.laneOffset-TRACK_LANE.INNER)>3)return null;
+  if(!this.hasClearedField(leader,5))return null;
+  if(this.measureLineIntegrity(leader.lineId)<.55)return null;
+  return leader.lineId;
+ }
+ findSettleTargetForLine(lineId){
+  const myLeader=this.rider(this.lineManager.leaderNumber(lineId));
+  if(!myLeader||myLeader.finished)return null;
+  const candidates=this.lineManager.linesArray().filter(line=>line.id!==lineId).map(line=>{
+   const members=line.members.map(n=>this.rider(n)).filter(r=>r&&!r.finished);
+   if(!members.length)return null;
+   const tail=[...members].sort((a,b)=>a.distance-b.distance)[0];
+   return {tail,gap:tail.distance-myLeader.distance};
+  }).filter(item=>item&&item.gap>6).sort((a,b)=>a.gap-b.gap);
+  return candidates[0]?.tail??null;
+ }
+ getLineFollowMode(rider){
+  if([ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.BLOCK,ACTION.SWITCH_TO_SELF_POWER,ACTION.FINAL_SPRINT].includes(rider.action))return LINE_FOLLOW_MODE.FREE;
+  const frontNumber=rider.frontLineMate;
+  if(!frontNumber)return LINE_FOLLOW_MODE.FREE;
+  const front=this.rider(frontNumber);
+  if(!front||front.finished)return LINE_FOLLOW_MODE.FREE;
+  const gap=front.distance-rider.distance;
+  if(gap>28||gap<=0)return LINE_FOLLOW_MODE.FREE;
+  if(rider.lineId===this.settlingLineId||Math.abs(front.laneOffset-rider.laneOffset)>6)return LINE_FOLLOW_MODE.SETTLING;
+  return LINE_FOLLOW_MODE.LOCKED_FOLLOW;
+ }
  laneDensityAround(rider,lane){
   let score=0;
   for(const other of this.riders){if(other.number===rider.number||other.finished)continue;const longitudinal=Math.abs(other.distance-rider.distance),lateral=Math.abs(other.laneOffset-lane);if(longitudinal<28&&lateral<9)score+=1-(longitudinal/28)*.55;}
@@ -174,9 +212,13 @@ export class PhysicsEngine{
   return best;
  }
 
- followDesiredSpeed(rider,target){
+ followDesiredSpeed(rider,target,modeOverride=null){
   const gap=target.distance-rider.distance,desiredGap=rider.profile.idealGap??17,gapError=gap-desiredGap,relative=target.speed-rider.speed;
-  const acceleration=clamp(gapError*.23+relative*.75,-2.6,3);
+  const mode=modeOverride??this.getLineFollowMode(rider);
+  let kp=.23,kd=.75,minAccel=-2.6,maxAccel=3;
+  if(mode===LINE_FOLLOW_MODE.SETTLING){kp=.32;kd=.88;minAccel=-3;maxAccel=3.5;}
+  else if(mode===LINE_FOLLOW_MODE.LOCKED_FOLLOW){kp=.38;kd=.94;minAccel=-3.2;maxAccel=3.8;}
+  const acceleration=clamp(gapError*kp+relative*kd,minAccel,maxAccel);
   return clamp(rider.speed+acceleration,0,rider.profile.topSpeed+2.5);
  }
 
@@ -231,7 +273,12 @@ export class PhysicsEngine{
   const braking=plan.action===ACTION.RETREAT?2.4:plan.action===ACTION.YIELD?2.0:3.7;
   if(rider.speed<desired)rider.speed=Math.min(desired,rider.speed+accelBase*dt); else rider.speed=Math.max(desired,rider.speed-braking*dt);
 
-  const laneRate=plan.action===ACTION.BLOCK?.95:[ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action)?2.5:1.7;
+  const followMode=plan.followMode??this.getLineFollowMode(rider);
+  let laneRate=1.7;
+  if(followMode===LINE_FOLLOW_MODE.LOCKED_FOLLOW)laneRate=4.2;
+  else if(followMode===LINE_FOLLOW_MODE.SETTLING)laneRate=3.4;
+  else if(plan.action===ACTION.BLOCK)laneRate=.95;
+  else if([ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))laneRate=2.5;
   rider.laneOffset+=(plan.laneTarget-rider.laneOffset)*clamp(laneRate*dt,0,1);
 
   let next=rider.distance+rider.speed*dt;
@@ -260,6 +307,8 @@ export class PhysicsEngine{
    this.elapsedTime+=stepDt;
    this.keirinProtocol.update(stepDt,this);
    this._updatePacer(stepDt);
+   this.establishedFrontLineId=this.detectEstablishedFrontLine();
+   if(this.establishedFrontLineId===this.settlingLineId)this.settlingLineId=null;
    const plans=new Map();
    for(const rider of this.riders)if(!rider.finished)plans.set(rider.number,this.tacticalAI.plan(rider,this,stepDt));
    for(const rider of this.riders){

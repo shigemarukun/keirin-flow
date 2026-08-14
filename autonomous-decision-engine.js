@@ -1,4 +1,4 @@
-import { ACTION, ROLE, MINDSET, SOLO_MINDSET } from './race-plan.js';
+import { ACTION, ROLE, MINDSET, SOLO_MINDSET, LINE_FOLLOW_MODE, TRACK_LANE } from './race-plan.js';
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 
 export class AutonomousDecisionEngine {
@@ -23,6 +23,34 @@ export class AutonomousDecisionEngine {
 
   decideLeader(rider,s,engine,dt,memory){
     const p=rider.profile, attacker=s.nearestAttacker;
+
+    // CR-0009: once a successful attack has cleared the field, closing to the
+    // inside is a persistent state, not a one-frame action.
+    if(memory.intent==='ESTABLISH_FRONT'){
+      const reachedInside=Math.abs(rider.laneOffset-TRACK_LANE.INNER)<1.5;
+      if(!reachedInside){
+        engine.settlingLineId=rider.lineId;
+        return {action:ACTION.CONTROL_PACE,intensity:.72,laneTarget:TRACK_LANE.INNER,followMode:LINE_FOLLOW_MODE.SETTLING,reason:'主導権奪取後、最イン線への収束・イン締めを継続中'};
+      }
+      memory.intent='HOLD_FRONT';
+    }
+
+    const justAttacked=[ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.SWITCH_TO_SELF_POWER].includes(memory.lastAction);
+    if(justAttacked&&engine.hasClearedField(rider,6)){
+      memory.intent='ESTABLISH_FRONT';
+      engine.settlingLineId=rider.lineId;
+      return {action:ACTION.CONTROL_PACE,intensity:.72,laneTarget:TRACK_LANE.INNER,followMode:LINE_FOLLOW_MODE.SETTLING,reason:'他ラインを叩き切ってレース先頭へ躍り出たため、イン締めを開始'};
+    }
+
+    // Once another line has genuinely established the front, a non-attacking
+    // leader docks behind the nearest preceding line tail instead of targeting
+    // an arbitrary individual at the head of the race.
+    if(engine.establishedFrontLineId&&engine.establishedFrontLineId!==rider.lineId&&!justAttacked){
+      const target=engine.findSettleTargetForLine(rider.lineId);
+      if(target){
+        return {action:ACTION.FOLLOW,intensity:.48,followTargetNumber:target.number,laneTarget:target.laneOffset,followMode:LINE_FOLLOW_MODE.SETTLING,reason:'主導権ライン確立を確認し、直前ライン最後尾へライン単位で収束'};
+      }
+    }
 
     // If this rider initiated a move and has now reached a resisting opponent,
     // re-assess the contest instead of blindly holding ATTACK until a phase ends.

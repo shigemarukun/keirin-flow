@@ -25,28 +25,95 @@ window.addEventListener('DOMContentLoaded',()=>{
  const playBellSound=async()=>{if(!(await ensureAudioReady())||!audioContext)return;const now=audioContext.currentTime+.02;[880,1760,2640,3520].forEach((frequency,index)=>{const o=audioContext.createOscillator(),g=audioContext.createGain(),duration=2.6/(index+1);o.type=index===0?'sine':'triangle';o.frequency.setValueAtTime(frequency,now);g.gain.setValueAtTime(.22/(index+1),now);g.gain.exponentialRampToValueAtTime(.0001,now+duration);o.connect(g);g.connect(audioContext.destination);o.start(now);o.stop(now+duration+.05);});};
  physics.onBell(playBellSound);
 
- document.getElementById('btn-start')?.addEventListener('click',async()=>{await ensureAudioReady();physics.start();});
- document.getElementById('btn-pause')?.addEventListener('click',()=>physics.pause());
- document.getElementById('btn-reset')?.addEventListener('click',()=>{physics.reset();renderSetup(physics.getState().setup);ui.renderDecisionLog?.([]);});
- const speed=document.getElementById('speedRange'),speedVal=document.getElementById('speedVal');
- speed?.addEventListener('input',event=>{const value=Number.parseFloat(event.target.value);physics.setSpeedScale(value);if(speedVal)speedVal.textContent=value.toFixed(1);});
+ let rafId=null;
+ let lastTime=performance.now();
+
+ const renderFrame=()=>{
+  const state=physics.getState();
+  window.__KEIRIN_STATE__=state;
+  ui.drawBank();
+  ui.drawRiders(state);
+  ui.updateUI(state);
+ };
+
+ const stopAnimationLoop=()=>{
+  if(rafId!==null){
+   cancelAnimationFrame(rafId);
+   rafId=null;
+  }
+ };
+
+ const frame=now=>{
+  // A cancelled/paused/reset engine never continues mutating state.
+  if(!physics.isStarted){
+   rafId=null;
+   renderFrame();
+   return;
+  }
+
+  const dt=Math.max(0,(now-lastTime)/1000);
+  lastTime=now;
+  physics.update(dt);
+  renderFrame();
+
+  if(physics.isStarted)rafId=requestAnimationFrame(frame);
+  else rafId=null;
+ };
+
+ const startAnimationLoop=()=>{
+  if(rafId!==null)return;
+  lastTime=performance.now();
+  rafId=requestAnimationFrame(frame);
+ };
+
+ const fullReset=()=>{
+  stopAnimationLoop();
+  physics.reset();
+  lastTime=performance.now();
+  renderSetup(physics.getState().setup);
+  ui.renderDecisionLog?.([]);
+  renderFrame();
+ };
+
+ document.getElementById('btn-start')?.addEventListener('click',async()=>{
+  await ensureAudioReady();
+  physics.start();
+  startAnimationLoop();
+ });
+
+ document.getElementById('btn-pause')?.addEventListener('click',()=>{
+  physics.pause();
+  stopAnimationLoop();
+  renderFrame();
+ });
+
+ document.getElementById('btn-reset')?.addEventListener('click',fullReset);
+
+ const speed=document.getElementById('speedRange');
+ const speedVal=document.getElementById('speedVal');
+ speed?.addEventListener('input',event=>{
+  const value=Number.parseFloat(event.target.value);
+  physics.setSpeedScale(value);
+  if(speedVal)speedVal.textContent=value.toFixed(1);
+ });
 
  // Future drag/drop or slider UI entry point.
  window.KEIRIN_FLOW_APPLY_SETUP=(newSetup)=>{
+  stopAnimationLoop();
   physics.applyRaceSetup(newSetup);
+  lastTime=performance.now();
   renderSetup(physics.getState().setup);
   ui.renderDecisionLog?.([]);
+  renderFrame();
  };
 
- let lastTime=performance.now();
- if(new URLSearchParams(location.search).get('autostart')==='1')physics.start();
+ window.__KEIRIN_RESET__=fullReset;
+ window.__KEIRIN_STOP_LOOP__=stopAnimationLoop;
 
- const frame=now=>{
-  const dt=(now-lastTime)/1000;lastTime=now;
-  physics.update(dt);
-  const state=physics.getState();window.__KEIRIN_STATE__=state;
-  ui.drawBank();ui.drawRiders(state);ui.updateUI(state);
-  requestAnimationFrame(frame);
- };
- requestAnimationFrame(frame);
+ renderFrame();
+
+ if(new URLSearchParams(location.search).get('autostart')==='1'){
+  physics.start();
+  startAnimationLoop();
+ }
 });

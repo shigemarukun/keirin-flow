@@ -5,6 +5,7 @@ import { KeirinProtocolController } from './keirin-protocol-controller.js';
 import { ScenarioPhaseManager } from './scenario-phase-manager.js';
 import { LinePathHistory } from './line-path-history.js';
 import { LaneTransition } from './lane-transition.js';
+import { RenderSlotResolver } from './render-slot-resolver.js';
 
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const PACER_STATE=Object.freeze({LEADING:'LEADING',EXITING:'EXITING',EXITED:'EXITED'});
@@ -21,7 +22,7 @@ class RaceClock{
  constructor(config){this.config=config;this.reset();}
  reset(){this.owner='PACER';this.referenceDistance=0;this.remainingDistance=this.config.RACE_DISTANCE;this.currentLap=2;this.firedEventSequence=[];this.events={Bell:false,FinalLap:false,FinalBack:false,Finish:false};}
  update(pacerDistance,leaderDistance,engine){
-  if(engine.pacer.state===PACER_STATE.EXITED)this.owner='LEADER';
+  if(engine.pacer.state!==PACER_STATE.LEADING)this.owner='LEADER';
   const candidate=this.owner==='PACER'?pacerDistance:leaderDistance;
   this.referenceDistance=Math.max(this.referenceDistance,candidate);
   this.remainingDistance=Math.max(0,this.config.RACE_DISTANCE-this.referenceDistance);
@@ -41,6 +42,7 @@ export class PhysicsEngine{
   this.keirinProtocol=new KeirinProtocolController();
   this.scenarioPhaseManager=new ScenarioPhaseManager();
   this.pathHistory=new LinePathHistory();
+  this.renderSlots=new RenderSlotResolver();
   this.applyRaceSetup(setup);
  }
 
@@ -78,16 +80,25 @@ export class PhysicsEngine{
    const initialDistance=base-slot;
    return {number,globalIndex:index,style:CAR_STYLES[number],profile,mindset:profile.mindset,soloMindset:profile.soloMindset,
     lineId:ctx.lineId,role:ctx.role,linePosition:ctx.linePosition,leaderNumber:ctx.leaderNumber,frontLineMate:ctx.frontLineMate,rearLineMate:ctx.rearLineMate,
-    initialDistance,distance:initialDistance,speed:this.profile.FORMATION_SPEED,acceleration:0,laneOffset:-18,action:ACTION.FORMATION,
+    initialDistance,distance:initialDistance,speed:this.profile.FORMATION_SPEED,acceleration:0,laneOffset:-18,renderDistance:initialDistance,renderLaneOffset:-18,renderMode:'SNAKE_FOLLOW',action:ACTION.FORMATION,
     followTargetNumber:null,energy:1,finished:false,finishTime:null,finishSpeed:null,virtualDistance:initialDistance,history:[],laneTransition:new LaneTransition(-18),slotDistance:slot};
   });
  }
  reset(setup=null){
   if(setup){this.applyRaceSetup(setup);return;}
   this.isStarted=false;this.elapsedTime=0;this.ranking=[];this.raceEvents=[];this.decisionLogs=[];this.bellRung=false;this.establishedFrontLineId=null;this.settlingLineId=null;this.raceClock.reset();
-  this.pacer={distance:0,speed:this.profile.FORMATION_SPEED,state:PACER_STATE.LEADING,laneOffset:-18,exitProgress:0};
+  this.pacer={
+   distance:0,
+   speed:this.profile.FORMATION_SPEED,
+   state:PACER_STATE.LEADING,
+   laneOffset:-18,
+   exitProgress:0,
+   exitStartedAt:null,
+   laneTransition:new LaneTransition(-18)
+  };
   this.pathHistory.reset();
-  for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.finishSpeed=null;r.virtualDistance=r.initialDistance;r.history=[];r.raceIntent=null;r.lastDecisionAction=null;r.lastDecisionLogTime=null;r.laneTransition.reset(-18);}
+  this.renderSlots.reset();
+  for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.renderDistance=r.initialDistance;r.renderLaneOffset=-18;r.renderMode='SNAKE_FOLLOW';r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.finishSpeed=null;r.virtualDistance=r.initialDistance;r.history=[];r.raceIntent=null;r.lastDecisionAction=null;r.lastDecisionLogTime=null;r.laneTransition.reset(-18);}
   for(const line of this.lineManager.linesArray()){const leader=this.rider(line.leader);if(leader)this.pathHistory.seed(line.id,leader.distance,leader.laneOffset,leader.speed);}
   this.keirinProtocol.initialize(this,this.prediction);
   this.scenarioPhaseManager.initialize(this);
@@ -241,29 +252,63 @@ export class PhysicsEngine{
  }
 
  _canPacerExit(){
-  return this.scenarioPhaseManager?.canPacerExit(this) ?? false;
+  const remaining=this.raceClock.remainingDistance;
+  const inExitWindow=remaining<=760&&remaining>=560;
+  return inExitWindow&&(this.scenarioPhaseManager?.canPacerExit(this)??false);
  }
+
  _updatePacer(dt){
   if(this.pacer.state===PACER_STATE.EXITED)return;
-  this.pacer.distance+=this.pacer.speed*dt;
 
-  if(this.pacer.state===PACER_STATE.LEADING&&this._canPacerExit()){
-   this.pacer.state=PACER_STATE.EXITING;
-   this.emitRaceEvent('PACER_EXIT_START',{attacker:this.keirinProtocol.pacerCutLeaderNumber,defender:this.keirinProtocol.frontLeaderNumber});
-   this.emitDecision({category:'PACER',message:'誘導切り攻防が成立したため誘導員が退避開始'});
+  // LEADING is a stable pacing state. EXITING accelerates gently while
+  // moving to the outer retreat corridor with the same sine easing used by
+  // rider lane changes. No canvas-space teleport is involved.
+  if(this.pacer.state===PACER_STATE.LEADING){
+    const target=this.profile.FORMATION_SPEED;
+    const accel=1.4;
+    if(this.pacer.speed<target)this.pacer.speed=Math.min(target,this.pacer.speed+accel*dt);
+    else this.pacer.speed=Math.max(target,this.pacer.speed-accel*dt);
+
+    if(this._canPacerExit()){
+      this.pacer.state=PACER_STATE.EXITING;
+      this.pacer.exitStartedAt=this.elapsedTime;
+      this.pacer.exitProgress=0;
+      this.pacer.laneTransition.setTarget(82,{duration:1.75});
+      this.emitRaceEvent('PACER_EXIT_START',{
+        attacker:this.keirinProtocol.pacerCutLeaderNumber,
+        defender:this.keirinProtocol.frontLeaderNumber
+      });
+      this.emitDecision({
+        category:'PACER',
+        action:'EXITING',
+        message:'後方ラインの上昇を確認。誘導員が滑らかに加速し外側退避線へ移動開始'
+      });
+    }
   }
 
   if(this.pacer.state===PACER_STATE.EXITING){
-   this.pacer.exitProgress=Math.min(1,this.pacer.exitProgress+.85*dt);
-   const e=this.pacer.exitProgress*this.pacer.exitProgress*(3-2*this.pacer.exitProgress);
-   this.pacer.laneOffset=-18-72*e;
-   if(this.pacer.exitProgress>=1){
-    this.pacer.state=PACER_STATE.EXITED;
-    this.emitRaceEvent('PACER_EXIT_COMPLETE',{});
-    this.emitDecision({category:'PACER',message:'誘導員の退避完了。先頭選手基準へ移行'});
-   }
+    const exitTargetSpeed=this.profile.FORMATION_SPEED+3.0;
+    const accel=1.9;
+    this.pacer.speed=Math.min(exitTargetSpeed,this.pacer.speed+accel*dt);
+    this.pacer.laneOffset=this.pacer.laneTransition.update(dt);
+
+    const elapsed=Math.max(0,this.elapsedTime-(this.pacer.exitStartedAt??this.elapsedTime));
+    this.pacer.exitProgress=clamp(elapsed/1.75,0,1);
+
+    if(this.pacer.exitProgress>=1&&Math.abs(this.pacer.laneOffset-82)<1.0){
+      this.pacer.state=PACER_STATE.EXITED;
+      this.emitRaceEvent('PACER_EXIT_COMPLETE',{});
+      this.emitDecision({
+        category:'PACER',
+        action:'EXITED',
+        message:'誘導員が外側退避線へ退避完了。先頭選手基準へ移行'
+      });
+    }
   }
+
+  this.pacer.distance+=Math.max(0,this.pacer.speed)*dt;
  }
+
  _applyEnergy(rider,plan,dt){
   const demand=Math.max(0,plan.targetSpeed-this.profile.FORMATION_SPEED)/this.profile.FORMATION_SPEED;
   let factor=1;
@@ -272,6 +317,24 @@ export class PhysicsEngine{
   if([ACTION.SAVE_ENERGY,ACTION.YIELD,ACTION.RETREAT].includes(plan.action))factor=.55;
   const load=(.0022+.0105*demand*demand)*factor/Math.max(.55,rider.profile.endurance);
   rider.energy=clamp(rider.energy-load*dt,0,1);
+ }
+
+ _logActionTransition(rider,plan){
+  const shouldLog=
+    rider.role===ROLE.LEADER ||
+    rider.role===ROLE.SOLO ||
+    [ACTION.BLOCK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.KIRIKAE,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action);
+
+  if(!shouldLog)return;
+  if(rider.lastDecisionAction===plan.action)return;
+
+  rider.lastDecisionAction=plan.action;
+  this.emitDecision({
+    riderNumber:rider.number,
+    category:'ACTION',
+    action:plan.action,
+    message:plan.reason??`${plan.action}へ遷移`
+  });
  }
 
  _move(rider,plan,dt){
@@ -349,11 +412,15 @@ export class PhysicsEngine{
    ];
    for(const rider of movementOrder){
     if(rider.finished)continue;
-    const plan=plans.get(rider.number);this._applyEnergy(rider,plan,stepDt);const before=rider.distance;this._move(rider,plan,stepDt);
+    const plan=plans.get(rider.number);this._logActionTransition(rider,plan);this._applyEnergy(rider,plan,stepDt);const before=rider.distance;this._move(rider,plan,stepDt);
     if(before<this.totalDistance&&rider.distance>=this.totalDistance)this._recordFinish(rider);
    }
    const leaderDistance=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),triggered=this.raceClock.update(this.pacer.distance,leaderDistance,this);
    if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:'打鐘。フェーズ駆動シナリオを継続'});this.onBellCallback?.();}
+
+   // Rendering is a separate, post-physics stage. It may resolve display
+   // exclusivity but never feeds coordinates back into race logic.
+   this.renderSlots.update(this);
   }
   if(this.riders.every(r=>r.finished)){this.isStarted=false;this._finalizeRanking();this.onFinishCallback?.(this.ranking.map(x=>({...x})));}
  }
@@ -367,7 +434,7 @@ export class PhysicsEngine{
     gaps.push({number:rider.number,frontNumber:target.number,gap:target.distance-rider.distance});
    }
   }
-  return {gaps,minGap:gaps.length?Math.min(...gaps.map(x=>x.gap)):null,maxGap:gaps.length?Math.max(...gaps.map(x=>x.gap)):null};
+  return {gaps,minGap:gaps.length?Math.min(...gaps.map(x=>x.gap)):null,maxGap:gaps.length?Math.max(...gaps.map(x=>x.gap)):null,render:this.renderSlots.diagnostics(this)};
  }
 
  getState(){return{riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,scenario:this.scenarioPhaseManager.state(),protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray(),pathHistory:this.pathHistory.snapshot()};}

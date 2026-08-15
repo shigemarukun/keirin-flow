@@ -383,128 +383,67 @@ export class UIRenderer {
     }
 
 
+    drawLineLinks(state) {
+        const c = this.ctx;
+        const byNumber = new Map(state.riders.map(r => [r.number, r]));
+
+        for (const line of state.lines ?? []) {
+            const members = line.members
+                .map(number => byNumber.get(number))
+                .filter(rider => rider && !rider.finished);
+
+            if (members.length < 2) continue;
+
+            c.beginPath();
+
+            members.forEach((rider, index) => {
+                const point = this.getBankCoordinates(
+                    rider.renderDistance ?? rider.distance,
+                    rider.renderLaneOffset ?? rider.laneOffset
+                );
+
+                if (index === 0) c.moveTo(point.x, point.y);
+                else c.lineTo(point.x, point.y);
+            });
+
+            c.lineWidth = 1.2;
+            c.strokeStyle = 'rgba(226,232,240,0.24)';
+            c.lineJoin = 'round';
+            c.lineCap = 'round';
+            c.stroke();
+        }
+    }
+
+
     drawRiders(state) {
 
         // =====================================================
         // 誘導員
-        //
-        // LEADING:
-        //   従来どおりEngineのdistance / laneOffsetを使用。
-        //
-        // EXITING:
-        //   laneOffsetの符号には依存せず、
-        //   基準走行位置からCanvas中央方向へ直接退避。
-        //
-        // EXITED:
-        //   描画しない。
+        // CR-0016: pacer rendering uses the same 1D distance + laneOffset
+        // coordinate pipeline as riders. EXITING is therefore a real eased
+        // lane change to the outer retreat corridor, not a canvas teleport.
         // =====================================================
-
-        if (
-            state.pacer.state !== 'EXITED'
-        ) {
-
-            let point;
-
-
-            // -------------------------------------------------
-            // 退避中
-            // -------------------------------------------------
-            if (
-                state.pacer.state === 'EXITING'
-            ) {
-
-                // 誘導員の通常走行基準レーン
-                // Engine初期値と同じ -18 を基準にする
-                const basePoint =
-                    this.getBankCoordinates(
-                        state.pacer.distance,
-                        -18
-                    );
-
-
-                // 現在地点 → Canvas中央方向
-                const dx =
-                    this.cx - basePoint.x;
-
-                const dy =
-                    this.cy - basePoint.y;
-
-
-                const length =
-                    Math.sqrt(
-                        (dx * dx)
-                        + (dy * dy)
-                    ) || 1;
-
-
-                // 内側方向の単位ベクトル
-                const inwardX =
-                    dx / length;
-
-                const inwardY =
-                    dy / length;
-
-
-                // Engineに実在するexitProgress
-                // 0.0 → 1.0
-                const progress =
-                    Math.max(
-                        0,
-                        Math.min(
-                            1,
-                            state.pacer.exitProgress
-                        )
-                    );
-
-
-                // 最大120px、バンク中央方向へ退避
-                const exitAmount =
-                    progress * 120;
-
-
-                point = {
-                    x:
-                        basePoint.x
-                        + (inwardX * exitAmount),
-
-                    y:
-                        basePoint.y
-                        + (inwardY * exitAmount),
-
-                    angle:
-                        basePoint.angle
-                };
-
-
-            // -------------------------------------------------
-            // 通常先導中
-            // -------------------------------------------------
-            } else {
-
-                point =
-                    this.getBankCoordinates(
-                        state.pacer.distance,
-                        state.pacer.laneOffset
-                    );
-            }
-
+        if (state.pacer.state !== 'EXITED') {
+            const point =
+                this.getBankCoordinates(
+                    state.pacer.distance,
+                    state.pacer.laneOffset
+                );
 
             this.drawMarker(
                 point.x,
                 point.y,
-                10,
-                '#64748b',
-                '#f8fafc',
+                6.2,
+                '#e2e8f0',
+                '#0f172a',
                 '誘',
-                '#ffffff',
-                10
+                '#0f172a',
+                8
             );
         }
 
 
-        // =====================================================
-        // 選手
-        // =====================================================
+        this.drawLineLinks(state);
 
         const orderedRiders =
             [...state.riders]
@@ -526,8 +465,8 @@ export class UIRenderer {
 
             const point =
                 this.getBankCoordinates(
-                    rider.distance,
-                    rider.laneOffset
+                    rider.renderDistance ?? rider.distance,
+                    rider.renderLaneOffset ?? rider.laneOffset
                 );
 
 
@@ -539,7 +478,7 @@ export class UIRenderer {
                 '#ffffff',
                 String(rider.number),
                 rider.style.text,
-                7
+                7.2
             );
         }
     }

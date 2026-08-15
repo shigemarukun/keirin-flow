@@ -1,0 +1,42 @@
+$ node --check main.js
+
+
+$ node --check engine.js
+
+
+$ node --check ui.js
+
+
+$ node --check render-slot-resolver.js
+
+
+$ node cr0015-slot-path-check.mjs
+PASS 0.5x maxSlotErr=0.0000 snakeBend=16.445 minSeparationMetric=5.999 phases=PACER_CUT>START_RESOLUTION>MIDDLE_REACTION>MIDDLE_SETTLE>MIDDLE_ACTION>FRONT_ESTABLISHED>FINISH_ACTION
+PASS 1x maxSlotErr=0.0000 snakeBend=16.445 minSeparationMetric=5.999 phases=PACER_CUT>START_RESOLUTION>MIDDLE_REACTION>MIDDLE_SETTLE>MIDDLE_ACTION>FRONT_ESTABLISHED>FINISH_ACTION
+PASS 2x maxSlotErr=0.0000 snakeBend=16.400 minSeparationMetric=5.999 phases=PACER_CUT>START_RESOLUTION>MIDDLE_REACTION>MIDDLE_SETTLE>MIDDLE_ACTION>FRONT_ESTABLISHED>FINISH_ACTION
+PASS 3x maxSlotErr=0.0000 snakeBend=16.389 minSeparationMetric=6.000 phases=PACER_CUT>START_RESOLUTION>MIDDLE_REACTION>MIDDLE_SETTLE>MIDDLE_ACTION>FRONT_ESTABLISHED>FINISH_ACTION
+CR-0015 SLOT/PATH HISTORY: ALL CHECKS PASSED
+
+
+$ node cr0016-integration-check.mjs
+PASS TSUPPARI 0.5x minPx=12.71 lag=53.82
+PASS TSUPPARI 1x minPx=12.93 lag=53.82
+PASS TSUPPARI 2x minPx=13.38 lag=52.80
+PASS TSUPPARI 3x minPx=13.38 lag=53.82
+PASS YIELD_KAMASI 0.5x minPx=12.05 kirikae=true
+PASS YIELD_KAMASI 1x minPx=12.05 kirikae=true
+PASS YIELD_KAMASI 2x minPx=12.05 kirikae=true
+PASS YIELD_KAMASI 3x minPx=12.05 kirikae=true
+CR-0016 LOGIC/RENDER INTEGRATION: ALL CHECKS PASSED
+
+
+$ node cr0016-reset-pacer-check.mjs
+PASS 0.5x pacerExitRemaining=759.9 reset=clean
+PASS 1x pacerExitRemaining=759.9 reset=clean
+PASS 2x pacerExitRemaining=759.9 reset=clean
+PASS 3x pacerExitRemaining=759.9 reset=clean
+CR-0016 RESET / PACER: ALL CHECKS PASSED
+
+
+$ node cr0016-ui-control-check.mjs
+CR-0016 UI CONTROL / SCALE STATIC CHECK: PASS

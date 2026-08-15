@@ -75,6 +75,7 @@ export const FINISH_BLOCK = Object.freeze({ MAKURI: 'MAKURI', NIGERIKIRI: 'NIGER
 export const GENERIC_PHASE = Object.freeze({
   PACER_CUT: 'PACER_CUT',
   START_RESOLUTION: 'START_RESOLUTION',
+  MIDDLE_REACTION: 'MIDDLE_REACTION',
   MIDDLE_ACTION: 'MIDDLE_ACTION',
   FRONT_ESTABLISHED: 'FRONT_ESTABLISHED',
   FINISH_ACTION: 'FINISH_ACTION'
@@ -138,9 +139,9 @@ export const TSUPPARI_MAKURI_SCENARIO = Object.freeze({
 export const YIELD_KAMASI_SCENARIO = Object.freeze({
   id: SCENARIO_TYPE.YIELD_KAMASI,
   blocks: Object.freeze({ start: START_BLOCK.YIELD, middle: MIDDLE_BLOCK.KAMASI, finish: FINISH_BLOCK.NIGERIKIRI }),
-  roles: Object.freeze({ receivingLineId: 'LINE_A', middleLineId: 'LINE_B', pacerCutLineId: 'LINE_C', kamasiLineId: 'LINE_A' }),
-  thresholds: Object.freeze({ pacerCutFallbackRemaining: 650, yieldSettleRemaining: 565, kamasiStartRemaining: 535, kamasiClearance: 7, finishStartRemaining: 125 }),
-  speeds: Object.freeze({ receive: 11.4, pacerCut: 23.5, controlFront: 13.2, yield: 8.2, middle: 13.0, kamasi: 28.4, chase: 20.0, finishLeader: 25.2, finishBante: 26.4, finishFollower: 23.2 }),
+  roles: Object.freeze({ receivingLineId: 'LINE_A', middleLineId: 'LINE_B', pacerCutLineId: 'LINE_C', opportunistLineId: 'LINE_B', kamasiLineId: 'LINE_A' }),
+  thresholds: Object.freeze({ pacerCutFallbackRemaining: 650, yieldSettleRemaining: 585, middleClearance: 7, middleSettleRemaining: 545, kamasiStartRemaining: 505, kamasiClearance: 7, finishStartRemaining: 125 }),
+  speeds: Object.freeze({ receive: 11.4, pacerCut: 23.5, controlFront: 13.2, yield: 8.2, middle: 13.0, opportunistAttack: 25.0, opportunistControl: 15.0, kamasi: 28.4, chase: 20.0, finishLeader: 25.2, finishBante: 26.4, finishFollower: 23.2 }),
   lanes: Object.freeze({ inner: TRACK_LANE.INNER, attack: TRACK_LANE.OUTSIDE, kamasi: 30 })
 });
 
@@ -152,6 +153,13 @@ export const SCENARIO_LIBRARY = Object.freeze({
 export function getScenarioDefinition(id = SCENARIO_TYPE.TSUPPARI_MAKURI) {
   return SCENARIO_LIBRARY[id] ?? SCENARIO_LIBRARY[SCENARIO_TYPE.TSUPPARI_MAKURI];
 }
+
+export const RUN_STYLE = Object.freeze({
+  NIGE: 'NIGE',
+  SENKO: 'SENKO',
+  MAKURI: 'MAKURI',
+  JIZAI: 'JIZAI'
+});
 
 export const ACTION = Object.freeze({
   FORMATION: 'FORMATION',
@@ -186,7 +194,8 @@ export const DEFAULT_RIDER_PROFILE = Object.freeze({
   baseAcceleration: 4.0,
   sprintBonus: 3.0,
   blockSkill: 0.75,
-  draftSkill: 0.75
+  draftSkill: 0.75,
+  runStyle: RUN_STYLE.JIZAI
 });
 
 export const DEFAULT_RACE_SETUP = Object.freeze({
@@ -201,7 +210,7 @@ export const DEFAULT_RACE_SETUP = Object.freeze({
     1: { mindset: MINDSET.TSUPPARI, power: 0.88, acceleration: 0.90, endurance: 0.82, tacticalIQ: 0.80, aggression: 0.78, riskTolerance: 0.62 },
     2: { power: 0.82, acceleration: 0.82, endurance: 0.88, tacticalIQ: 0.88, blockSkill: 0.90 },
     3: { power: 0.78, acceleration: 0.78, endurance: 0.86, tacticalIQ: 0.80 },
-    4: { mindset: MINDSET.YIELD_AND_ROLL, power: 0.92, acceleration: 0.95, endurance: 0.90, tacticalIQ: 0.88, aggression: 0.72, riskTolerance: 0.58 },
+    4: { runStyle: RUN_STYLE.NIGE, mindset: MINDSET.YIELD_AND_ROLL, power: 0.92, acceleration: 0.95, endurance: 0.90, tacticalIQ: 0.88, aggression: 0.72, riskTolerance: 0.58 },
     5: { power: 0.85, acceleration: 0.88, endurance: 0.90, tacticalIQ: 0.84, blockSkill: 0.80 },
     6: { power: 0.80, acceleration: 0.82, endurance: 0.88, tacticalIQ: 0.78 },
     7: { mindset: MINDSET.CONTAIN, power: 0.86, acceleration: 0.86, endurance: 0.84, tacticalIQ: 0.84, aggression: 0.75, riskTolerance: 0.64 },

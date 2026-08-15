@@ -1,10 +1,14 @@
 import { AIModel } from './ai.js';
 import { PhysicsEngine } from './engine.js';
 import { UIRenderer } from './ui.js';
+import { SCENARIO_TYPE } from './race-plan.js';
 
 window.addEventListener('DOMContentLoaded',()=>{
  const aiModel=new AIModel();
  const setup=aiModel.getInitialRaceSetup();
+ // CR-0013 browser demo intentionally launches the new visible teacher case.
+ // The engine itself still supports TSUPPARI_MAKURI by scenarioId.
+ setup.scenarioId=SCENARIO_TYPE.YIELD_KAMASI;
  const physics=new PhysicsEngine(setup);
  const ui=new UIRenderer('bankCanvas');
 

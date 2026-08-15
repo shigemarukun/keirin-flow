@@ -7,7 +7,8 @@ import {
   YIELD_KAMASI_SCENARIO,
   SCENARIO_TYPE,
   GENERIC_PHASE,
-  ROLE
+  ROLE,
+  RUN_STYLE
 } from './race-plan.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -193,12 +194,38 @@ export class ScenarioPhaseManager {
     }
 
     if (this.currentPhase === GENERIC_PHASE.START_RESOLUTION) {
-      const receiveTail = this._tail(engine, d.roles.receivingLineId);
-      const field = engine.riders.filter(r => !r.finished && r.lineId !== d.roles.receivingLineId);
+      const field = engine.riders.filter(r => !r.finished && r.lineId !== d.roles.receivingLineId && r.role !== ROLE.SOLO);
       const lastOther = [...field].sort((a,b)=>a.distance-b.distance)[0];
-      const fullyYielded = receiveLeader && receiveTail && lastOther && receiveLeader.distance < lastOther.distance - 8;
-      if ((fullyYielded && remaining <= d.thresholds.yieldSettleRemaining) || remaining <= d.thresholds.kamasiStartRemaining) {
-        this._transition(GENERIC_PHASE.MIDDLE_ACTION, engine, '前が流した瞬間、後方へ引いたラインが打鐘手前からKAMASIを発動');
+      const fullyYielded = receiveLeader && lastOther && receiveLeader.distance < lastOther.distance - 8;
+      const opportunist = this._leader(engine, d.roles.opportunistLineId);
+      const shouldMiddleAttack = opportunist && [RUN_STYLE.NIGE, RUN_STYLE.SENKO].includes(opportunist.profile?.runStyle);
+
+      if (fullyYielded && remaining <= d.thresholds.yieldSettleRemaining) {
+        if (shouldMiddleAttack) {
+          this._transition(
+            GENERIC_PHASE.MIDDLE_REACTION,
+            engine,
+            `${opportunist.number}番は逃げ・先行型。前を取ったラインが流した隙を叩き、ライン単位で主導権を取りに行く`
+          );
+        } else {
+          this._transition(GENERIC_PHASE.MIDDLE_ACTION, engine, '中団は動かず、後方へ引いたラインが打鐘手前からKAMASIを発動');
+        }
+      }
+      return;
+    }
+
+    if (this.currentPhase === GENERIC_PHASE.MIDDLE_REACTION) {
+      const opportunist = this._leader(engine, d.roles.opportunistLineId);
+      const cut = this._leader(engine, d.roles.pacerCutLineId);
+      const clearedCut = opportunist && cut && opportunist.distance >= cut.distance + d.thresholds.middleClearance;
+      const receiveBehindCut = receiveLeader && cut && receiveLeader.distance <= cut.distance - 18;
+
+      if (clearedCut && receiveBehindCut) {
+        this._transition(
+          GENERIC_PHASE.MIDDLE_ACTION,
+          engine,
+          '中団先行ラインが誘導切りラインを叩き切り、456 / 789 / 123の隊列を作成。後方123がカマシ機会をうかがう'
+        );
       }
       return;
     }
@@ -262,7 +289,7 @@ export class ScenarioPhaseManager {
     const middleId = d.roles.middleLineId;
     const kamasiId = d.roles.kamasiLineId;
 
-    if (rider.role === ROLE.SOLO && [GENERIC_PHASE.MIDDLE_ACTION, GENERIC_PHASE.FRONT_ESTABLISHED, GENERIC_PHASE.FINISH_ACTION].includes(p)) {
+    if (rider.role === ROLE.SOLO && [GENERIC_PHASE.MIDDLE_REACTION, GENERIC_PHASE.MIDDLE_ACTION, GENERIC_PHASE.FRONT_ESTABLISHED, GENERIC_PHASE.FINISH_ACTION].includes(p)) {
       return this._kirikaePlan(rider, engine);
     }
 
@@ -301,6 +328,27 @@ export class ScenarioPhaseManager {
         return this._dockLeaderPlan(rider, engine, fieldTail?.number, d.speeds.controlFront, '最後尾まで引いたためインへ戻してカマシ準備');
       }
       return this._leaderPlan(rider, d.speeds.middle, d.lanes.inner, ACTION.SAVE_ENERGY, '前受けラインをやり過ごして中団維持', {maxAccel:2.4,laneRate:2.6});
+    }
+
+    if (p === GENERIC_PHASE.MIDDLE_REACTION) {
+      const opportunistId = d.roles.opportunistLineId;
+      if (rider.lineId === opportunistId) {
+        const outsideReady = rider.laneOffset >= -5;
+        return this._leaderPlan(
+          rider,
+          outsideReady ? d.speeds.opportunistAttack : 18.0,
+          26,
+          ACTION.ATTACK,
+          '前を取ったラインの緩みを逃げ・先行型が即座に叩く',
+          {maxAccel: outsideReady ? 5.8 : 3.8, laneRate: 3.2}
+        );
+      }
+      if (rider.lineId === cutId) {
+        return this._leaderPlan(rider, d.speeds.controlFront, TRACK_LANE.INNER, ACTION.YIELD, '中団先行ラインに叩かれ、無理せず番手側へ収まる', {maxBrake:2.8,laneRate:3.2});
+      }
+      if (rider.lineId === receiveId) {
+        return this._leaderPlan(rider, 12.5, TRACK_LANE.INNER, ACTION.SAVE_ENERGY, '後方で隊列変化を見ながらカマシの脚を溜める', {maxAccel:2.6,laneRate:3.2});
+      }
     }
 
     if (p === GENERIC_PHASE.MIDDLE_ACTION) {

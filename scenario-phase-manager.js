@@ -85,11 +85,11 @@ export class ScenarioPhaseManager {
   update(engine, dt = 1 / 120) {
     const d = this.definition;
     const remaining = engine.raceClock.remainingDistance;
-    const r1 = engine.rider(1);
-    const r7 = engine.rider(7);
+    const frontLeader = engine.rider(engine.lineManager.leaderNumber(d.frontLineId));
+    const rearLeader = engine.rider(engine.lineManager.leaderNumber(d.rearLineId));
 
     if (this.currentPhase === SCENARIO_PHASE.PACER_CUT) {
-      const attackReachedFront = r1 && r7 && (r1.distance - r7.distance) <= d.phase1.contestGap;
+      const attackReachedFront = frontLeader && rearLeader && (frontLeader.distance - rearLeader.distance) <= d.phase1.contestGap;
       if (attackReachedFront || remaining <= d.phaseThresholds.phase1FallbackRemaining) {
         this._transition(
           SCENARIO_PHASE.TSUPPARI_RESET,
@@ -111,8 +111,8 @@ export class ScenarioPhaseManager {
         );
       }
     } else if (this.currentPhase === SCENARIO_PHASE.SECOND_ATTACK) {
-      const r1Now = engine.rider(1);
-      const r7Now = engine.rider(7);
+      const r1Now = engine.rider(engine.lineManager.leaderNumber(d.frontLineId));
+      const r7Now = engine.rider(engine.lineManager.leaderNumber(d.rearLineId));
       const sideBySide =
         r1Now && r7Now &&
         Math.abs(r1Now.distance - r7Now.distance) <= 5 &&
@@ -137,8 +137,9 @@ export class ScenarioPhaseManager {
         );
       }
     } else if (this.currentPhase === SCENARIO_PHASE.MAKURI) {
-      const r2 = engine.rider(2);
-      const r4 = engine.rider(4);
+      const frontMembers = engine.lineManager.members(d.frontLineId);
+      const r2 = engine.rider(frontMembers[1]);
+      const r4 = engine.rider(engine.lineManager.leaderNumber(d.middleLineId));
 
       if (!this.phase4BlockCompleted && r2 && r4) {
         const blockGap = r2.distance - r4.distance;
@@ -274,20 +275,25 @@ export class ScenarioPhaseManager {
 
     // Final straight exceptions: 2 and 6 are released from line-following
     // so they can pass the fading 1 and contest third place side-by-side.
-    if (p === SCENARIO_PHASE.FINISH && (rider.number === 2 || rider.number === 6)) {
+    const frontMembers = engine.lineManager.members(d.frontLineId);
+    const middleMembers = engine.lineManager.members(d.middleLineId);
+    const frontBanteNumber = frontMembers[1] ?? null;
+    const middleThirdNumber = middleMembers[2] ?? middleMembers[middleMembers.length - 1] ?? null;
+
+    if (p === SCENARIO_PHASE.FINISH && (rider.number === frontBanteNumber || rider.number === middleThirdNumber)) {
       return this._leaderPlan(
         rider,
         d.phase5.speeds[rider.number],
-        rider.number === 2 ? -6 : 18,
+        rider.number === frontBanteNumber ? -6 : 18,
         ACTION.FINAL_SPRINT,
-        rider.number === 2 ? '1番をかわして3着争いへ' : '4-5追走から3着争いへ',
+        rider.number === frontBanteNumber ? '先行車をかわして3着争いへ' : '捲りライン追走から3着争いへ',
         { maxAccel: 5.8, maxBrake: 2.4, laneRate: 2.6 }
       );
     }
 
     // Phase 4 final-corner bante block: 2 temporarily releases from 1,
     // drifts outward with inertia, then returns to the line after the check.
-    if (p === SCENARIO_PHASE.MAKURI && rider.number === 2 && this.phase4BlockActive) {
+    if (p === SCENARIO_PHASE.MAKURI && rider.number === frontBanteNumber && this.phase4BlockActive) {
       return this._leaderPlan(
         rider,
         Math.max(rider.speed, 22.6),
@@ -372,7 +378,7 @@ export class ScenarioPhaseManager {
           );
         }
 
-        const front = engine.rider(1);
+        const front = engine.rider(engine.lineManager.leaderNumber(d.frontLineId));
         const clearOutside = rider.laneOffset >= -7;
         const gap = front ? front.distance - rider.distance : 999;
         const reachedContest = clearOutside && front && gap <= d.phase3.squeezeGap;

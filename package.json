@@ -1,12 +1,10 @@
 {
+  "name": "keirin-flow-cr0014-real-physics",
+  "version": "0.14.0",
+  "private": true,
   "type": "module",
   "scripts": {
-    "check:hardcode": "node cr0007-no-hardcode-check.mjs",
-    "check:autonomous": "node cr0007-autonomous-check.mjs",
-    "check:teacher": "node scenario-b-autonomous-regression.mjs",
-    "check:interface": "node cr0007-interface-check.mjs",
-    "check": "node cr0010-phase-scenario-check.mjs && node cr0007-interface-check.mjs",
-    "check:line-settling": "node cr0009-line-settling-check.mjs",
-    "check:phase-scenario": "node cr0010-phase-scenario-check.mjs"
+    "test": "node cr0014-real-physics-check.mjs",
+    "test:legacy": "node cr0013-fusion-check.mjs"
   }
 }

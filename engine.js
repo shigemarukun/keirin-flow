@@ -300,9 +300,33 @@ export class PhysicsEngine{
   return safe;
  }
 
+ _getOuterLaneLoad(rider){
+  const outside=Math.max(0,rider.laneOffset-TRACK_LANE.INNER);
+  return clamp(outside/900,0,.065);
+ }
+
+ _getBlockResistance(rider){
+  if(!this.scenarioPhaseManager?.phase4BlockActive)return 0;
+  const d=this.scenarioPhaseManager.definition;
+  const attackLeader=this.rider(this.lineManager.leaderNumber(d.middleLineId));
+  if(!attackLeader||rider.number!==attackLeader.number)return 0;
+  const frontMembers=this.lineManager.members(d.frontLineId);
+  const blocker=this.rider(frontMembers[1]);
+  if(!blocker)return 0;
+  const longitudinal=Math.abs(blocker.distance-rider.distance);
+  const lateral=Math.abs(blocker.laneOffset-rider.laneOffset);
+  if(longitudinal>22||lateral>26)return 0;
+  const proximity=1-clamp(longitudinal/22,0,1);
+  return proximity*(blocker.profile?.blockSkill??.75)*1.15;
+ }
+
  _move(rider,plan,dt){
   rider.action=plan.action;rider.followTargetNumber=plan.followTargetNumber??null;
   let desired=Math.max(0,plan.targetSpeed);
+  if([ACTION.ATTACK,ACTION.LINE_ATTACK].includes(plan.action) && rider.laneOffset>TRACK_LANE.ATTACK){
+   desired*=1-this._getOuterLaneLoad(rider);
+  }
+  desired=Math.max(0,desired-this._getBlockResistance(rider));
   if(!plan.scenarioControlled && rider.energy<.18)
     desired=Math.min(desired,rider.profile.topSpeed*(.72+1.2*rider.energy));
   const prev=rider.speed;

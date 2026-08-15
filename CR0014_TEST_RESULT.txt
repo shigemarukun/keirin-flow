@@ -1,0 +1,4 @@
+0.5x pass=true ranking=4-5-2-6-1-3-7-8-9 minCorridor=13.500 reverse=false overlap=false
+1x pass=true ranking=4-5-2-6-1-3-7-8-9 minCorridor=13.500 reverse=false overlap=false
+2x pass=true ranking=4-5-2-6-1-3-7-8-9 minCorridor=13.500 reverse=false overlap=false
+3x pass=true ranking=4-5-2-6-1-3-7-8-9 minCorridor=13.500 reverse=false overlap=false

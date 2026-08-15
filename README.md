@@ -1,30 +1,11 @@
-# KEIRIN FLOW — CR-0011 BATTLE / BLOCK
+# KEIRIN FLOW CR-0014 REAL PHYSICS
 
-CR-0010のPhase-Driven教師シナリオを維持しながら、最終周の攻防演出を競輪らしく強化したリリースです。
+Open `index.html` from a static web server.
 
-## TSUPPARI_MAKURI 攻防
-
-1. 789誘導切り
-2. 1突っ張り、789後退、123 / 456 / 789再整列
-3. 789再仕掛け。7は外から1の横へ到達後、lane=10付近まで内へねじ込み圧力。1はINNER=-18を死守
-4. 残り200m付近で789と1が消耗し、456が大外捲り
-5. 残り100m付近で2が一瞬外へBLOCK。4はさらに外から乗り越え、4-5ワンツー。2-6が3着争い
-
-## 物理保証
-
-- targetSpeedは加減速上限を経由しワープなし
-- Phase 3は1=-18 / 7≈10の別レーンでねじ込み vs イン防衛
-- Phase 4開始は残り約200m
-- BLOCKは残り約112m、約0.6秒
-- 456の外持ち出しは4→5→6
-- 同一走行帯の最小縦車間 13.5m以上
-- 乱数なし
-
-## セルフチェック
+Regression test:
 
 ```bash
-node cr0011-battle-block-check.mjs
+npm test
 ```
 
-0.5x / 1x / 2x / 3x 全速度で同じ因果と着順を検証します。
-期待着順: `4-5-2-6-1-3-7-8-9`
+CR-0014 keeps the CR-0013 teacher scenario while upgrading the deterministic physics core: 1/120 fixed step, 13.5m same-corridor exclusion, S-curve lane motion, outer-lane load, generic line-role block resistance, and role-based phase lookups.

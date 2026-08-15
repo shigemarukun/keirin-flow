@@ -22,6 +22,7 @@ export class ScenarioPhaseManager {
     this.phase4BlockActive = false;
     this.phase4BlockStartedAt = null;
     this.phase4BlockCompleted = false;
+    this.reassessment = new Map();
   }
 
   initialize(engine) {
@@ -29,6 +30,42 @@ export class ScenarioPhaseManager {
     this._emitPhase(engine, '7-8-9が外から誘導切りへ上昇');
   }
 
+
+  _reassessAfterTsuppari(engine) {
+    const d = this.definition;
+    const frontLeader = engine.rider(engine.lineManager.leaderNumber(d.frontLineId));
+    for (const lineId of [d.middleLineId, d.rearLineId]) {
+      const leader = engine.rider(engine.lineManager.leaderNumber(lineId));
+      if (!leader || !frontLeader) continue;
+      const p = leader.profile;
+      const accel = p.acceleration ?? .8;
+      const endurance = p.endurance ?? .8;
+      const iq = p.tacticalIQ ?? .8;
+      const energy = leader.energy ?? 1;
+      const lanePressure = engine.measureOutsidePressure(frontLeader);
+
+      // Fully deterministic CR-0013 re-evaluation.  Scores are deliberately
+      // separated enough that tiny integration differences cannot flip intent.
+      const saveMakuri = accel*.34 + endurance*.30 + iq*.20 + energy*.16;
+      const insideSwitch = iq*.38 + endurance*.20 + (1-lanePressure)*.22 + energy*.20 - .12;
+      const keepPressure = (p.power??.8)*.30 + (p.aggression??.65)*.30 + accel*.20 + energy*.20 - .10;
+      const choices = [
+        ['SAVE_FOR_MAKURI', saveMakuri],
+        ['INSIDE_SWITCH', insideSwitch],
+        ['KEEP_PRESSURE', keepPressure]
+      ].sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0]));
+      const selected=choices[0][0];
+      this.reassessment.set(lineId, selected);
+      engine.emitDecision({
+        riderNumber: leader.number, category:'CR0013_REASSESS', action:selected,
+        message: selected==='SAVE_FOR_MAKURI'
+          ? '突っ張りを確認。一旦引いて脚を溜め、最終周の大外捲りへ温存'
+          : selected==='INSIDE_SWITCH'
+            ? '突っ張りを確認。無理な踏み合いを避け、イン差し・切り替えを選択'
+            : '突っ張りを確認。外並走の圧力を維持して主導権争いを継続'
+      });
+    }
+  }
   _emitPhase(engine, message) {
     engine.emitDecision({
       category: 'SCENARIO_PHASE',
@@ -59,6 +96,7 @@ export class ScenarioPhaseManager {
           engine,
           '1番が突っ張り。7-8-9は無理をせず後退し、3ラインを再整列'
         );
+        this._reassessAfterTsuppari(engine);
       }
     } else if (this.currentPhase === SCENARIO_PHASE.TSUPPARI_RESET) {
       const lineCSettled = this._lineSettled(engine, d.rearLineId, TRACK_LANE.INNER, 4);
@@ -370,7 +408,7 @@ export class ScenarioPhaseManager {
           rider,
           d.phase4.makuriSpeed + blockBoost,
           blockLane,
-          ACTION.ATTACK,
+          ACTION.LINE_ATTACK,
           this.phase4BlockActive ? '2番の外牽制をさらに外から勢いで乗り越える' : '中団から大外捲り',
           {maxAccel: 5.4, maxBrake: 2.0, laneRate: this.phase4BlockActive ? 2.2 : 2.5}
         );
@@ -410,7 +448,8 @@ export class ScenarioPhaseManager {
       phase3SideBySideSeconds: this.phase3SideBySideSeconds,
       phase4BlockActive: this.phase4BlockActive,
       phase4BlockCompleted: this.phase4BlockCompleted,
-      phase4BlockStartedAt: this.phase4BlockStartedAt
+      phase4BlockStartedAt: this.phase4BlockStartedAt,
+      reassessment: Object.fromEntries(this.reassessment)
     };
   }
 }

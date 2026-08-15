@@ -339,7 +339,8 @@ export class UIRenderer {
         border,
         label,
         textColor,
-        fontSize = 11
+        fontSize = 11,
+        headingAngle = null
     ) {
         const c = this.ctx;
 
@@ -380,6 +381,21 @@ export class UIRenderer {
             x,
             y
         );
+
+        // A circular marker has no visible yaw by itself.  Draw a short heading
+        // tick so the S-curve lean/heading is visible without changing the
+        // established marker radius or bank scale.
+        if (Number.isFinite(headingAngle)) {
+            c.beginPath();
+            c.moveTo(x, y);
+            c.lineTo(
+                x + Math.cos(headingAngle) * (radius + 7),
+                y + Math.sin(headingAngle) * (radius + 7)
+            );
+            c.lineWidth = 2;
+            c.strokeStyle = border;
+            c.stroke();
+        }
     }
 
 
@@ -535,7 +551,8 @@ export class UIRenderer {
                 '#ffffff',
                 String(rider.number),
                 rider.style.text,
-                12
+                12,
+                point.angle + (rider.visualAngleOffset ?? 0)
             );
         }
     }

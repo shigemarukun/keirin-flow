@@ -35,6 +35,7 @@ class RaceClock{
 export class PhysicsEngine{
  constructor(setup=DEFAULT_RACE_SETUP){
   this.timeScale=1;this.onBellCallback=null;this.onFinishCallback=null;
+  this.fixedStep=1/120;this.accumulator=0;
   this.tenkaiPredictor=new TenkaiPredictor();
   this.keirinProtocol=new KeirinProtocolController();
   this.scenarioPhaseManager=new ScenarioPhaseManager();
@@ -69,9 +70,9 @@ export class PhysicsEngine{
 
  reset(setup=null){
   if(setup){this.applyRaceSetup(setup);return;}
-  this.isStarted=false;this.elapsedTime=0;this.ranking=[];this.raceEvents=[];this.decisionLogs=[];this.bellRung=false;this.establishedFrontLineId=null;this.settlingLineId=null;this.raceClock.reset();
+  this.isStarted=false;this.elapsedTime=0;this.accumulator=0;this.ranking=[];this.raceEvents=[];this.decisionLogs=[];this.bellRung=false;this.establishedFrontLineId=null;this.settlingLineId=null;this.raceClock.reset();
   this.pacer={distance:0,speed:this.profile.FORMATION_SPEED,state:PACER_STATE.LEADING,laneOffset:-18,exitProgress:0};
-  for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.history=[];r.raceIntent=null;r.lastDecisionAction=null;r.lastDecisionLogTime=null;}
+  for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.history=[];r.raceIntent=null;r.laneMotion=null;r.laneVelocity=0;r.visualAngleOffset=0;r.lastDecisionAction=null;r.lastDecisionLogTime=null;}
   this.keirinProtocol.initialize(this,this.prediction);
   this.scenarioPhaseManager.initialize(this);
  }
@@ -138,7 +139,7 @@ export class PhysicsEngine{
   return candidates[0]?.tail??null;
  }
  getLineFollowMode(rider){
-  if([ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.BLOCK,ACTION.SWITCH_TO_SELF_POWER,ACTION.FINAL_SPRINT].includes(rider.action))return LINE_FOLLOW_MODE.FREE;
+  if([ACTION.ATTACK,ACTION.LINE_ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.BLOCK,ACTION.SWITCH_TO_SELF_POWER,ACTION.FINAL_SPRINT].includes(rider.action))return LINE_FOLLOW_MODE.FREE;
   const frontNumber=rider.frontLineMate;
   if(!frontNumber)return LINE_FOLLOW_MODE.FREE;
   const front=this.rider(frontNumber);
@@ -166,7 +167,7 @@ export class PhysicsEngine{
   const candidates=this.riders.filter(other=>{
    if(other.finished||other.number===rider.number)return false;
    if(other.lineId&&rider.lineId&&other.lineId===rider.lineId)return false;
-   return [ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.SWITCH_TO_SELF_POWER].includes(other.action);
+   return [ACTION.ATTACK,ACTION.LINE_ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.SWITCH_TO_SELF_POWER].includes(other.action);
   });
   const other=candidates.sort((a,b)=>Math.abs(a.distance-rider.distance)-Math.abs(b.distance-rider.distance))[0];
   if(!other)return null;
@@ -250,18 +251,58 @@ export class PhysicsEngine{
  _applyEnergy(rider,plan,dt){
   const demand=Math.max(0,plan.targetSpeed-this.profile.FORMATION_SPEED)/this.profile.FORMATION_SPEED;
   let factor=1;
-  if([ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.DEFEND,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))factor=1.55;
+  if([ACTION.ATTACK,ACTION.LINE_ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.DEFEND,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))factor=1.55;
   if(plan.action===ACTION.BLOCK)factor=1.30;
   if([ACTION.SAVE_ENERGY,ACTION.YIELD,ACTION.RETREAT].includes(plan.action))factor=.55;
   const load=(.0022+.0105*demand*demand)*factor/Math.max(.55,rider.profile.endurance);
   rider.energy=clamp(rider.energy-load*dt,0,1);
  }
 
+ _updateLaneMotion(rider, targetLane, plan, dt){
+  const EPS=.02;
+  const target=Number.isFinite(targetLane)?targetLane:rider.laneOffset;
+  const delta=target-rider.laneOffset;
+  if(Math.abs(delta)<EPS){
+   rider.laneOffset=target;rider.laneVelocity=0;rider.visualAngleOffset*=Math.max(0,1-8*dt);rider.laneMotion=null;return;
+  }
+
+  // A target change creates one deterministic S-curve. We never LERP the
+  // current position toward the target every frame; progress advances on the
+  // fixed simulation clock and is mapped by cubic smoothstep.
+  if(!rider.laneMotion || Math.abs(rider.laneMotion.target-target)>.25){
+   const rate=Math.max(.75,plan.laneRate??2.2);
+   const duration=clamp(Math.abs(delta)/(rate*12),.28,1.35);
+   rider.laneMotion={start:rider.laneOffset,target,elapsed:0,duration};
+  }
+  const m=rider.laneMotion;
+  const prev=rider.laneOffset;
+  m.elapsed=Math.min(m.duration,m.elapsed+dt);
+  const t=clamp(m.elapsed/m.duration,0,1);
+  const e=t*t*(3-2*t); // cubic ease-in-out / S curve
+  rider.laneOffset=m.start+(m.target-m.start)*e;
+  rider.laneVelocity=(rider.laneOffset-prev)/Math.max(dt,1e-6);
+  rider.visualAngleOffset=clamp(rider.laneVelocity*.012,-.22,.22);
+  if(t>=1){rider.laneOffset=m.target;rider.laneMotion=null;rider.laneVelocity=0;}
+ }
+
+ _resolveExclusiveSlot(rider,next){
+  // Bounding slot: longitudinal 13.5m applies only to the same running
+  // corridor. Parallel riders remain legal when lateral separation is clear.
+  const MIN_GAP=13.5, SAME_CORRIDOR=11.0;
+  let safe=next;
+  for(const other of this.riders){
+   if(other.number===rider.number||other.finished)continue;
+   if(Math.abs(other.laneOffset-rider.laneOffset)>=SAME_CORRIDOR)continue;
+   if(other.distance<=rider.distance)continue;
+   const cap=other.distance-MIN_GAP;
+   if(safe>cap)safe=Math.max(rider.distance,cap); // never reverse
+  }
+  return safe;
+ }
+
  _move(rider,plan,dt){
   rider.action=plan.action;rider.followTargetNumber=plan.followTargetNumber??null;
-  let desired=plan.targetSpeed;
-  // Scenario plans already encode the intended fatigue outcome. Do not let the
-  // legacy autonomous-energy limiter contradict the teacher scenario.
+  let desired=Math.max(0,plan.targetSpeed);
   if(!plan.scenarioControlled && rider.energy<.18)
     desired=Math.min(desired,rider.profile.topSpeed*(.72+1.2*rider.energy));
   const prev=rider.speed;
@@ -269,65 +310,53 @@ export class PhysicsEngine{
   const accelBase=Math.min(plan.maxAccel??naturalAccel,naturalAccel*1.55);
   const naturalBrake=plan.action===ACTION.RETREAT?2.4:plan.action===ACTION.YIELD?2.0:3.7;
   const braking=Math.min(plan.maxBrake??naturalBrake,4.4);
-  // Inertial integration: targets may jump at a phase boundary, rider speed may not.
   if(rider.speed<desired)rider.speed=Math.min(desired,rider.speed+accelBase*dt);
   else rider.speed=Math.max(desired,rider.speed-braking*dt);
+  rider.speed=Math.max(0,rider.speed); // reverse is impossible
 
-  const followMode=plan.followMode??this.getLineFollowMode(rider);
-  let laneRate=plan.laneRate??1.7;
-  if(plan.laneRate==null){
-   if(followMode===LINE_FOLLOW_MODE.LOCKED_FOLLOW)laneRate=4.2;
-   else if(followMode===LINE_FOLLOW_MODE.SETTLING)laneRate=3.4;
-   else if(plan.action===ACTION.BLOCK)laneRate=.95;
-   else if([ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))laneRate=2.5;
-  }
-  rider.laneOffset+=(plan.laneTarget-rider.laneOffset)*clamp(laneRate*dt,0,1);
+  this._updateLaneMotion(rider,plan.laneTarget,plan,dt);
 
   let next=rider.distance+rider.speed*dt;
   const target=rider.followTargetNumber?this.rider(rider.followTargetNumber):null;
   if(target&&!target.finished&&target.distance>rider.distance&&plan.action===ACTION.FOLLOW){
-   // Line-follow safety envelope. The spring controller does the real work;
-   // this is only a sub-step guard and never changes speed instantaneously.
-   const minGap=13.5;
-   if(next>target.distance-minGap)next=target.distance-minGap;
+   next=Math.min(next,target.distance-13.5);
   }
-
-  // Soft geometric guard: no billiard-style impulse and no instant speed rewrite.
-  // A sub-step may be shortened by at most the distance travelled in that sub-step.
-  for(const other of this.riders){
-   if(other.number===rider.number||other.finished)continue;
-   const sameCorridor=Math.abs(other.laneOffset-rider.laneOffset)<7;
-   const otherAhead=other.distance>rider.distance;
-   if(sameCorridor&&otherAhead&&other.distance-next<7.0){
-    next=Math.min(next,other.distance-7.0);
-   }
-  }
-
-  rider.distance=next;rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
+  next=this._resolveExclusiveSlot(rider,next);
+  rider.distance=Math.max(rider.distance,next);
+  rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
  }
 
  _recordFinish(rider){rider.distance=this.totalDistance;rider.finished=true;rider.finishTime=this.elapsedTime;this.ranking.push({rank:0,number:rider.number,lineId:rider.lineId,time:rider.finishTime,margin:''});}
  _finalizeRanking(){this.ranking.sort((a,b)=>a.time-b.time||a.number-b.number);this.ranking.forEach((item,index)=>{item.rank=index+1;item.margin=index===0?'先頭':'';});}
 
+ _step(dt){
+  this.elapsedTime+=dt;
+  this.scenarioPhaseManager.update(this,dt);
+  this._updatePacer(dt);
+  const plans=new Map();
+  for(const rider of this.riders)if(!rider.finished)plans.set(rider.number,this.scenarioPhaseManager.plan(rider,this));
+  for(const rider of this.riders){
+   if(rider.finished)continue;
+   const plan=plans.get(rider.number);this._applyEnergy(rider,plan,dt);const before=rider.distance;this._move(rider,plan,dt);
+   if(before<this.totalDistance&&rider.distance>=this.totalDistance)this._recordFinish(rider);
+  }
+  const leaderDistance=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),triggered=this.raceClock.update(this.pacer.distance,leaderDistance,this);
+  if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:'打鐘。フェーズ駆動シナリオを継続'});this.onBellCallback?.();}
+ }
+
  update(dt){
   if(!this.isStarted)return;
-  const frameDt=clamp(Number(dt)||0,0,.1)*this.timeScale,steps=Math.max(1,Math.ceil(frameDt/(1/120))),stepDt=frameDt/steps;
-  for(let step=0;step<steps;step++){
-   this.elapsedTime+=stepDt;
-   // CR-0010: scenario grammar owns tactical intent. Physics only interpolates it.
-   this.scenarioPhaseManager.update(this,stepDt);
-   this._updatePacer(stepDt);
-   const plans=new Map();
-   for(const rider of this.riders)if(!rider.finished)plans.set(rider.number,this.scenarioPhaseManager.plan(rider,this));
-   for(const rider of this.riders){
-    if(rider.finished)continue;
-    const plan=plans.get(rider.number);this._applyEnergy(rider,plan,stepDt);const before=rider.distance;this._move(rider,plan,stepDt);
-    if(before<this.totalDistance&&rider.distance>=this.totalDistance)this._recordFinish(rider);
-   }
-   const leaderDistance=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),triggered=this.raceClock.update(this.pacer.distance,leaderDistance,this);
-   if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:'打鐘。フェーズ駆動シナリオを継続'});this.onBellCallback?.();}
+  // Rendering FPS and playback speed never change the simulation quantum.
+  // 0.5x/1x/2x/3x only changes how quickly fixed 1/120s ticks are consumed.
+  this.accumulator+=clamp(Number(dt)||0,0,.1)*this.timeScale;
+  const maxTicks=48;
+  let ticks=0;
+  while(this.accumulator+1e-12>=this.fixedStep && ticks<maxTicks){
+   this._step(this.fixedStep);
+   this.accumulator-=this.fixedStep;
+   ticks++;
   }
-  if(this.riders.every(r=>r.finished)){this.isStarted=false;this._finalizeRanking();this.onFinishCallback?.(this.ranking.map(x=>({...x})));}
+  if(this.riders.every(r=>r.finished)){this.isStarted=false;this.accumulator=0;this._finalizeRanking();this.onFinishCallback?.(this.ranking.map(x=>({...x})));}
  }
 
  getDiagnostics(){

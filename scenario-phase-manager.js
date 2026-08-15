@@ -3,12 +3,7 @@ import {
   LINE_FOLLOW_MODE,
   SCENARIO_PHASE,
   TRACK_LANE,
-  TSUPPARI_MAKURI_SCENARIO,
-  YIELD_KAMASI_SCENARIO,
-  SCENARIO_TYPE,
-  GENERIC_PHASE,
-  ROLE,
-  RUN_STYLE
+  TSUPPARI_MAKURI_SCENARIO
 } from './race-plan.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -19,15 +14,8 @@ export class ScenarioPhaseManager {
     this.reset();
   }
 
-  configure(definition) {
-    this.definition = definition ?? TSUPPARI_MAKURI_SCENARIO;
-    this.reset();
-  }
-
   reset() {
-    this.currentPhase = this.definition?.id === SCENARIO_TYPE.YIELD_KAMASI
-      ? GENERIC_PHASE.PACER_CUT
-      : SCENARIO_PHASE.PACER_CUT;
+    this.currentPhase = SCENARIO_PHASE.PACER_CUT;
     this.phaseEnteredAt = 0;
     this.phaseHistory = [this.currentPhase];
     this.phase3SideBySideSeconds = 0;
@@ -38,12 +26,7 @@ export class ScenarioPhaseManager {
 
   initialize(engine) {
     this.reset();
-    if (this.definition.id === SCENARIO_TYPE.YIELD_KAMASI) {
-      const cut = this._leader(engine, this.definition.roles.pacerCutLineId);
-      this._emitPhase(engine, `${cut?.number ?? '?'}番を先頭とするラインが外から誘導切りへ上昇`);
-    } else {
-      this._emitPhase(engine, '7-8-9が外から誘導切りへ上昇');
-    }
+    this._emitPhase(engine, '7-8-9が外から誘導切りへ上昇');
   }
 
   _emitPhase(engine, message) {
@@ -63,10 +46,6 @@ export class ScenarioPhaseManager {
   }
 
   update(engine, dt = 1 / 120) {
-    if (this.definition.id === SCENARIO_TYPE.YIELD_KAMASI) {
-      this._updateYieldKamasi(engine, dt);
-      return;
-    }
     const d = this.definition;
     const remaining = engine.raceClock.remainingDistance;
     const r1 = engine.rider(1);
@@ -170,250 +149,6 @@ export class ScenarioPhaseManager {
     }
   }
 
-  _leader(engine, lineId) {
-    return engine.rider(engine.lineManager.leaderNumber(lineId));
-  }
-
-  _tail(engine, lineId) {
-    return engine.rider(engine.lineManager.tailNumber(lineId));
-  }
-
-  _updateYieldKamasi(engine, dt) {
-    const d = this.definition;
-    const remaining = engine.raceClock.remainingDistance;
-    const receiveLeader = this._leader(engine, d.roles.receivingLineId);
-    const cutLeader = this._leader(engine, d.roles.pacerCutLineId);
-    const kamasiLeader = this._leader(engine, d.roles.kamasiLineId);
-
-    if (this.currentPhase === GENERIC_PHASE.PACER_CUT) {
-      const reached = receiveLeader && cutLeader && (receiveLeader.distance - cutLeader.distance) <= 5;
-      if (reached || remaining <= d.thresholds.pacerCutFallbackRemaining) {
-        this._transition(GENERIC_PHASE.START_RESOLUTION, engine, '前受けラインはインを一定ペースで維持し、突っ張らずに誘導切りラインの進入を許容');
-      }
-      return;
-    }
-
-    if (this.currentPhase === GENERIC_PHASE.START_RESOLUTION) {
-      // YIELD is passive: the receiving line never brakes or changes lane.
-      // The line has yielded once the attacking LEADER has naturally cleared
-      // the receiving leader. Followers remain rigidly attached behind it.
-      const fullyYielded = receiveLeader && cutLeader && cutLeader.distance >= receiveLeader.distance + 7;
-      const opportunist = this._leader(engine, d.roles.opportunistLineId);
-      const shouldMiddleAttack = opportunist && [RUN_STYLE.NIGE, RUN_STYLE.SENKO].includes(opportunist.profile?.runStyle);
-
-      if (fullyYielded && remaining <= d.thresholds.yieldSettleRemaining) {
-        if (shouldMiddleAttack) {
-          this._transition(
-            GENERIC_PHASE.MIDDLE_REACTION,
-            engine,
-            `${opportunist.number}番は逃げ・先行型。前を取ったラインが流した隙を叩き、ライン単位で主導権を取りに行く`
-          );
-        } else {
-          this._transition(GENERIC_PHASE.MIDDLE_ACTION, engine, '中団は動かず、後方へ引いたラインが打鐘手前からKAMASIを発動');
-        }
-      }
-      return;
-    }
-
-    if (this.currentPhase === GENERIC_PHASE.MIDDLE_REACTION) {
-      const opportunist = this._leader(engine, d.roles.opportunistLineId);
-      const opportunistTail = this._tail(engine, d.roles.opportunistLineId);
-      const cut = this._leader(engine, d.roles.pacerCutLineId);
-      const clearedCutAsBundle =
-        opportunistTail && cut &&
-        opportunistTail.distance >= cut.distance + d.thresholds.middleClearance;
-      const receiveBehindCut = receiveLeader && cut && receiveLeader.distance <= cut.distance - 8;
-
-      if (clearedCutAsBundle && receiveBehindCut) {
-        this._transition(
-          GENERIC_PHASE.MIDDLE_SETTLE,
-          engine,
-          '456が789をライン丸ごと叩き切った。456がインへ締め、789 / 123もその後ろで隊列を整える'
-        );
-      }
-      return;
-    }
-
-    if (this.currentPhase === GENERIC_PHASE.MIDDLE_SETTLE) {
-      const middleLeader = this._leader(engine, d.roles.opportunistLineId);
-      const cutLeaderNow = this._leader(engine, d.roles.pacerCutLineId);
-      const receiveLeaderNow = this._leader(engine, d.roles.receivingLineId);
-      const allInner = [middleLeader, cutLeaderNow, receiveLeaderNow]
-        .every(r => r && Math.abs(r.laneOffset - TRACK_LANE.INNER) < 2.5);
-      const ordered =
-        middleLeader && cutLeaderNow && receiveLeaderNow &&
-        middleLeader.distance > cutLeaderNow.distance + 12 &&
-        cutLeaderNow.distance > receiveLeaderNow.distance + 12;
-
-      if (allInner && ordered) {
-        this._transition(
-          GENERIC_PHASE.MIDDLE_ACTION,
-          engine,
-          '456 / 789 / 123の一列棒状が完成。後方123が次のカマシ判断へ'
-        );
-      }
-      return;
-    }
-
-    if (this.currentPhase === GENERIC_PHASE.MIDDLE_ACTION) {
-      const opponents = engine.riders.filter(r=>!r.finished && r.lineId !== d.roles.kamasiLineId && r.role !== ROLE.SOLO);
-      const bestOpponent = [...opponents].sort((a,b)=>b.distance-a.distance)[0];
-      const cleared = kamasiLeader && (!bestOpponent || kamasiLeader.distance >= bestOpponent.distance + d.thresholds.kamasiClearance);
-      if (cleared) {
-        this._transition(GENERIC_PHASE.FRONT_ESTABLISHED, engine, 'カマシラインが全別線を叩き切ってインへ入り主導権を確立');
-      }
-      return;
-    }
-
-    if (this.currentPhase === GENERIC_PHASE.FRONT_ESTABLISHED && remaining <= d.thresholds.finishStartRemaining) {
-      this._transition(GENERIC_PHASE.FINISH_ACTION, engine, '主導権ラインが最終直線へ。逃げ切り／番手差しの決着へ');
-    }
-  }
-
-  _bestKirikaeTarget(rider, engine) {
-    const candidates = engine.lineManager.linesArray()
-      .filter(line => !line.isSolo)
-      .map(line => {
-        const tail = this._tail(engine, line.id);
-        const leader = this._leader(engine, line.id);
-        if (!tail || !leader || tail.finished || leader.finished) return null;
-        const gap = tail.distance - rider.distance;
-        if (gap < -4 || gap > 70) return null;
-        const score = leader.speed * 2.2 - Math.max(0, gap) * 0.08 + engine.measureLineIntegrity(line.id) * 3;
-        return { tail, score };
-      })
-      .filter(Boolean)
-      .sort((a,b)=>b.score-a.score);
-    return candidates[0]?.tail ?? null;
-  }
-
-  _kirikaePlan(rider, engine) {
-    const target = this._bestKirikaeTarget(rider, engine);
-    if (!target) return this._leaderPlan(rider, Math.max(16, rider.speed), TRACK_LANE.INNER, ACTION.SAVE_ENERGY, '単騎で脚を溜めて展開待ち', {maxAccel:3.0,laneRate:2.2});
-    const gap = target.distance - rider.distance;
-    const desired = Math.max(0, target.speed + clamp((gap - 17) * 0.30, -1.5, 4.0));
-    return {
-      action: ACTION.KIRIKAE,
-      targetSpeed: desired,
-      laneTarget: target.laneOffset,
-      followTargetNumber: target.number,
-      followMode: LINE_FOLLOW_MODE.SETTLING,
-      reason: `単騎KIRIKAE: 勢いのあるライン最後尾${target.number}番へ切り替え`,
-      scenarioControlled: true,
-      maxAccel: 5.0,
-      maxBrake: 3.0,
-      laneRate: 3.0
-    };
-  }
-
-  _planYieldKamasi(rider, engine) {
-    const d = this.definition;
-    const p = this.currentPhase;
-    const receiveId = d.roles.receivingLineId;
-    const cutId = d.roles.pacerCutLineId;
-    const middleId = d.roles.middleLineId;
-    const kamasiId = d.roles.kamasiLineId;
-
-    if (rider.role === ROLE.SOLO && [GENERIC_PHASE.MIDDLE_REACTION, GENERIC_PHASE.MIDDLE_ACTION, GENERIC_PHASE.FRONT_ESTABLISHED, GENERIC_PHASE.FINISH_ACTION].includes(p)) {
-      return this._kirikaePlan(rider, engine);
-    }
-
-    // NIGERIKIRI may resolve as leader hold or bante-sashi. Release only the
-    // bante in the final straight; the rest of the line remains coherent.
-    if (p === GENERIC_PHASE.FINISH_ACTION && rider.lineId === kamasiId && rider.linePosition === 1) {
-      return this._leaderPlan(rider, d.speeds.finishBante, -6, ACTION.FINAL_SPRINT, '番手が先行を残しながら直線で差しに入る', {maxAccel:5.6,maxBrake:2.2,laneRate:2.4});
-    }
-
-    if (rider.frontLineMate) {
-      // Tactical authority belongs to the self-powered leader only.
-      // Followers are rendered as a rigid slipstream chain; they do not
-      // choose lane, avoidance, attack or braking independently.
-      if (p === GENERIC_PHASE.FINISH_ACTION && rider.lineId === kamasiId && rider.linePosition === 1) {
-        // handled above: only the finish bante is deliberately released
-      } else {
-        return this._rigidFollowPlan(rider, engine);
-      }
-    }
-
-    if (rider.role === ROLE.SOLO) {
-      return this._leaderPlan(rider, Math.max(12.5, rider.speed), TRACK_LANE.INNER, ACTION.SAVE_ENERGY, '単騎は序盤の攻防を見ながら脚を温存', {maxAccel:2.5,laneRate:2.0});
-    }
-
-    if (p === GENERIC_PHASE.PACER_CUT) {
-      if (rider.lineId === cutId) return this._leaderPlan(rider, d.speeds.pacerCut, d.lanes.attack, ACTION.ATTACK, '誘導切りへ外上昇', {maxAccel:5.2,laneRate:3.0});
-      if (rider.lineId === receiveId) return this._leaderPlan(rider, d.speeds.receive, d.lanes.inner, ACTION.CONTROL_PACE, '前受けで相手の上昇を待つ', {maxAccel:2.5,laneRate:3.0});
-      return this._leaderPlan(rider, d.speeds.middle, d.lanes.inner, ACTION.SAVE_ENERGY, '中団で脚を温存', {maxAccel:2.5,laneRate:2.6});
-    }
-
-    if (p === GENERIC_PHASE.START_RESOLUTION) {
-      if (rider.lineId === cutId) return this._leaderPlan(rider, d.speeds.controlFront, d.lanes.inner, ACTION.CONTROL_PACE, '前へ出て流し、打鐘前の主導権を一旦確保', {maxBrake:2.8,laneRate:3.6});
-      if (rider.lineId === receiveId) {
-        return this._leaderPlan(
-          rider,
-          d.speeds.yieldPace,
-          TRACK_LANE.INNER,
-          ACTION.YIELD,
-          '突っ張らずインを一定ペースで維持。外線の速度差で自然に相対後退',
-          {maxAccel:2.0,maxBrake:1.0,laneRate:4.6}
-        );
-      }
-      return this._leaderPlan(rider, d.speeds.middle, d.lanes.inner, ACTION.SAVE_ENERGY, '前受けラインをやり過ごして中団維持', {maxAccel:2.4,laneRate:2.6});
-    }
-
-    if (p === GENERIC_PHASE.MIDDLE_REACTION) {
-      const opportunistId = d.roles.opportunistLineId;
-      if (rider.lineId === opportunistId) {
-        const outsideReady = rider.laneOffset >= -5;
-        return this._leaderPlan(
-          rider,
-          outsideReady ? d.speeds.opportunistAttack : 20.0,
-          d.lanes.middleAttack,
-          ACTION.ATTACK,
-          '前を取ったラインの緩みを逃げ・先行型が即座に叩く',
-          {maxAccel: outsideReady ? 7.2 : 4.6, maxBrake:1.8, laneRate:4.2}
-        );
-      }
-      if (rider.lineId === cutId) {
-        return this._leaderPlan(rider, d.speeds.controlFront, TRACK_LANE.INNER, ACTION.CONTROL_PACE, 'インで一定ペースを保ち、外から来る中団ラインの叩きを受ける', {maxAccel:2.0,maxBrake:1.2,laneRate:4.4});
-      }
-      if (rider.lineId === receiveId) {
-        return this._leaderPlan(rider, 12.5, TRACK_LANE.INNER, ACTION.SAVE_ENERGY, '後方で隊列変化を見ながらカマシの脚を溜める', {maxAccel:2.6,laneRate:3.2});
-      }
-    }
-
-    if (p === GENERIC_PHASE.MIDDLE_SETTLE) {
-      if (rider.lineId === d.roles.opportunistLineId) {
-        return this._leaderPlan(rider, d.speeds.opportunistControl, TRACK_LANE.INNER, ACTION.CONTROL_PACE, '叩き切ったラインが速やかにインを締める', {maxBrake:2.0,laneRate:5.0});
-      }
-      if (rider.lineId === cutId) {
-        return this._leaderPlan(rider, d.speeds.controlFront, TRACK_LANE.INNER, ACTION.FOLLOW, '叩かれたラインは456の後方へ収まりライン維持', {maxAccel:2.5,maxBrake:1.4,laneRate:4.8});
-      }
-      if (rider.lineId === receiveId) {
-        return this._leaderPlan(rider, d.speeds.yieldPace, TRACK_LANE.INNER, ACTION.SAVE_ENERGY, '123はイン後方で脚を溜め、隊列完成を待つ', {maxAccel:2.0,maxBrake:1.0,laneRate:4.8});
-      }
-    }
-
-    if (p === GENERIC_PHASE.MIDDLE_ACTION) {
-      if (rider.lineId === kamasiId) {
-        const outsideReady = rider.laneOffset >= -5;
-        return this._leaderPlan(rider, outsideReady ? d.speeds.kamasi : 18.0, d.lanes.kamasi, ACTION.ATTACK, '後方から爆発的な打鐘カマシ', {maxAccel:outsideReady?6.4:4.0,laneRate:3.4});
-      }
-      if (rider.lineId === cutId) return this._leaderPlan(rider, d.speeds.chase, d.lanes.inner, ACTION.DEFEND, '流していたところをカマされ追走へ切り替え', {maxAccel:4.2,laneRate:3.0});
-      return this._leaderPlan(rider, d.speeds.chase - 1.0, d.lanes.inner, ACTION.FOLLOW, 'カマシを見て追走', {maxAccel:4.0,laneRate:2.8});
-    }
-
-    if (p === GENERIC_PHASE.FRONT_ESTABLISHED) {
-      if (rider.lineId === kamasiId) return this._leaderPlan(rider, 24.5, d.lanes.inner, ACTION.CONTROL_PACE, '叩き切ってインを締め、そのまま先行', {maxBrake:1.6,laneRate:4.0});
-      return this._leaderPlan(rider, d.speeds.chase, d.lanes.inner, ACTION.FOLLOW, '主導権ラインを追走', {maxAccel:4.0,laneRate:3.0});
-    }
-
-    if (rider.lineId === kamasiId) {
-      if (rider.linePosition === 0) return this._leaderPlan(rider, d.speeds.finishLeader, d.lanes.inner, ACTION.FINAL_SPRINT, 'カマシ先行から逃げ込み', {maxAccel:4.8,laneRate:3.0});
-    }
-    if (rider.lineId === cutId) return this._leaderPlan(rider, 18.8, TRACK_LANE.INNER, ACTION.FADE, 'カマされて追走一杯', {maxBrake:2.0,laneRate:2.8});
-    return this._leaderPlan(rider, 20.0, rider.laneOffset, ACTION.FINAL_SPRINT, '最終直線へ', {maxAccel:4.2,laneRate:2.5});
-  }
-
   _lineSettled(engine, lineId, lane, laneTolerance = 7) {
     const members = engine.lineManager.members(lineId).map(n => engine.rider(n)).filter(Boolean);
     if (!members.length) return false;
@@ -468,23 +203,6 @@ export class ScenarioPhaseManager {
     };
   }
 
-  _rigidFollowPlan(rider, engine) {
-    const front = engine.rider(rider.frontLineMate);
-    if (!front) return this._leaderPlan(rider, rider.speed, rider.laneOffset, ACTION.CONTROL_PACE, '追従対象なし');
-
-    return {
-      action: ACTION.FOLLOW,
-      targetSpeed: front.speed,
-      laneTarget: front.laneOffset,
-      followTargetNumber: front.number,
-      followMode: LINE_FOLLOW_MODE.LOCKED_FOLLOW,
-      reason: '先頭のPath Historyを1.5mスロットで時間差追尾',
-      scenarioControlled: true,
-      tailFollow: true,
-      slotMeters: 1.5
-    };
-  }
-
   _followPlan(rider, engine, speedCap = null, laneDelay = 0) {
     const front = engine.rider(rider.frontLineMate);
     if (!front) {
@@ -513,7 +231,6 @@ export class ScenarioPhaseManager {
   }
 
   plan(rider, engine) {
-    if (this.definition.id === SCENARIO_TYPE.YIELD_KAMASI) return this._planYieldKamasi(rider, engine);
     const d = this.definition;
     const p = this.currentPhase;
 
@@ -673,16 +390,13 @@ export class ScenarioPhaseManager {
   }
 
   canPacerExit(engine) {
-    if (this.definition.id === SCENARIO_TYPE.YIELD_KAMASI) {
-      if (this.currentPhase !== GENERIC_PHASE.PACER_CUT) return true;
-      const frontLeader = this._leader(engine, this.definition.roles.receivingLineId);
-      const rearLeader = this._leader(engine, this.definition.roles.pacerCutLineId);
-      if (!frontLeader || !rearLeader) return false;
-      return (frontLeader.distance - rearLeader.distance) <= 14;
-    }
     if (this.currentPhase !== SCENARIO_PHASE.PACER_CUT) return true;
-    const frontLeader = engine.rider(engine.lineManager.leaderNumber(this.definition.frontLineId));
-    const rearLeader = engine.rider(engine.lineManager.leaderNumber(this.definition.rearLineId));
+    const frontLeader = engine.rider(
+      engine.lineManager.leaderNumber(this.definition.frontLineId)
+    );
+    const rearLeader = engine.rider(
+      engine.lineManager.leaderNumber(this.definition.rearLineId)
+    );
     if (!frontLeader || !rearLeader) return false;
     return (frontLeader.distance - rearLeader.distance) <= 14;
   }

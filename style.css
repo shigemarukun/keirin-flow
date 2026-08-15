@@ -22,7 +22,7 @@ body {
 
 button, input { font: inherit; }
 
-#app { width: min(1240px, 100%); margin: 0 auto; padding: 28px 20px 40px; }
+#app { width: min(1180px, 100%); margin: 0 auto; padding: 28px 20px 40px; }
 
 header { text-align: center; margin-bottom: 22px; }
 .eyebrow { color: var(--accent); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.2em; }
@@ -31,7 +31,7 @@ header h1 { margin-top: 4px; font-size: clamp(2rem, 5vw, 3rem); letter-spacing: 
 
 main {
     display: grid;
-    grid-template-columns: minmax(760px, 800px) minmax(340px, 380px);
+    grid-template-columns: minmax(0, 800px) minmax(280px, 340px);
     gap: 20px;
     align-items: start;
 }

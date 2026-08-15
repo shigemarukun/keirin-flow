@@ -1,30 +1,30 @@
-# KEIRIN FLOW — CR-0012
+# KEIRIN FLOW — CR-0011 BATTLE / BLOCK
 
-Phase-Driven Scenario Engine の汎用化版。
+CR-0010のPhase-Driven教師シナリオを維持しながら、最終周の攻防演出を競輪らしく強化したリリースです。
 
-`RaceSetupConfig.scenarioId` と任意長の `lines` を `PhysicsEngine` に渡すだけでシナリオを切り替えられます。
+## TSUPPARI_MAKURI 攻防
 
-```js
-{
-  scenarioId: 'YIELD_KAMASI',
-  lines: [
-    { id:'LINE_A', members:[1,2,3], leader:1 },
-    { id:'LINE_B', members:[4,5], leader:4 },
-    { id:'SOLO_6', members:[6], leader:6 },
-    { id:'LINE_C', members:[7,8,9], leader:7 }
-  ],
-  riders: { 6:{ solo:true } }
-}
-```
+1. 789誘導切り
+2. 1突っ張り、789後退、123 / 456 / 789再整列
+3. 789再仕掛け。7は外から1の横へ到達後、lane=10付近まで内へねじ込み圧力。1はINNER=-18を死守
+4. 残り200m付近で789と1が消耗し、456が大外捲り
+5. 残り100m付近で2が一瞬外へBLOCK。4はさらに外から乗り越え、4-5ワンツー。2-6が3着争い
 
-1車ラインは自動的に `ROLE.SOLO`。攻防局面では `KIRIKAE` により、速度・位置・ライン整合度から最も有望な別ラインの最後尾へ切り替えます。
+## 物理保証
 
-## Scenario blocks
-- START: `TSUPPARI` / `YIELD`
-- MIDDLE: `SECOND_ATTACK` / `KAMASI` / `PACE_HOLD`
-- FINISH: `MAKURI` / `NIGERIKIRI`
+- targetSpeedは加減速上限を経由しワープなし
+- Phase 3は1=-18 / 7≈10の別レーンでねじ込み vs イン防衛
+- Phase 4開始は残り約200m
+- BLOCKは残り約112m、約0.6秒
+- 456の外持ち出しは4→5→6
+- 同一走行帯の最小縦車間 13.5m以上
+- 乱数なし
 
-## Checks
+## セルフチェック
+
 ```bash
-npm run check
+node cr0011-battle-block-check.mjs
 ```
+
+0.5x / 1x / 2x / 3x 全速度で同じ因果と着順を検証します。
+期待着順: `4-5-2-6-1-3-7-8-9`

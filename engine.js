@@ -1,11 +1,8 @@
-import { normalizeRaceSetup, DEFAULT_RACE_SETUP, ACTION, ROLE, PROTOCOL_STATE, LINE_FOLLOW_MODE, TRACK_LANE, getScenarioDefinition } from './race-plan.js';
+import { normalizeRaceSetup, DEFAULT_RACE_SETUP, ACTION, ROLE, PROTOCOL_STATE, LINE_FOLLOW_MODE, TRACK_LANE } from './race-plan.js';
 import { LineManager } from './line-manager.js';
 import { TenkaiPredictor } from './tenkai-predictor.js';
 import { KeirinProtocolController } from './keirin-protocol-controller.js';
 import { ScenarioPhaseManager } from './scenario-phase-manager.js';
-import { LinePathHistory } from './line-path-history.js';
-import { LaneTransition } from './lane-transition.js';
-import { RenderSlotResolver } from './render-slot-resolver.js';
 
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const PACER_STATE=Object.freeze({LEADING:'LEADING',EXITING:'EXITING',EXITED:'EXITED'});
@@ -22,7 +19,7 @@ class RaceClock{
  constructor(config){this.config=config;this.reset();}
  reset(){this.owner='PACER';this.referenceDistance=0;this.remainingDistance=this.config.RACE_DISTANCE;this.currentLap=2;this.firedEventSequence=[];this.events={Bell:false,FinalLap:false,FinalBack:false,Finish:false};}
  update(pacerDistance,leaderDistance,engine){
-  if(engine.pacer.state!==PACER_STATE.LEADING)this.owner='LEADER';
+  if(engine.pacer.state===PACER_STATE.EXITED)this.owner='LEADER';
   const candidate=this.owner==='PACER'?pacerDistance:leaderDistance;
   this.referenceDistance=Math.max(this.referenceDistance,candidate);
   this.remainingDistance=Math.max(0,this.config.RACE_DISTANCE-this.referenceDistance);
@@ -41,8 +38,6 @@ export class PhysicsEngine{
   this.tenkaiPredictor=new TenkaiPredictor();
   this.keirinProtocol=new KeirinProtocolController();
   this.scenarioPhaseManager=new ScenarioPhaseManager();
-  this.pathHistory=new LinePathHistory();
-  this.renderSlots=new RenderSlotResolver();
   this.applyRaceSetup(setup);
  }
 
@@ -51,9 +46,6 @@ export class PhysicsEngine{
   this.profile=RACE_PROFILES[this.setup.trackProfile]??RACE_PROFILES.PROFILE_400;
   this.totalDistance=this.profile.RACE_DISTANCE;
   this.lineManager=new LineManager(this.setup);
-  this.scenarioPhaseManager.configure(
-    this.setup.scenarioConfig ?? getScenarioDefinition(this.setup.scenarioId)
-  );
   this.raceClock=new RaceClock(this.profile);
   this.prediction=this.tenkaiPredictor.predict(this.setup,this.lineManager);
   this._buildRiders();
@@ -65,41 +57,21 @@ export class PhysicsEngine{
   for(const line of this.lineManager.linesArray())ordered.push(...line.members);
   for(let number=1;number<=9;number+=1)if(!ordered.includes(number))ordered.push(number);
 
-  const lineBase=new Map();
-  let cursor=-14;
-  for(const line of this.lineManager.linesArray()){
-    lineBase.set(line.id,cursor);
-    const length=Math.max(1,line.members.length);
-    cursor-=Math.max(10,3+(length-1)*1.5+8);
-  }
-  return this.riders=ordered.map((number,index)=>{
+  this.riders=ordered.map((number,index)=>{
    const ctx=this.lineManager.context(number);
    const profile=this.setup.riders[number];
-   const base=ctx.lineId?lineBase.get(ctx.lineId):(cursor-index*5);
-   const slot=Math.max(0,ctx.linePosition)*1.5;
-   const initialDistance=base-slot;
    return {number,globalIndex:index,style:CAR_STYLES[number],profile,mindset:profile.mindset,soloMindset:profile.soloMindset,
     lineId:ctx.lineId,role:ctx.role,linePosition:ctx.linePosition,leaderNumber:ctx.leaderNumber,frontLineMate:ctx.frontLineMate,rearLineMate:ctx.rearLineMate,
-    initialDistance,distance:initialDistance,speed:this.profile.FORMATION_SPEED,acceleration:0,laneOffset:-18,renderDistance:initialDistance,renderLaneOffset:-18,renderMode:'SNAKE_FOLLOW',action:ACTION.FORMATION,
-    followTargetNumber:null,energy:1,finished:false,finishTime:null,finishSpeed:null,virtualDistance:initialDistance,history:[],laneTransition:new LaneTransition(-18),slotDistance:slot};
+    initialDistance:-14-index*17,distance:-14-index*17,speed:this.profile.FORMATION_SPEED,acceleration:0,laneOffset:-18,action:ACTION.FORMATION,
+    followTargetNumber:null,energy:1,finished:false,finishTime:null,history:[]};
   });
  }
+
  reset(setup=null){
   if(setup){this.applyRaceSetup(setup);return;}
   this.isStarted=false;this.elapsedTime=0;this.ranking=[];this.raceEvents=[];this.decisionLogs=[];this.bellRung=false;this.establishedFrontLineId=null;this.settlingLineId=null;this.raceClock.reset();
-  this.pacer={
-   distance:0,
-   speed:this.profile.FORMATION_SPEED,
-   state:PACER_STATE.LEADING,
-   laneOffset:-18,
-   exitProgress:0,
-   exitStartedAt:null,
-   laneTransition:new LaneTransition(-18)
-  };
-  this.pathHistory.reset();
-  this.renderSlots.reset();
-  for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.renderDistance=r.initialDistance;r.renderLaneOffset=-18;r.renderMode='SNAKE_FOLLOW';r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.finishSpeed=null;r.virtualDistance=r.initialDistance;r.history=[];r.raceIntent=null;r.lastDecisionAction=null;r.lastDecisionLogTime=null;r.laneTransition.reset(-18);}
-  for(const line of this.lineManager.linesArray()){const leader=this.rider(line.leader);if(leader)this.pathHistory.seed(line.id,leader.distance,leader.laneOffset,leader.speed);}
+  this.pacer={distance:0,speed:this.profile.FORMATION_SPEED,state:PACER_STATE.LEADING,laneOffset:-18,exitProgress:0};
+  for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.history=[];r.raceIntent=null;r.lastDecisionAction=null;r.lastDecisionLogTime=null;}
   this.keirinProtocol.initialize(this,this.prediction);
   this.scenarioPhaseManager.initialize(this);
  }
@@ -252,63 +224,29 @@ export class PhysicsEngine{
  }
 
  _canPacerExit(){
-  const remaining=this.raceClock.remainingDistance;
-  const inExitWindow=remaining<=760&&remaining>=560;
-  return inExitWindow&&(this.scenarioPhaseManager?.canPacerExit(this)??false);
+  return this.scenarioPhaseManager?.canPacerExit(this) ?? false;
  }
-
  _updatePacer(dt){
   if(this.pacer.state===PACER_STATE.EXITED)return;
+  this.pacer.distance+=this.pacer.speed*dt;
 
-  // LEADING is a stable pacing state. EXITING accelerates gently while
-  // moving to the outer retreat corridor with the same sine easing used by
-  // rider lane changes. No canvas-space teleport is involved.
-  if(this.pacer.state===PACER_STATE.LEADING){
-    const target=this.profile.FORMATION_SPEED;
-    const accel=1.4;
-    if(this.pacer.speed<target)this.pacer.speed=Math.min(target,this.pacer.speed+accel*dt);
-    else this.pacer.speed=Math.max(target,this.pacer.speed-accel*dt);
-
-    if(this._canPacerExit()){
-      this.pacer.state=PACER_STATE.EXITING;
-      this.pacer.exitStartedAt=this.elapsedTime;
-      this.pacer.exitProgress=0;
-      this.pacer.laneTransition.setTarget(82,{duration:1.75});
-      this.emitRaceEvent('PACER_EXIT_START',{
-        attacker:this.keirinProtocol.pacerCutLeaderNumber,
-        defender:this.keirinProtocol.frontLeaderNumber
-      });
-      this.emitDecision({
-        category:'PACER',
-        action:'EXITING',
-        message:'後方ラインの上昇を確認。誘導員が滑らかに加速し外側退避線へ移動開始'
-      });
-    }
+  if(this.pacer.state===PACER_STATE.LEADING&&this._canPacerExit()){
+   this.pacer.state=PACER_STATE.EXITING;
+   this.emitRaceEvent('PACER_EXIT_START',{attacker:this.keirinProtocol.pacerCutLeaderNumber,defender:this.keirinProtocol.frontLeaderNumber});
+   this.emitDecision({category:'PACER',message:'誘導切り攻防が成立したため誘導員が退避開始'});
   }
 
   if(this.pacer.state===PACER_STATE.EXITING){
-    const exitTargetSpeed=this.profile.FORMATION_SPEED+3.0;
-    const accel=1.9;
-    this.pacer.speed=Math.min(exitTargetSpeed,this.pacer.speed+accel*dt);
-    this.pacer.laneOffset=this.pacer.laneTransition.update(dt);
-
-    const elapsed=Math.max(0,this.elapsedTime-(this.pacer.exitStartedAt??this.elapsedTime));
-    this.pacer.exitProgress=clamp(elapsed/1.75,0,1);
-
-    if(this.pacer.exitProgress>=1&&Math.abs(this.pacer.laneOffset-82)<1.0){
-      this.pacer.state=PACER_STATE.EXITED;
-      this.emitRaceEvent('PACER_EXIT_COMPLETE',{});
-      this.emitDecision({
-        category:'PACER',
-        action:'EXITED',
-        message:'誘導員が外側退避線へ退避完了。先頭選手基準へ移行'
-      });
-    }
+   this.pacer.exitProgress=Math.min(1,this.pacer.exitProgress+.85*dt);
+   const e=this.pacer.exitProgress*this.pacer.exitProgress*(3-2*this.pacer.exitProgress);
+   this.pacer.laneOffset=-18-72*e;
+   if(this.pacer.exitProgress>=1){
+    this.pacer.state=PACER_STATE.EXITED;
+    this.emitRaceEvent('PACER_EXIT_COMPLETE',{});
+    this.emitDecision({category:'PACER',message:'誘導員の退避完了。先頭選手基準へ移行'});
+   }
   }
-
-  this.pacer.distance+=Math.max(0,this.pacer.speed)*dt;
  }
-
  _applyEnergy(rider,plan,dt){
   const demand=Math.max(0,plan.targetSpeed-this.profile.FORMATION_SPEED)/this.profile.FORMATION_SPEED;
   let factor=1;
@@ -319,75 +257,56 @@ export class PhysicsEngine{
   rider.energy=clamp(rider.energy-load*dt,0,1);
  }
 
- _logActionTransition(rider,plan){
-  const shouldLog=
-    rider.role===ROLE.LEADER ||
-    rider.role===ROLE.SOLO ||
-    [ACTION.BLOCK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.KIRIKAE,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action);
-
-  if(!shouldLog)return;
-  if(rider.lastDecisionAction===plan.action)return;
-
-  rider.lastDecisionAction=plan.action;
-  this.emitDecision({
-    riderNumber:rider.number,
-    category:'ACTION',
-    action:plan.action,
-    message:plan.reason??`${plan.action}へ遷移`
-  });
- }
-
  _move(rider,plan,dt){
   rider.action=plan.action;rider.followTargetNumber=plan.followTargetNumber??null;
-
-  // CR-0015 SLOT/PATH engine. Followers do not run collision, avoidance,
-  // acceleration or lane-choice physics. They sample the leader's historical
-  // 1D distance/lane path at fixed metre slots.
-  if(plan.tailFollow && rider.lineId && rider.linePosition>0){
-    const leader=this.rider(rider.leaderNumber);
-    const leaderTravel=leader.finished?(leader.virtualDistance??leader.distance):leader.distance;
-    const sample=this.pathHistory.tailTarget(rider.lineId,leaderTravel,rider.linePosition,plan.slotMeters??1.5);
-    if(sample){
-      const prev=rider.speed;
-      rider.distance=Math.max(rider.distance, sample.distance); // monotonic: never reverse
-      rider.laneOffset=sample.laneOffset;
-      rider.speed=Math.max(0,sample.speed);
-      rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
-      return;
-    }
-  }
-
   let desired=plan.targetSpeed;
+  // Scenario plans already encode the intended fatigue outcome. Do not let the
+  // legacy autonomous-energy limiter contradict the teacher scenario.
   if(!plan.scenarioControlled && rider.energy<.18)
     desired=Math.min(desired,rider.profile.topSpeed*(.72+1.2*rider.energy));
   const prev=rider.speed;
   const naturalAccel=(rider.profile.baseAcceleration??4)*(.65+.55*rider.profile.acceleration);
   const accelBase=Math.min(plan.maxAccel??naturalAccel,naturalAccel*1.55);
-  const naturalBrake=plan.action===ACTION.RETREAT?2.4:plan.action===ACTION.YIELD?1.0:3.7;
+  const naturalBrake=plan.action===ACTION.RETREAT?2.4:plan.action===ACTION.YIELD?2.0:3.7;
   const braking=Math.min(plan.maxBrake??naturalBrake,4.4);
+  // Inertial integration: targets may jump at a phase boundary, rider speed may not.
   if(rider.speed<desired)rider.speed=Math.min(desired,rider.speed+accelBase*dt);
   else rider.speed=Math.max(desired,rider.speed-braking*dt);
 
-  // Lane is an independent 1D state. Changes use sinusoidal ease-in/out,
-  // never direct canvas x/y writes and never linear snapping.
-  const laneDelta=Math.abs((plan.laneTarget??rider.laneOffset)-rider.laneTransition.target);
-  if(laneDelta>.05){
-    const rate=Math.max(.5,plan.laneRate??2.5);
-    const duration=clamp(laneDelta/(rate*13),.55,1.65);
-    rider.laneTransition.setTarget(plan.laneTarget??rider.laneOffset,{duration});
+  const followMode=plan.followMode??this.getLineFollowMode(rider);
+  let laneRate=plan.laneRate??1.7;
+  if(plan.laneRate==null){
+   if(followMode===LINE_FOLLOW_MODE.LOCKED_FOLLOW)laneRate=4.2;
+   else if(followMode===LINE_FOLLOW_MODE.SETTLING)laneRate=3.4;
+   else if(plan.action===ACTION.BLOCK)laneRate=.95;
+   else if([ACTION.ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))laneRate=2.5;
   }
-  rider.laneOffset=rider.laneTransition.update(dt);
+  rider.laneOffset+=(plan.laneTarget-rider.laneOffset)*clamp(laneRate*dt,0,1);
 
-  // Distance is strictly monotonic. No collision impulse, no backward
-  // coordinate correction, no direct position overwrite.
-  const next=rider.distance+Math.max(0,rider.speed)*dt;
-  rider.distance=Math.max(rider.distance,next);
-  rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
+  let next=rider.distance+rider.speed*dt;
+  const target=rider.followTargetNumber?this.rider(rider.followTargetNumber):null;
+  if(target&&!target.finished&&target.distance>rider.distance&&plan.action===ACTION.FOLLOW){
+   // Line-follow safety envelope. The spring controller does the real work;
+   // this is only a sub-step guard and never changes speed instantaneously.
+   const minGap=13.5;
+   if(next>target.distance-minGap)next=target.distance-minGap;
+  }
 
-  if(rider.lineId && rider.linePosition===0)
-    this.pathHistory.push(rider.lineId,{distance:rider.distance,laneOffset:rider.laneOffset,speed:rider.speed});
+  // Soft geometric guard: no billiard-style impulse and no instant speed rewrite.
+  // A sub-step may be shortened by at most the distance travelled in that sub-step.
+  for(const other of this.riders){
+   if(other.number===rider.number||other.finished)continue;
+   const sameCorridor=Math.abs(other.laneOffset-rider.laneOffset)<7;
+   const otherAhead=other.distance>rider.distance;
+   if(sameCorridor&&otherAhead&&other.distance-next<7.0){
+    next=Math.min(next,other.distance-7.0);
+   }
+  }
+
+  rider.distance=next;rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
  }
- _recordFinish(rider){rider.distance=this.totalDistance;rider.virtualDistance=this.totalDistance;rider.finishSpeed=rider.speed;rider.finished=true;rider.finishTime=this.elapsedTime;this.ranking.push({rank:0,number:rider.number,lineId:rider.lineId,time:rider.finishTime,margin:''});}
+
+ _recordFinish(rider){rider.distance=this.totalDistance;rider.finished=true;rider.finishTime=this.elapsedTime;this.ranking.push({rank:0,number:rider.number,lineId:rider.lineId,time:rider.finishTime,margin:''});}
  _finalizeRanking(){this.ranking.sort((a,b)=>a.time-b.time||a.number-b.number);this.ranking.forEach((item,index)=>{item.rank=index+1;item.margin=index===0?'先頭':'';});}
 
  update(dt){
@@ -395,32 +314,18 @@ export class PhysicsEngine{
   const frameDt=clamp(Number(dt)||0,0,.1)*this.timeScale,steps=Math.max(1,Math.ceil(frameDt/(1/120))),stepDt=frameDt/steps;
   for(let step=0;step<steps;step++){
    this.elapsedTime+=stepDt;
-   // Finished leaders continue a virtual 1D path beyond the line so their
-   // tail followers can cross the finish without freezing at the same slot.
-   for(const leader of this.riders.filter(r=>r.finished&&r.lineId&&r.linePosition===0)){
-    leader.virtualDistance=(leader.virtualDistance??this.totalDistance)+Math.max(0,leader.finishSpeed??0)*stepDt;
-    this.pathHistory.push(leader.lineId,{distance:leader.virtualDistance,laneOffset:leader.laneOffset,speed:leader.finishSpeed??0});
-   }
    // CR-0010: scenario grammar owns tactical intent. Physics only interpolates it.
    this.scenarioPhaseManager.update(this,stepDt);
    this._updatePacer(stepDt);
    const plans=new Map();
    for(const rider of this.riders)if(!rider.finished)plans.set(rider.number,this.scenarioPhaseManager.plan(rider,this));
-   const movementOrder=[
-    ...this.riders.filter(r=>!r.finished&&(r.role===ROLE.LEADER||r.role===ROLE.SOLO)),
-    ...this.riders.filter(r=>!r.finished&&r.role!==ROLE.LEADER&&r.role!==ROLE.SOLO).sort((a,b)=>a.linePosition-b.linePosition)
-   ];
-   for(const rider of movementOrder){
+   for(const rider of this.riders){
     if(rider.finished)continue;
-    const plan=plans.get(rider.number);this._logActionTransition(rider,plan);this._applyEnergy(rider,plan,stepDt);const before=rider.distance;this._move(rider,plan,stepDt);
+    const plan=plans.get(rider.number);this._applyEnergy(rider,plan,stepDt);const before=rider.distance;this._move(rider,plan,stepDt);
     if(before<this.totalDistance&&rider.distance>=this.totalDistance)this._recordFinish(rider);
    }
    const leaderDistance=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),triggered=this.raceClock.update(this.pacer.distance,leaderDistance,this);
    if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:'打鐘。フェーズ駆動シナリオを継続'});this.onBellCallback?.();}
-
-   // Rendering is a separate, post-physics stage. It may resolve display
-   // exclusivity but never feeds coordinates back into race logic.
-   this.renderSlots.update(this);
   }
   if(this.riders.every(r=>r.finished)){this.isStarted=false;this._finalizeRanking();this.onFinishCallback?.(this.ranking.map(x=>({...x})));}
  }
@@ -434,8 +339,8 @@ export class PhysicsEngine{
     gaps.push({number:rider.number,frontNumber:target.number,gap:target.distance-rider.distance});
    }
   }
-  return {gaps,minGap:gaps.length?Math.min(...gaps.map(x=>x.gap)):null,maxGap:gaps.length?Math.max(...gaps.map(x=>x.gap)):null,render:this.renderSlots.diagnostics(this)};
+  return {gaps,minGap:gaps.length?Math.min(...gaps.map(x=>x.gap)):null,maxGap:gaps.length?Math.max(...gaps.map(x=>x.gap)):null};
  }
 
- getState(){return{riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,scenario:this.scenarioPhaseManager.state(),protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray(),pathHistory:this.pathHistory.snapshot()};}
+ getState(){return{riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,scenario:this.scenarioPhaseManager.state(),protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
 }

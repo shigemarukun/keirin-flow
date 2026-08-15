@@ -9,23 +9,20 @@ export class LineManager {
     this.contextByNumber = new Map();
 
     for (const line of setup.lines) {
-      const isSolo = line.members.length === 1;
-      this.lines.set(line.id, { ...line, members: [...line.members], isSolo });
+      this.lines.set(line.id, { ...line, members: [...line.members] });
       line.members.forEach((number, index) => {
         let role = ROLE.LINE_MEMBER;
-        if (isSolo) role = ROLE.SOLO;
-        else if (index === 0) role = ROLE.LEADER;
+        if (index === 0) role = ROLE.LEADER;
         else if (index === 1) role = ROLE.BANTE;
         else if (index === 2) role = ROLE.THIRD;
 
         this.contextByNumber.set(number, {
-          lineId: isSolo ? null : line.id,
-          sourceLineId: line.id,
-          linePosition: isSolo ? null : index,
+          lineId: line.id,
+          linePosition: index,
           role,
-          leaderNumber: isSolo ? null : line.leader,
-          frontLineMate: !isSolo && index > 0 ? line.members[index - 1] : null,
-          rearLineMate: !isSolo && index < line.members.length - 1 ? line.members[index + 1] : null
+          leaderNumber: line.leader,
+          frontLineMate: index > 0 ? line.members[index - 1] : null,
+          rearLineMate: index < line.members.length - 1 ? line.members[index + 1] : null
         });
       });
     }
@@ -51,7 +48,4 @@ export class LineManager {
   members(lineId) { return this.line(lineId)?.members ?? []; }
   lineOf(number) { const ctx=this.context(number); return ctx?.lineId ? this.line(ctx.lineId) : null; }
   linesArray() { return [...this.lines.values()].map(line=>({...line,members:[...line.members]})); }
-  activeLineIds() { return this.linesArray().filter(line=>!line.isSolo).map(line=>line.id); }
-  soloNumbers() { return [...this.contextByNumber.entries()].filter(([,ctx])=>ctx.role===ROLE.SOLO).map(([n])=>n); }
-  tailNumber(lineId) { const members=this.members(lineId); return members.length ? members[members.length-1] : null; }
 }

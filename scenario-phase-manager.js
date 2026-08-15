@@ -478,10 +478,10 @@ export class ScenarioPhaseManager {
       laneTarget: front.laneOffset,
       followTargetNumber: front.number,
       followMode: LINE_FOLLOW_MODE.LOCKED_FOLLOW,
-      reason: '先頭軌跡へ剛体スリップストリーム追走',
+      reason: '先頭のPath Historyを1.5mスロットで時間差追尾',
       scenarioControlled: true,
-      rigidFollow: true,
-      rigidGap: 16.5
+      tailFollow: true,
+      slotMeters: 1.5
     };
   }
 

@@ -6,10 +6,11 @@ import { SCENARIO_TYPE } from './race-plan.js';
 window.addEventListener('DOMContentLoaded',()=>{
  const aiModel=new AIModel();
  const setup=aiModel.getInitialRaceSetup();
- // CR-0013 browser demo intentionally launches the new visible teacher case.
+ // CR-0015 browser demo: slot/path-history teacher case.
  // The engine itself still supports TSUPPARI_MAKURI by scenarioId.
  setup.scenarioId=SCENARIO_TYPE.YIELD_KAMASI;
  const physics=new PhysicsEngine(setup);
+ window.__KEIRIN_PHYSICS__=physics;
  const ui=new UIRenderer('bankCanvas');
 
  const renderSetup=(applied)=>{
@@ -38,10 +39,12 @@ window.addEventListener('DOMContentLoaded',()=>{
  };
 
  let lastTime=performance.now();
+ if(new URLSearchParams(location.search).get('autostart')==='1')physics.start();
+
  const frame=now=>{
   const dt=(now-lastTime)/1000;lastTime=now;
   physics.update(dt);
-  const state=physics.getState();
+  const state=physics.getState();window.__KEIRIN_STATE__=state;
   ui.drawBank();ui.drawRiders(state);ui.updateUI(state);
   requestAnimationFrame(frame);
  };

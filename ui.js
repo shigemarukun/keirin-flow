@@ -520,6 +520,10 @@ export class UIRenderer {
             of orderedRiders
         ) {
 
+            // Finished riders leave the bank canvas; result order is shown
+            // in the dedicated ranking panel. This prevents a finish-line pile.
+            if (rider.finished) continue;
+
             const point =
                 this.getBankCoordinates(
                     rider.distance,
@@ -530,12 +534,12 @@ export class UIRenderer {
             this.drawMarker(
                 point.x,
                 point.y,
-                12,
+                5.2,
                 rider.style.background,
                 '#ffffff',
                 String(rider.number),
                 rider.style.text,
-                12
+                7
             );
         }
     }

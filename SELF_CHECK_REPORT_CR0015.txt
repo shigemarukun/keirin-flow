@@ -1,0 +1,24 @@
+$ node --check engine.js
+
+
+$ node --check scenario-phase-manager.js
+
+
+$ node --check line-path-history.js
+
+
+$ node --check lane-transition.js
+
+
+$ node --check ui.js
+
+
+$ node --check main.js
+
+
+$ node cr0015-slot-path-check.mjs
+PASS 0.5x maxSlotErr=0.0000 snakeBend=16.445 minSeparationMetric=5.999 phases=PACER_CUT>START_RESOLUTION>MIDDLE_REACTION>MIDDLE_SETTLE>MIDDLE_ACTION>FRONT_ESTABLISHED>FINISH_ACTION
+PASS 1x maxSlotErr=0.0000 snakeBend=16.445 minSeparationMetric=5.999 phases=PACER_CUT>START_RESOLUTION>MIDDLE_REACTION>MIDDLE_SETTLE>MIDDLE_ACTION>FRONT_ESTABLISHED>FINISH_ACTION
+PASS 2x maxSlotErr=0.0000 snakeBend=16.400 minSeparationMetric=5.999 phases=PACER_CUT>START_RESOLUTION>MIDDLE_REACTION>MIDDLE_SETTLE>MIDDLE_ACTION>FRONT_ESTABLISHED>FINISH_ACTION
+PASS 3x maxSlotErr=0.0000 snakeBend=16.389 minSeparationMetric=6.000 phases=PACER_CUT>START_RESOLUTION>MIDDLE_REACTION>MIDDLE_SETTLE>MIDDLE_ACTION>FRONT_ESTABLISHED>FINISH_ACTION
+CR-0015 SLOT/PATH HISTORY: ALL CHECKS PASSED

@@ -76,6 +76,7 @@ export const GENERIC_PHASE = Object.freeze({
   PACER_CUT: 'PACER_CUT',
   START_RESOLUTION: 'START_RESOLUTION',
   MIDDLE_REACTION: 'MIDDLE_REACTION',
+  MIDDLE_SETTLE: 'MIDDLE_SETTLE',
   MIDDLE_ACTION: 'MIDDLE_ACTION',
   FRONT_ESTABLISHED: 'FRONT_ESTABLISHED',
   FINISH_ACTION: 'FINISH_ACTION'
@@ -141,8 +142,8 @@ export const YIELD_KAMASI_SCENARIO = Object.freeze({
   blocks: Object.freeze({ start: START_BLOCK.YIELD, middle: MIDDLE_BLOCK.KAMASI, finish: FINISH_BLOCK.NIGERIKIRI }),
   roles: Object.freeze({ receivingLineId: 'LINE_A', middleLineId: 'LINE_B', pacerCutLineId: 'LINE_C', opportunistLineId: 'LINE_B', kamasiLineId: 'LINE_A' }),
   thresholds: Object.freeze({ pacerCutFallbackRemaining: 650, yieldSettleRemaining: 585, middleClearance: 7, middleSettleRemaining: 545, kamasiStartRemaining: 505, kamasiClearance: 7, finishStartRemaining: 125 }),
-  speeds: Object.freeze({ receive: 11.4, pacerCut: 23.5, controlFront: 13.2, yield: 8.2, middle: 13.0, opportunistAttack: 25.0, opportunistControl: 15.0, kamasi: 28.4, chase: 20.0, finishLeader: 25.2, finishBante: 26.4, finishFollower: 23.2 }),
-  lanes: Object.freeze({ inner: TRACK_LANE.INNER, attack: TRACK_LANE.OUTSIDE, kamasi: 30 })
+  speeds: Object.freeze({ receive: 13.0, pacerCut: 23.5, controlFront: 14.2, yieldPace: 13.0, middle: 13.0, opportunistAttack: 27.2, opportunistControl: 16.0, kamasi: 28.4, chase: 20.0, finishLeader: 25.2, finishBante: 26.4, finishFollower: 23.2 }),
+  lanes: Object.freeze({ inner: TRACK_LANE.INNER, attack: TRACK_LANE.OUTSIDE, middleAttack: 34, kamasi: 30 })
 });
 
 export const SCENARIO_LIBRARY = Object.freeze({

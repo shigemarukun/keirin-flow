@@ -188,15 +188,16 @@ export class ScenarioPhaseManager {
     if (this.currentPhase === GENERIC_PHASE.PACER_CUT) {
       const reached = receiveLeader && cutLeader && (receiveLeader.distance - cutLeader.distance) <= 5;
       if (reached || remaining <= d.thresholds.pacerCutFallbackRemaining) {
-        this._transition(GENERIC_PHASE.START_RESOLUTION, engine, '前受けラインは突っ張らずYIELD。誘導切りラインを前へ出して後方へ引く');
+        this._transition(GENERIC_PHASE.START_RESOLUTION, engine, '前受けラインはインを一定ペースで維持し、突っ張らずに誘導切りラインの進入を許容');
       }
       return;
     }
 
     if (this.currentPhase === GENERIC_PHASE.START_RESOLUTION) {
-      const field = engine.riders.filter(r => !r.finished && r.lineId !== d.roles.receivingLineId && r.role !== ROLE.SOLO);
-      const lastOther = [...field].sort((a,b)=>a.distance-b.distance)[0];
-      const fullyYielded = receiveLeader && lastOther && receiveLeader.distance < lastOther.distance - 8;
+      // YIELD is passive: the receiving line never brakes or changes lane.
+      // The line has yielded once the attacking LEADER has naturally cleared
+      // the receiving leader. Followers remain rigidly attached behind it.
+      const fullyYielded = receiveLeader && cutLeader && cutLeader.distance >= receiveLeader.distance + 7;
       const opportunist = this._leader(engine, d.roles.opportunistLineId);
       const shouldMiddleAttack = opportunist && [RUN_STYLE.NIGE, RUN_STYLE.SENKO].includes(opportunist.profile?.runStyle);
 
@@ -216,15 +217,39 @@ export class ScenarioPhaseManager {
 
     if (this.currentPhase === GENERIC_PHASE.MIDDLE_REACTION) {
       const opportunist = this._leader(engine, d.roles.opportunistLineId);
+      const opportunistTail = this._tail(engine, d.roles.opportunistLineId);
       const cut = this._leader(engine, d.roles.pacerCutLineId);
-      const clearedCut = opportunist && cut && opportunist.distance >= cut.distance + d.thresholds.middleClearance;
-      const receiveBehindCut = receiveLeader && cut && receiveLeader.distance <= cut.distance - 18;
+      const clearedCutAsBundle =
+        opportunistTail && cut &&
+        opportunistTail.distance >= cut.distance + d.thresholds.middleClearance;
+      const receiveBehindCut = receiveLeader && cut && receiveLeader.distance <= cut.distance - 8;
 
-      if (clearedCut && receiveBehindCut) {
+      if (clearedCutAsBundle && receiveBehindCut) {
+        this._transition(
+          GENERIC_PHASE.MIDDLE_SETTLE,
+          engine,
+          '456が789をライン丸ごと叩き切った。456がインへ締め、789 / 123もその後ろで隊列を整える'
+        );
+      }
+      return;
+    }
+
+    if (this.currentPhase === GENERIC_PHASE.MIDDLE_SETTLE) {
+      const middleLeader = this._leader(engine, d.roles.opportunistLineId);
+      const cutLeaderNow = this._leader(engine, d.roles.pacerCutLineId);
+      const receiveLeaderNow = this._leader(engine, d.roles.receivingLineId);
+      const allInner = [middleLeader, cutLeaderNow, receiveLeaderNow]
+        .every(r => r && Math.abs(r.laneOffset - TRACK_LANE.INNER) < 2.5);
+      const ordered =
+        middleLeader && cutLeaderNow && receiveLeaderNow &&
+        middleLeader.distance > cutLeaderNow.distance + 12 &&
+        cutLeaderNow.distance > receiveLeaderNow.distance + 12;
+
+      if (allInner && ordered) {
         this._transition(
           GENERIC_PHASE.MIDDLE_ACTION,
           engine,
-          '中団先行ラインが誘導切りラインを叩き切り、456 / 789 / 123の隊列を作成。後方123がカマシ機会をうかがう'
+          '456 / 789 / 123の一列棒状が完成。後方123が次のカマシ判断へ'
         );
       }
       return;
@@ -300,12 +325,14 @@ export class ScenarioPhaseManager {
     }
 
     if (rider.frontLineMate) {
-      let cap = null;
-      if (p === GENERIC_PHASE.MIDDLE_ACTION && rider.lineId === kamasiId) cap = d.speeds.kamasi - rider.linePosition * 0.45;
-      if (p === GENERIC_PHASE.FINISH_ACTION && rider.lineId === kamasiId) {
-        cap = rider.linePosition === 1 ? d.speeds.finishBante : d.speeds.finishFollower;
+      // Tactical authority belongs to the self-powered leader only.
+      // Followers are rendered as a rigid slipstream chain; they do not
+      // choose lane, avoidance, attack or braking independently.
+      if (p === GENERIC_PHASE.FINISH_ACTION && rider.lineId === kamasiId && rider.linePosition === 1) {
+        // handled above: only the finish bante is deliberately released
+      } else {
+        return this._rigidFollowPlan(rider, engine);
       }
-      return this._followPlan(rider, engine, cap, rider.linePosition * 0.18);
     }
 
     if (rider.role === ROLE.SOLO) {
@@ -321,11 +348,14 @@ export class ScenarioPhaseManager {
     if (p === GENERIC_PHASE.START_RESOLUTION) {
       if (rider.lineId === cutId) return this._leaderPlan(rider, d.speeds.controlFront, d.lanes.inner, ACTION.CONTROL_PACE, '前へ出て流し、打鐘前の主導権を一旦確保', {maxBrake:2.8,laneRate:3.6});
       if (rider.lineId === receiveId) {
-        const fieldTail = [...engine.riders].filter(r=>!r.finished && r.lineId !== receiveId).sort((a,b)=>a.distance-b.distance)[0];
-        if (fieldTail && rider.distance > fieldTail.distance - 12) {
-          return this._leaderPlan(rider, d.speeds.yield, TRACK_LANE.OUTSIDE, ACTION.YIELD, '無理に突っ張らず大外を下げて7番手へ', {maxBrake:3.5,laneRate:1.8});
-        }
-        return this._dockLeaderPlan(rider, engine, fieldTail?.number, d.speeds.controlFront, '最後尾まで引いたためインへ戻してカマシ準備');
+        return this._leaderPlan(
+          rider,
+          d.speeds.yieldPace,
+          TRACK_LANE.INNER,
+          ACTION.YIELD,
+          '突っ張らずインを一定ペースで維持。外線の速度差で自然に相対後退',
+          {maxAccel:2.0,maxBrake:1.0,laneRate:4.6}
+        );
       }
       return this._leaderPlan(rider, d.speeds.middle, d.lanes.inner, ACTION.SAVE_ENERGY, '前受けラインをやり過ごして中団維持', {maxAccel:2.4,laneRate:2.6});
     }
@@ -336,18 +366,30 @@ export class ScenarioPhaseManager {
         const outsideReady = rider.laneOffset >= -5;
         return this._leaderPlan(
           rider,
-          outsideReady ? d.speeds.opportunistAttack : 18.0,
-          26,
+          outsideReady ? d.speeds.opportunistAttack : 20.0,
+          d.lanes.middleAttack,
           ACTION.ATTACK,
           '前を取ったラインの緩みを逃げ・先行型が即座に叩く',
-          {maxAccel: outsideReady ? 5.8 : 3.8, laneRate: 3.2}
+          {maxAccel: outsideReady ? 7.2 : 4.6, maxBrake:1.8, laneRate:4.2}
         );
       }
       if (rider.lineId === cutId) {
-        return this._leaderPlan(rider, d.speeds.controlFront, TRACK_LANE.INNER, ACTION.YIELD, '中団先行ラインに叩かれ、無理せず番手側へ収まる', {maxBrake:2.8,laneRate:3.2});
+        return this._leaderPlan(rider, d.speeds.controlFront, TRACK_LANE.INNER, ACTION.CONTROL_PACE, 'インで一定ペースを保ち、外から来る中団ラインの叩きを受ける', {maxAccel:2.0,maxBrake:1.2,laneRate:4.4});
       }
       if (rider.lineId === receiveId) {
         return this._leaderPlan(rider, 12.5, TRACK_LANE.INNER, ACTION.SAVE_ENERGY, '後方で隊列変化を見ながらカマシの脚を溜める', {maxAccel:2.6,laneRate:3.2});
+      }
+    }
+
+    if (p === GENERIC_PHASE.MIDDLE_SETTLE) {
+      if (rider.lineId === d.roles.opportunistLineId) {
+        return this._leaderPlan(rider, d.speeds.opportunistControl, TRACK_LANE.INNER, ACTION.CONTROL_PACE, '叩き切ったラインが速やかにインを締める', {maxBrake:2.0,laneRate:5.0});
+      }
+      if (rider.lineId === cutId) {
+        return this._leaderPlan(rider, d.speeds.controlFront, TRACK_LANE.INNER, ACTION.FOLLOW, '叩かれたラインは456の後方へ収まりライン維持', {maxAccel:2.5,maxBrake:1.4,laneRate:4.8});
+      }
+      if (rider.lineId === receiveId) {
+        return this._leaderPlan(rider, d.speeds.yieldPace, TRACK_LANE.INNER, ACTION.SAVE_ENERGY, '123はイン後方で脚を溜め、隊列完成を待つ', {maxAccel:2.0,maxBrake:1.0,laneRate:4.8});
       }
     }
 
@@ -423,6 +465,23 @@ export class ScenarioPhaseManager {
       maxAccel: 3.4,
       maxBrake: 2.8,
       laneRate: 3.4
+    };
+  }
+
+  _rigidFollowPlan(rider, engine) {
+    const front = engine.rider(rider.frontLineMate);
+    if (!front) return this._leaderPlan(rider, rider.speed, rider.laneOffset, ACTION.CONTROL_PACE, '追従対象なし');
+
+    return {
+      action: ACTION.FOLLOW,
+      targetSpeed: front.speed,
+      laneTarget: front.laneOffset,
+      followTargetNumber: front.number,
+      followMode: LINE_FOLLOW_MODE.LOCKED_FOLLOW,
+      reason: '先頭軌跡へ剛体スリップストリーム追走',
+      scenarioControlled: true,
+      rigidFollow: true,
+      rigidGap: 16.5
     };
   }
 

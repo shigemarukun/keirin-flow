@@ -262,6 +262,23 @@ export class PhysicsEngine{
 
  _move(rider,plan,dt){
   rider.action=plan.action;rider.followTargetNumber=plan.followTargetNumber??null;
+
+  // CR-0014: followers have no independent tactical physics in a teacher
+  // scenario. They inherit the front mate's already-interpolated trajectory.
+  // This makes the line a coherent bundle while retaining a fixed wheel gap.
+  if(plan.rigidFollow && rider.followTargetNumber){
+    const front=this.rider(rider.followTargetNumber);
+    if(front && !front.finished){
+      const prev=rider.speed;
+      const gap=plan.rigidGap??16.5;
+      rider.speed=front.speed;
+      rider.laneOffset=front.laneOffset;
+      rider.distance=Math.min(front.distance-gap, this.totalDistance);
+      rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
+      return;
+    }
+  }
+
   let desired=plan.targetSpeed;
   // Scenario plans already encode the intended fatigue outcome. Do not let the
   // legacy autonomous-energy limiter contradict the teacher scenario.

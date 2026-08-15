@@ -5,10 +5,11 @@
     "check:autonomous": "node cr0007-autonomous-check.mjs",
     "check:teacher": "node scenario-b-autonomous-regression.mjs",
     "check:interface": "node cr0007-interface-check.mjs",
-    "check": "node cr0011-battle-block-check.mjs && node cr0012-dynamic-yield-kamasi-check.mjs && node cr0013-yield-middle-reaction-check.mjs",
+    "check": "node cr0011-battle-block-check.mjs && node cr0012-dynamic-yield-kamasi-check.mjs && node cr0014-visual-grammar-check.mjs",
     "check:line-settling": "node cr0009-line-settling-check.mjs",
     "check:phase-scenario": "node cr0010-phase-scenario-check.mjs",
     "check:dynamic": "node cr0012-dynamic-yield-kamasi-check.mjs",
-    "check:cr0013": "node cr0013-yield-middle-reaction-check.mjs"
+    "check:cr0013": "node cr0013-yield-middle-reaction-check.mjs",
+    "check:cr0014": "node cr0014-visual-grammar-check.mjs"
   }
 }

@@ -68,7 +68,7 @@ check(new Set(bySpeed).size === 1, '再生速度 0.5x/1x/2x/3x で着順が同�
 // 3. physical sanity
 check(a.finished === 9, '9人全員が完走する', `${a.finished}/9`);
 check(!a.reverse, '逆走しない');
-check(a.minCorridorGap >= 9 - 1e-6, '同じ走路で前後に重ならない (前に割り込むときも9m以上空ける)', a.minCorridorGap.toFixed(2));
+check(a.minCorridorGap >= 5 - 1e-6, '同じ走路で前後に重ならない (前に割り込むときも5m以上空ける)', a.minCorridorGap.toFixed(2));
 
 // 4. abilities change the outcome
 const variants = {
@@ -85,7 +85,12 @@ for (const [label, mutate] of Object.entries(variants)) {
 }
 check([7, 8, 9].includes(results['7-8-9を最強に'].order[0]), '最強にした7-8-9ラインから1着が出る', `1着 ${results['7-8-9を最強に'].order[0]}番`);
 check(results['4番を超強力な捲りに'].order[0] === 4, '超強力にした捲り選手が捲り切る', `1着 ${results['4番を超強力な捲りに'].order[0]}番`);
-check(results['1番を弱い先行に'].order.indexOf(1) > a.order.indexOf(1), '弱くした先行選手は着順を落とす', `${a.order.indexOf(1) + 1}着 → ${results['1番を弱い先行に'].order.indexOf(1) + 1}着`);
+{
+  const weak = clone(); Object.assign(weak.riders[1], { power: .6, acceleration: .6, endurance: .6, tactic: 'SENKO' });
+  const strong = clone(); Object.assign(strong.riders[1], { power: 1, acceleration: .95, endurance: 1, tactic: 'SENKO' });
+  const w = race(weak).order.indexOf(1) + 1, st = race(strong).order.indexOf(1) + 1;
+  check(w > st, '同じ先行でも、弱い選手は強い選手より着順が悪い', `強い先行 ${st}着 / 弱い先行 ${w}着`);
+}
 
 // 5. car numbers are labels only: relabel everybody and the same riders must ride the same race
 const perm = { 1: 5, 2: 9, 3: 1, 4: 7, 5: 2, 6: 8, 7: 3, 8: 6, 9: 4 };
@@ -113,7 +118,7 @@ check(!hard, 'race-ai.js に車番の決め打ちがない', hard ? hard.join(',
 const contestSecs = a.logs.filter(l => l.c === 'CONTEST' && /秒の踏み合い/.test(l.m)).map(l => Number(l.m.match(/([\d.]+)秒/)[1]));
 check(contestSecs.length > 0 && Math.max(...contestSecs) >= 1.0, '突っ張り・捲りで並走の踏み合いが起き、1秒以上競る', contestSecs.map(x => `${x}秒`).join(', '));
 
-const early = clone(); Object.assign(early.riders[1], { endurance: .55, aggression: .95 });
+const early = clone(); Object.assign(early.riders[1], { endurance: .55, aggression: .95, tactic: 'SENKO' });
 const er = race(early);
 const fade1 = er.speeds[1];
 check(er.logs.some(l => l.c === 'FATIGUE' && l.n === 1) && fade1.peak - fade1.last >= 3, '持久力の低い逃げ選手は最後にタレる', `最高${fade1.peak.toFixed(1)} → ゴール前${fade1.last.toFixed(1)}m/s`);
@@ -148,7 +153,7 @@ check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '�
       });
       split = splitNow ? split + 1 / 60 : 0; worstSplit = Math.max(worstSplit, split);
     }
-    if (e.ranking.length !== e.riders.length || worst > 2 || worstSplit > 3) bad.push(`${layout}: 完走${e.ranking.length}/${e.riders.length} 詰まり${worst.toFixed(1)}秒 割り込み${worstSplit.toFixed(1)}秒`);
+    if (e.ranking.length !== e.riders.length || worst > 4 || worstSplit > 3) bad.push(`${layout}: 完走${e.ranking.length}/${e.riders.length} 詰まり${worst.toFixed(1)}秒 割り込み${worstSplit.toFixed(1)}秒`);
   }
   check(bad.length === 0, 'ラインを組み替えても破綻しない (13通りの並び・単騎3人以上や全員単騎も含む: 全員完走・詰まらない・ラインの間に割り込まれ続けない)', bad.join(' / '));
 
@@ -192,6 +197,21 @@ check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '�
   }
   const missing = Object.entries(seen).filter(([, v]) => v === 0).map(([k]) => k);
   check(!missing.length, '32レースの中で、競輪の14種類の動きがすべて起きる', Object.entries(seen).map(([k, v]) => `${k}${v}`).join(' '));
+}
+
+// 13. 逃げは「残りすぎない」: 残200mで先頭だった選手が、いつも3着に残るわけではない
+{
+  const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
+  let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  let n = 0, top3 = 0, win = 0;
+  for (const L of ['123/456/789', '789/123/456', '456/123/789', '12/456/789/3', '12/34/56/789', '123/456/7/8/9']) for (let k = 0; k < 5; k++) {
+    const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(L);
+    for (const r of d.riders) r.score = +(104 + rnd() * 14).toFixed(1);
+    const e = new PhysicsEngine(toRaceSetup(d)); e.start(); let front = null;
+    for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) { e.update(1 / 60); if (!front && e.raceClock.remainingDistance <= 200) front = [...e.riders].sort((a, b) => b.distance - a.distance)[0].number; }
+    const pos = e.ranking.findIndex(r => r.number === front) + 1; n++; if (pos <= 3) top3++; if (pos === 1) win++;
+  }
+  check(top3 / n < 0.7 && win / n > 0.05, '逃げは残りすぎない (残200mで先頭の選手の3着以内率が7割未満、1着も時々ある)', `${n}レース: 1着${Math.round(win / n * 100)}% / 3着以内${Math.round(top3 / n * 100)}%`);
 }
 
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');

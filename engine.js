@@ -52,6 +52,9 @@ export class PhysicsEngine{
  applyRaceSetup(setup){
   this.setup=normalizeRaceSetup(setup);
   this.mode=setup?.mode===RACE_MODE.TEACHER?RACE_MODE.TEACHER:RACE_MODE.AUTONOMOUS;
+  // 車間 (m)。実際の競輪は前の車輪にほぼ付いて走るので、自律モードは詰めた隊列にする。
+  // min: 同じ走路でこれ以上は近づけない / follow: 追走するときの車間 / cutIn: 前に割り込める差 / start: スタート時の間隔
+  this.spacing=this.mode===RACE_MODE.TEACHER?{min:13.5,follow:17,cutIn:9,start:17}:{min:7,follow:7.8,cutIn:5,start:9};
   this.setup.mode=this.mode;
   this.profile=RACE_PROFILES[this.setup.trackProfile]??RACE_PROFILES.PROFILE_400;
   this.totalDistance=this.profile.RACE_DISTANCE;
@@ -75,7 +78,7 @@ export class PhysicsEngine{
    const profile=this.setup.riders[number];
    return {number,globalIndex:index,style:CAR_STYLES[number],profile,mindset:profile.mindset,soloMindset:profile.soloMindset,
     lineId:ctx.lineId,role:ctx.role,linePosition:ctx.linePosition,leaderNumber:ctx.leaderNumber,frontLineMate:ctx.frontLineMate,rearLineMate:ctx.rearLineMate,
-    initialDistance:-14-index*17,distance:-14-index*17,speed:this.profile.FORMATION_SPEED,acceleration:0,laneOffset:-18,action:ACTION.FORMATION,
+    initialDistance:-14-index*this.spacing.start,distance:-14-index*this.spacing.start,speed:this.profile.FORMATION_SPEED,acceleration:0,laneOffset:-18,action:ACTION.FORMATION,
     followTargetNumber:null,energy:1,finished:false,finishTime:null,history:[]};
   });
  }
@@ -173,7 +176,7 @@ export class PhysicsEngine{
   const members=this.lineManager.members(lineId).map(n=>this.rider(n)).filter(Boolean);
   if(members.length<=1)return 1;
   let error=0,count=0;
-  for(let i=1;i<members.length;i++){error+=Math.abs((members[i-1].distance-members[i].distance)-17);count++;}
+  for(let i=1;i<members.length;i++){error+=Math.abs((members[i-1].distance-members[i].distance)-this.spacing.follow);count++;}
   return clamp(1-(error/Math.max(1,count))/24,0,1);
  }
 
@@ -310,7 +313,7 @@ export class PhysicsEngine{
  _resolveExclusiveSlot(rider,next){
   // Bounding slot: longitudinal 13.5m applies only to the same running
   // corridor. Parallel riders remain legal when lateral separation is clear.
-  const MIN_GAP=13.5, SAME_CORRIDOR=11.0;
+  const MIN_GAP=this.spacing.min, SAME_CORRIDOR=11.0;
   let safe=next;
   for(const other of this.riders){
    if(other.number===rider.number||other.finished)continue;
@@ -323,13 +326,19 @@ export class PhysicsEngine{
  }
 
  _laneBlocked(rider,laneBefore){
-  const MIN_GAP=13.5,SAME_CORRIDOR=11.0,CUT_IN_GAP=9;
+  const MIN_GAP=this.spacing.min,SAME_CORRIDOR=11.0,CUT_IN_GAP=this.spacing.cutIn;
   for(const other of this.riders){
    if(other.number===rider.number||other.finished)continue;
    if(Math.abs(other.distance-rider.distance)>=MIN_GAP)continue;
    // Cutting in front of someone is allowed once we are clearly ahead of him (CUT_IN_GAP);
    // he then simply cannot close up below the follow spacing.
-   if(other.distance<=rider.distance-CUT_IN_GAP)continue;
+   if(other.distance<=rider.distance-CUT_IN_GAP){
+    // ...but not between a rider and the wheel he is following (that would split someone else's line).
+    const wheel=other.followTargetNumber?this.rider(other.followTargetNumber):null;
+    const splitting=wheel&&!wheel.finished&&wheel.number!==rider.number&&wheel.distance>rider.distance&&wheel.distance-other.distance<this.spacing.follow*2.2
+      &&Math.abs(wheel.laneOffset-rider.laneOffset)<SAME_CORRIDOR&&!(rider.lineId&&rider.lineId===other.lineId);
+    if(!splitting)continue;
+   }
    const wasClear=Math.abs(other.laneOffset-laneBefore)>=SAME_CORRIDOR;
    const nowInside=Math.abs(other.laneOffset-rider.laneOffset)<SAME_CORRIDOR;
    const closer=Math.abs(other.laneOffset-rider.laneOffset)<Math.abs(other.laneOffset-laneBefore);
@@ -385,6 +394,8 @@ export class PhysicsEngine{
    const box=this.rider(rider.boxedBy);
    if(box&&!box.finished&&box.distance>=rider.distance&&box.action!==ACTION.YIELD)desired=Math.min(desired,Math.max(PACE_FLOOR,box.speed-1.5));
   }
+  // 自律モードでは、誘導員が外れたあとに歩くような速度まで落ちることはない (下げるときを除く)
+  if(this.mode!==RACE_MODE.TEACHER&&this.pacer.state==='EXITED'&&plan.action!==ACTION.RETREAT)desired=Math.max(desired,PACE_FLOOR);
   if(!plan.scenarioControlled && rider.energy<.18)
     desired=Math.min(desired,rider.profile.topSpeed*(.72+1.2*rider.energy));
   const prev=rider.speed;
@@ -408,7 +419,7 @@ export class PhysicsEngine{
   let next=rider.distance+rider.speed*dt;
   const target=rider.followTargetNumber?this.rider(rider.followTargetNumber):null;
   if(target&&!target.finished&&target.distance>rider.distance&&plan.action===ACTION.FOLLOW){
-   next=Math.min(next,target.distance-13.5);
+   next=Math.min(next,target.distance-this.spacing.min);
   }
   next=this._resolveExclusiveSlot(rider,next);
   rider.distance=Math.max(rider.distance,next);

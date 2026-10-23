@@ -2,9 +2,31 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#0f172a">
-    <title>KEIRIN FLOW - 自律AIレース</title>
+    <title>KEIRIN FLOW - AIが展開を読む競輪シミュレーター</title>
+    <meta name="description" content="AIが展開を読む競輪シミュレーター。誘導切り・突っ張り・捲り・番手ブロックまで、各選手が自分で判断して走ります。">
+
+    <!-- ホーム画面に追加 (PWA) -->
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="KEIRIN FLOW">
+
+    <!-- LINE / SNS で共有したときのカード表示 -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="KEIRIN FLOW">
+    <meta property="og:title" content="KEIRIN FLOW - AIが展開を読む競輪シミュレーター">
+    <meta property="og:description" content="並びを変えて「もしも」の展開を試せる。各選手が自分で判断して走る競輪デジタルツイン。">
+    <meta property="og:url" content="https://shigemarukun.github.io/keirin-flow/">
+    <meta property="og:image" content="https://shigemarukun.github.io/keirin-flow/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:locale" content="ja_JP">
+    <meta name="twitter:card" content="summary_large_image">
     <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -72,5 +94,11 @@
     </div>
 
     <script type="module" src="./main.js"></script>
+    <script>
+        // オフラインでも開けるようにする (対応ブラウザのみ)
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+        }
+    </script>
 </body>
 </html>

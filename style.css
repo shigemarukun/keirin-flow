@@ -165,3 +165,30 @@ button:hover { filter: brightness(1.08); }
 @media (max-width: 720px) {
     #rider-legend { left: 10px; bottom: 8px; font-size: 0.68rem; gap: 4px 8px; padding: 5px 8px; }
 }
+
+/* スマホ: レース情報と凡例をコースの上下に出して、コースに重ねない */
+@media (max-width: 720px) {
+    #race-info-overlay {
+        position: static;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 2px 12px;
+        min-width: 0;
+        margin: 0;
+        padding: 8px 12px;
+        border: 0;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 0;
+        background: rgba(7, 11, 20, 0.9);
+        font-size: 0.78rem;
+    }
+    #lap-counter { font-weight: 700; }
+    #rider-legend {
+        position: static;
+        justify-content: center;
+        border-radius: 0;
+        border-top: 1px solid rgba(148, 163, 184, 0.18);
+        background: rgba(7, 11, 20, 0.9);
+    }
+}

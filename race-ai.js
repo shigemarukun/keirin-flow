@@ -29,6 +29,10 @@ export const PACE = Object.freeze({
   BELL_PACE: 15.4
 });
 
+// 展開としてユーザーが選べる戦法
+export const TACTICS = Object.freeze(['SENKO', 'KAMASHI', 'MAKURI', 'OIKOMI']);
+export const TACTIC_LABEL = Object.freeze({ SENKO: '先行', KAMASHI: 'カマシ', MAKURI: '捲り', OIKOMI: '追込' });
+
 export class RaceAI {
   constructor() { this.memory = new Map(); this.pacerCut = null; this.contests = []; }
 
@@ -54,6 +58,8 @@ export class RaceAI {
 
   strikeDistance(rider, style) {
     const p = rider.profile;
+    if (style === 'OIKOMI') return 0; // 追込: 最後の直線まで仕掛けない
+    if (style === 'KAMASHI') return clamp(520 + (p.acceleration - .8) * 200, 460, 600); // 打鐘前後に後方から一気に
     if (style === 'SENKO') return clamp(430 + (p.endurance - .8) * 700 + (p.aggression - .65) * 200, 300, 560);
     return clamp(280 + (p.acceleration - .8) * 200 + (p.tacticalIQ - .8) * 100, 220, 340);
   }
@@ -84,7 +90,12 @@ export class RaceAI {
   plan(rider, engine) {
     const rem = engine.raceClock.remainingDistance;
     const m = this.mem(rider);
-    if (!m.style) { m.style = this.styleOf(rider); m.strikeAt = this.strikeDistance(rider, m.style); }
+    if (!m.style) {
+      // ユーザーが展開を指定していればそれを優先 (先行 / カマシ / 捲り / 追込)、なければ能力から決める
+      m.style = TACTICS.includes(rider.profile.tactic) ? rider.profile.tactic : this.styleOf(rider);
+      m.forced = TACTICS.includes(rider.profile.tactic);
+      m.strikeAt = this.strikeDistance(rider, m.style);
+    }
     if (rem <= PACE.RED_BOARD) this._resolvePacerCut(engine);
 
     this._noteFatigue(rider, engine, m, rem);
@@ -222,6 +233,12 @@ export class RaceAI {
     const lead = this._frontRunner(engine);
     const iLead = lead?.number === rider.number;
     const threat = this._incomingAttack(rider, engine);
+    // 先頭にいたのに他のラインに前へ出られた = 叩かれた (番手が切り替えを考えるきっかけ)
+    if (m.wasFront && !iLead && lead && lead.lineId !== rider.lineId && rem < 600 && rem > PACE.FINAL_STRAIGHT && !m.beaten) {
+      m.beaten = true;
+      engine.emitDecision({ riderNumber: rider.number, category: 'AI_DECISION', action: ACTION.FOLLOW, message: `${lead.number}番に叩かれて先頭を明け渡す (残脚${pct(rider.energy)})` });
+    }
+    m.wasFront = iLead;
 
     if (iLead) {
       if (threat) return this._defendOrConcede(rider, engine, m, threat, rem);
@@ -236,7 +253,7 @@ export class RaceAI {
     }
 
     // not leading: should I go now?
-    const lateAndStillBehind = rem <= 140 && engine.positionRank(rider) >= 4 && rider.energy > .2;
+    const lateAndStillBehind = m.style !== 'OIKOMI' && rem <= 140 && engine.positionRank(rider) >= 4 && rider.energy > .2;
     // the further back we sit, the earlier a makuri has to start
     const behindBy = lead ? lead.distance - rider.distance : 0;
     const strikeAt = m.style === 'MAKURI' ? m.strikeAt + clamp((behindBy - 35) * 1.5, 0, 80) : m.strikeAt;
@@ -244,7 +261,8 @@ export class RaceAI {
     if (strikeNow && rider.energy > .08) {
       if (!m.struck) m.struck = true;
       const leadGap = lead.distance - rider.distance;
-      const why = m.style === 'SENKO' ? '叩いて主導権を奪いにいく' : '中団から捲りに出る';
+      const farBack = behindBy > 40 && rem > 420;
+      const why = { SENKO: farBack ? '後方から一気にカマす' : '叩いて主導権を奪いにいく', KAMASHI: '後方から一気にカマす', MAKURI: '中団から捲りに出る', OIKOMI: '追い込みに出る' }[m.style] ?? '仕掛ける';
       // 外に出たいのに横に選手がいて出られない (包まれた): 少し下げてから外へ持ち出す
       if ((rider.boxedFor ?? 0) > 0.6 && rider.boxedBy) {
         const box = engine.rider(rider.boxedBy);
@@ -270,13 +288,14 @@ export class RaceAI {
     if (gap > 14) return { action: ACTION.CONTROL_PACE, speed: Math.max(engine.pacer.speed + (engine.pacer.distance - 17 - rider.distance) * .3, 0), lane: TRACK_LANE.INNER, reason: '前受けで誘導員の後ろ。外からの上昇を待つ' };
     const mine = this.strength(rider) + (rider.mindset === MINDSET.TSUPPARI ? .06 : rider.mindset === MINDSET.YIELD_AND_ROLL ? -.20 : 0);
     const theirs = this.strength(cutter);
-    if (mine > theirs + .02) {
+    const forced = rider.profile.frontResponse; // ユーザーが「突っ張る / 出させる」を指定していればそれに従う
+    if (forced === 'TSUPPARI' || (forced !== 'YIELD' && mine > theirs + .02)) {
       pc.outcome = 'CONTEST';
       this._startContest(cutter, rider, engine, '誘導切りに来た相手を突っ張る');
-      return { action: ACTION.DEFEND, speed: cutter.speed + 1.2, lane: TRACK_LANE.INNER, reason: `外から来た相手を突っ張る (自分${mine.toFixed(2)} > 相手${theirs.toFixed(2)})` };
+      return { action: ACTION.DEFEND, speed: cutter.speed + 1.2, lane: TRACK_LANE.INNER, reason: forced === 'TSUPPARI' ? '指定どおり、外から来た相手を突っ張る' : `外から来た相手を突っ張る (自分${mine.toFixed(2)} > 相手${theirs.toFixed(2)})` };
     }
     pc.outcome = 'YIELD';
-    return { action: ACTION.YIELD, speed: engine.pacer.speed - .6, lane: TRACK_LANE.INNER, reason: `無理に張り合わず誘導切りを受け入れる (自分${mine.toFixed(2)} ≦ 相手${theirs.toFixed(2)})` };
+    return { action: ACTION.YIELD, speed: engine.pacer.speed - .6, lane: TRACK_LANE.INNER, reason: forced === 'YIELD' ? '指定どおり、誘導切りを出させて一旦引く' : `無理に張り合わず誘導切りを受け入れる (自分${mine.toFixed(2)} ≦ 相手${theirs.toFixed(2)})` };
   }
 
   _incomingAttack(rider, engine) {
@@ -297,6 +316,7 @@ export class RaceAI {
     const mine = this.strength(rider), theirs = this.strength(attacker);
     if (attacker.distance > rider.distance + 4) {
       m.defending = false;
+      if (rem < 600) m.beaten = true; // 叩かれた (番手が切り替えを考えるきっかけ)
       return this._followPlan(attacker, `${attacker.number}番に叩かれたため後ろに付けて立て直す`, { lane: TRACK_LANE.INNER });
     }
     if (m.style === 'SENKO' || rider.mindset === MINDSET.TSUPPARI || rem <= m.strikeAt) {
@@ -316,6 +336,27 @@ export class RaceAI {
   follower(rider, engine, m, rem) {
     const front = engine.rider(rider.frontLineMate);
     const leader = engine.rider(rider.leaderNumber);
+
+    // 番手捲り: 前の選手が脚を使い切りそうで、後ろから捲りが来るなら、自分から踏んで出る
+    if (rider.role === ROLE.BANTE && rem < 280 && rem > PACE.FINAL_STRAIGHT && leader && !this._retreating(leader) && rider.energy > .45) {
+      const threat = this._incomingAttack(rider, engine) ?? this._incomingAttack(leader, engine);
+      if (m.banteMakuri || (threat && threat.gap < 18 && leader.energy < .22 && this.strength(rider) >= this.strength(threat.rider) + .02)) {
+        m.banteMakuri = true;
+        return { action: ACTION.SWITCH_TO_SELF_POWER, speed: this.sprintSpeed(rider), lane: this._attackLane(rider, engine),
+          reason: `番手捲り。前の${leader.number}番が一杯(残脚${pct(leader.energy)})で${threat ? `${threat.rider.number}番が来るため` : ''}自分から踏む` };
+      }
+    }
+
+    // 切り替え: 自分のラインの先頭が叩かれたら、叩いた側のラインの後ろへ移る
+    if (rider.role === ROLE.BANTE && leader && this.memory.get(leader.number)?.beaten && rem < 600 && rem > PACE.FINAL_STRAIGHT && rider.profile.tacticalIQ >= .8) {
+      const cur = m.switchedTo ? engine.rider(m.switchedTo) : null;
+      const target = cur && !cur.finished && cur.distance > rider.distance ? cur : this._aheadNotRetreating(rider, engine);
+      if (target && target.lineId !== rider.lineId) {
+        const t = this._lineTailAhead(target, rider, engine);
+        if (!m.switchedTo) m.switchedTo = t.number;
+        return this._followPlan(t, `${leader.number}番が叩かれたので、${t.number}番の後ろに切り替える`, { lane: t.laneOffset });
+      }
+    }
 
     // Bante block (番手の牽制) against an attacker of another line.
     // (a line that is dropping back after a lost contest has no position to defend)
@@ -444,10 +485,15 @@ export class RaceAI {
   finalStraight(rider, engine, m) {
     if (rider.energy <= .04) return { action: ACTION.FADE, speed: rider.profile.topSpeed * .75, lane: rider.laneOffset, reason: '脚が残っておらず失速' };
     const ahead = this._nearestAheadInCorridor(rider, engine, 22);
-    let lane = rider.laneOffset;
-    if (ahead && ahead.rider.speed < rider.speed + 1.5) lane = clamp(ahead.rider.laneOffset + 13, -18, 42); // 外へ持ち出して抜く
+    let lane = rider.laneOffset, how = '追い込む';
+    if (ahead && ahead.rider.speed < rider.speed + 1.5) {
+      // 前が詰まっている: 内が空いていれば内を突く(内すくい)、空いていなければ外へ持ち出す
+      const innerFree = rider.laneOffset <= 0 && !engine.riders.some(o => !o.finished && o !== rider && Math.abs(o.laneOffset - TRACK_LANE.INNER) < 11 && o.distance - rider.distance > -8 && o.distance - rider.distance < 30);
+      if (innerFree) { lane = TRACK_LANE.INNER; how = '内を突く'; }
+      else { lane = clamp(ahead.rider.laneOffset + 13, -18, 42); how = '外へ持ち出して追い込む'; }
+    }
     const pos = engine.positionRank(rider);
-    return { action: ACTION.FINAL_SPRINT, speed: this.sprintSpeed(rider), lane, reason: `最後の直線。残脚${pct(rider.energy)}で${pos}番手から追い込む` };
+    return { action: ACTION.FINAL_SPRINT, speed: this.sprintSpeed(rider), lane, reason: `最後の直線。残脚${pct(rider.energy)}で${pos}番手から${how}` };
   }
 
   // ---------- plan translation + logging ----------

@@ -63,10 +63,14 @@ export class TenkaiPredictor {
 
     // 誘導切りは後方ラインほど先に動く必要がある、という位置責任を決定論的に加点。
     const rearPosition = candidateCount <= 1 ? 1 : index / (candidateCount - 1);
-    return ability * 0.65 + rearPosition * 0.35;
+    // 展開の指定: 追込を指定された先頭は誘導切りに来ない。先行・カマシ指定は来やすい
+    const tacticBias = leader.tactic === 'OIKOMI' ? -1 : ['SENKO', 'KAMASHI'].includes(leader.tactic) ? 0.1 : 0;
+    return ability * 0.65 + rearPosition * 0.35 + tacticBias;
   }
 
   predictFrontResponse(rider) {
+    if (rider.frontResponse === 'TSUPPARI') return 'TSUPPARI';
+    if (rider.frontResponse === 'YIELD') return 'YIELD';
     if (rider.mindset === MINDSET.TSUPPARI) return 'TSUPPARI';
     if (rider.mindset === MINDSET.YIELD_AND_ROLL) return 'YIELD';
     return 'CONTAIN';

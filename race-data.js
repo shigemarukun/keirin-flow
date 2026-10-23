@@ -30,6 +30,11 @@ const num = (v, fallback) => (Number.isFinite(Number(v)) && v !== '' && v != nul
 
 export const CONVERSION_RULES_VERSION = 'v0';
 
+// 「展開を選ぶ」で指定できる戦法 (ライン先頭・単騎の選手に付ける)
+//   data.tactics       = { 1: 'SENKO', 4: 'MAKURI' }   先行 / カマシ / 捲り / 追込
+//   data.frontResponse = { 1: 'TSUPPARI' }            前受けの選手が 突っ張る / 出させる
+export const TACTIC_CODES = Object.freeze(['SENKO', 'KAMASHI', 'MAKURI', 'OIKOMI']);
+
 // ---------- 入力のチェックと正規化 ----------
 export function validateRaceData(data) {
   const errors = [];
@@ -52,6 +57,8 @@ export function validateRaceData(data) {
   if (missing.length) errors.push(`並びに入っていない選手がいます: ${missing.join(', ')}番`);
   if (unknown.length) errors.push(`並びに出走しない車番があります: ${unknown.join(', ')}番`);
   if (twice.length) errors.push(`並びで ${[...new Set(twice)].join(', ')}番 が2回出てきます`);
+  for (const [car, t] of Object.entries(data?.tactics ?? {})) if (t && !TACTIC_CODES.includes(t)) errors.push(`${car}番の戦法「${t}」は指定できません`);
+  for (const [car, f] of Object.entries(data?.frontResponse ?? {})) if (f && !['TSUPPARI', 'YIELD'].includes(f)) errors.push(`${car}番の前受けの対応「${f}」は指定できません`);
   return errors;
 }
 
@@ -131,7 +138,12 @@ export function toRaceSetup(data) {
   if (data.autoFormation) lines = orderLinesAuto(lines, infoByCar);
 
   const riders = {};
-  for (const [car, info] of Object.entries(infoByCar)) riders[car] = { ...info.profile };
+  for (const [car, info] of Object.entries(infoByCar)) {
+    riders[car] = { ...info.profile };
+    const tactic = data.tactics?.[car], front = data.frontResponse?.[car];
+    if (TACTIC_CODES.includes(tactic)) riders[car].tactic = tactic;
+    if (front === 'TSUPPARI' || front === 'YIELD') riders[car].frontResponse = front;
+  }
   const setupLines = [];
   lines.forEach((group, index) => {
     if (group.length === 1) { riders[group[0]].solo = true; return; }

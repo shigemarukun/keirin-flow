@@ -30,9 +30,9 @@ export const PACE = Object.freeze({
 });
 
 export class RaceAI {
-  constructor() { this.memory = new Map(); this.pacerCut = null; }
+  constructor() { this.memory = new Map(); this.pacerCut = null; this.contests = []; }
 
-  reset() { this.memory.clear(); this.pacerCut = null; }
+  reset() { this.memory.clear(); this.pacerCut = null; this.contests = []; }
 
   mem(rider) {
     if (!this.memory.has(rider.number)) {
@@ -87,8 +87,10 @@ export class RaceAI {
     if (!m.style) { m.style = this.styleOf(rider); m.strikeAt = this.strikeDistance(rider, m.style); }
     if (rem <= PACE.RED_BOARD) this._resolvePacerCut(engine);
 
-    let d;
-    if (rem <= PACE.FINAL_STRAIGHT) d = this.finalStraight(rider, engine, m);
+    this._noteFatigue(rider, engine, m, rem);
+
+    let d = this._contestDecision(rider, engine, rem);
+    if (!d && rem <= PACE.FINAL_STRAIGHT) d = this.finalStraight(rider, engine, m);
     if (!d) {
       const role = rider.role;
       if (role === ROLE.LEADER) d = this.leader(rider, engine, m, rem);
@@ -112,7 +114,22 @@ export class RaceAI {
     return best;
   }
 
-  _leaderAhead(engine) { return engine.getRaceLeader(); }
+  // Who is really at the front: riders dropping back after a lost contest don't count.
+  _retreating(o) { const om = this.memory.get(o.number); return o.action === ACTION.RETREAT || (om?.gaveUp && !om?.retreatDone); }
+  _frontRunner(engine) {
+    let best = null;
+    for (const o of engine.riders) if (!o.finished && !this._retreating(o) && (!best || o.distance > best.distance)) best = o;
+    return best;
+  }
+  _aheadNotRetreating(rider, engine) {
+    let best = null;
+    for (const o of engine.riders) {
+      if (o.finished || o.number === rider.number || this._retreating(o)) continue;
+      const gap = o.distance - rider.distance;
+      if (gap > 0 && (!best || gap < best.distance - rider.distance)) best = o;
+    }
+    return best;
+  }
 
   _attackLane(rider, engine) {
     // one lane outside the widest rider in the zone we must pass
@@ -133,7 +150,7 @@ export class RaceAI {
   leader(rider, engine, m, rem) {
     const p = rider.profile;
     const pc = this.pacerCut;
-    const isRaceLeader = engine.getRaceLeader()?.number === rider.number;
+    const isRaceLeader = this._frontRunner(engine)?.number === rider.number;
 
     // 1) Pacer phase: the front leader sits behind the pacer.
     if (engine.pacer.state !== 'EXITED' && isRaceLeader && !(pc && pc.cutterNumber === rider.number && !pc.outcome)) {
@@ -153,14 +170,15 @@ export class RaceAI {
     if (m.gaveUp && !m.retreatDone) {
       let tail = null;
       for (const o of engine.riders) if (!o.finished && o.lineId !== rider.lineId && (!tail || o.distance < tail.distance)) tail = o;
-      if (tail && rider.distance > tail.distance - 15 && engine.raceClock.remainingDistance > 430) {
-        return { action: ACTION.RETREAT, speed: Math.max(7, tail.speed - 3), lane: TRACK_LANE.OUTSIDE, reason: '突っ張られたので外を下げ、後方へ引いて立て直す' };
+      if (tail && rider.distance > tail.distance - 15 && engine.raceClock.remainingDistance > 300) {
+        const front = this._frontRunner(engine);
+        return { action: ACTION.RETREAT, speed: Math.max(7, Math.min(tail.speed, front?.speed ?? tail.speed) - 5.5), lane: TRACK_LANE.OUTSIDE, reason: '突っ張られたので外を下げ、後方へ引いて立て直す' };
       }
       m.retreatDone = true;
     }
 
     // 4) Strike: our planned moment has come (or the race is slipping away).
-    const lead = engine.getRaceLeader();
+    const lead = this._frontRunner(engine);
     const iLead = lead?.number === rider.number;
     const threat = this._incomingAttack(rider, engine);
 
@@ -186,10 +204,13 @@ export class RaceAI {
       if (!m.struck) m.struck = true;
       const leadGap = lead.distance - rider.distance;
       const why = m.style === 'SENKO' ? '叩いて主導権を奪いにいく' : '中団から捲りに出る';
+      const blocker = this._blockerOn(rider, engine);
+      if (blocker) return { action: ACTION.ATTACK, speed: this.sprintSpeed(rider), lane: this._attackLane(rider, engine), reason: `${blocker.number}番のブロックで外へ持っていかれながら踏む (残脚${pct(rider.energy)})`, tag: 'BLOCKED' };
       return { action: ACTION.ATTACK, speed: this.sprintSpeed(rider), lane: this._attackLane(rider, engine), reason: `残${rem.toFixed(0)}mで${why} (先頭まで${leadGap.toFixed(0)}m・残脚${pct(rider.energy)})` };
     }
 
-    const ahead = this._nearestAheadInCorridor(rider, engine, 80) ?? (engine.findNearestAhead(rider) ? { rider: engine.findNearestAhead(rider) } : null);
+    const corridor = this._nearestAheadInCorridor(rider, engine, 80);
+    const ahead = corridor && !this._retreating(corridor.rider) ? corridor : (this._aheadNotRetreating(rider, engine) ? { rider: this._aheadNotRetreating(rider, engine) } : null);
     if (ahead) return this._followPlan(ahead.rider, m.gaveUp ? '一度引いて脚を回復。後方から再仕掛けを待つ' : `前のラインの後ろで脚を溜める (仕掛け予定 残${m.strikeAt.toFixed(0)}m)`, { lane: TRACK_LANE.INNER });
     return { action: ACTION.CONTROL_PACE, speed: PACE.CRUISE, lane: TRACK_LANE.INNER, reason: '位置を保つ' };
   }
@@ -202,8 +223,8 @@ export class RaceAI {
     const mine = this.strength(rider) + (rider.mindset === MINDSET.TSUPPARI ? .06 : rider.mindset === MINDSET.YIELD_AND_ROLL ? -.20 : 0);
     const theirs = this.strength(cutter);
     if (mine > theirs + .02) {
-      pc.outcome = 'TSUPPARI';
-      this.mem(cutter).gaveUp = true;
+      pc.outcome = 'CONTEST';
+      this._startContest(cutter, rider, engine, '誘導切りに来た相手を突っ張る');
       return { action: ACTION.DEFEND, speed: cutter.speed + 1.2, lane: TRACK_LANE.INNER, reason: `外から来た相手を突っ張る (自分${mine.toFixed(2)} > 相手${theirs.toFixed(2)})` };
     }
     pc.outcome = 'YIELD';
@@ -233,6 +254,7 @@ export class RaceAI {
     if (m.style === 'SENKO' || rider.mindset === MINDSET.TSUPPARI || rem <= m.strikeAt) {
       if (rider.energy > .18 && mine >= theirs - .05) {
         m.defending = true;
+        if (Math.abs(rider.distance - attacker.distance) < 10) this._startContest(attacker, rider, engine, '主導権を渡さず合わせて踏む');
         return { action: ACTION.DEFEND, speed: this.sprintSpeed(rider), lane: TRACK_LANE.INNER, reason: `${attacker.number}番の仕掛けに合わせて踏み上げ主導権を守る (残脚${pct(rider.energy)})` };
       }
     }
@@ -254,7 +276,7 @@ export class RaceAI {
       if (now >= m.blockCooldownUntil) {
         const t = this._blockTarget(rider, engine);
         if (t && rider.profile.blockSkill * rider.energy > .35) {
-          m.blockUntil = now + .7; m.blockCooldownUntil = now + 2.5;
+          m.blockUntil = now + 1.0; m.blockCooldownUntil = now + 2.5;
           m.blockLane = clamp(t.laneOffset - 8, rider.laneOffset, 34);
           m.blockReason = `${t.number}番の捲りに外へ張って牽制 (ブロック力${pct(rider.profile.blockSkill)})`;
           return { action: ACTION.BLOCK, speed: Math.max(rider.speed, front?.speed ?? rider.speed), lane: m.blockLane, reason: m.blockReason };
@@ -280,7 +302,7 @@ export class RaceAI {
     let best = null;
     for (const o of engine.riders) {
       if (o.finished || o.number === rider.number || (o.lineId && o.lineId === rider.lineId)) continue;
-      if (![ACTION.ATTACK, ACTION.SWITCH_TO_SELF_POWER].includes(o.action)) continue;
+      if (![ACTION.ATTACK, ACTION.FULL_CONTEST, ACTION.SWITCH_TO_SELF_POWER].includes(o.action)) continue;
       const gap = rider.distance - o.distance;
       if (gap < -4 || gap > 16) continue;
       if (o.laneOffset <= rider.laneOffset + 4 || o.laneOffset > rider.laneOffset + 30) continue;
@@ -288,6 +310,75 @@ export class RaceAI {
       if (!best || gap < best.gap) best = { r: o, gap };
     }
     return best?.r ?? null;
+  }
+
+  _blockerOn(rider, engine) {
+    for (const b of engine.riders) {
+      if (b.finished || b.number === rider.number || b.action !== ACTION.BLOCK) continue;
+      if (b.lineId && b.lineId === rider.lineId) continue;
+      if (Math.abs(b.distance - rider.distance) < 22 && Math.abs(b.laneOffset - rider.laneOffset) < 26) return b;
+    }
+    return null;
+  }
+
+  // ---------- 踏み合い / 競り合い (side-by-side contest) ----------
+  _startContest(attacker, defender, engine, why) {
+    if (this.contests.some(c => [c.attacker, c.defender].some(n => n === attacker.number || n === defender.number))) return;
+    if (engine.elapsedTime < (this.mem(attacker).noContestUntil ?? -1)) return;
+    this.contests.push({ attacker: attacker.number, defender: defender.number, start: engine.elapsedTime });
+    engine.emitDecision({ riderNumber: defender.number, category: 'CONTEST', action: ACTION.FULL_CONTEST,
+      message: `${why}。${attacker.number}番と並んで踏み合い (残脚 ${attacker.number}番${pct(attacker.energy)} / ${defender.number}番${pct(defender.energy)})` });
+  }
+
+  _resolveContests(engine) {
+    if (this._resolvedAt === engine.elapsedTime) return;
+    this._resolvedAt = engine.elapsedTime;
+    for (const c of [...this.contests]) {
+      const a = engine.rider(c.attacker), d = engine.rider(c.defender);
+      const elapsed = engine.elapsedTime - c.start;
+      const lead = a.distance - d.distance;
+      const sa = this.strength(a), sd = this.strength(d) + .03; // the inside rider has the shorter path
+      let winner = null;
+      if (lead > 6) winner = 'ATTACKER';
+      else if (lead < -9 && elapsed >= 1.5) winner = 'DEFENDER';
+      else if (elapsed >= 1.2 && Math.abs(lead) < 9) {
+        if (a.energy < .2 || sa < sd - .03) winner = 'DEFENDER';
+        else if (d.energy < .15 || sd < sa - .06) winner = 'ATTACKER';
+      }
+      if (!winner && elapsed >= 4) winner = sa > sd ? 'ATTACKER' : 'DEFENDER';
+      if (!winner) continue;
+      this.contests = this.contests.filter(x => x !== c);
+      const secs = elapsed.toFixed(1);
+      if (winner === 'DEFENDER') {
+        const am = this.mem(a); am.gaveUp = true; am.retreatDone = false; am.struck = false; am.noContestUntil = engine.elapsedTime + 3;
+        const late = engine.raceClock.remainingDistance <= 430;
+        engine.emitDecision({ riderNumber: a.number, category: 'CONTEST', action: ACTION.RETREAT, message: `${secs}秒の踏み合いで${d.number}番に競り負け、${late ? '前に出られず' : '後ろへ下げる'} (残脚${pct(a.energy)})` });
+        engine.emitDecision({ riderNumber: d.number, category: 'CONTEST', action: ACTION.DEFEND, message: `踏み合いを制して前を守る。ただし脚を使った (残脚${pct(d.energy)})` });
+      } else {
+        const dm = this.mem(d); dm.beaten = true; dm.noContestUntil = engine.elapsedTime + 3;
+        if (this.pacerCut && this.pacerCut.cutterNumber === a.number) this.pacerCut.outcome = 'CUT';
+        engine.emitDecision({ riderNumber: a.number, category: 'CONTEST', action: ACTION.ATTACK, message: `${secs}秒の踏み合いを制して${d.number}番を叩き切る (残脚${pct(a.energy)})` });
+      }
+    }
+  }
+
+  _contestDecision(rider, engine, rem) {
+    this._resolveContests(engine);
+    const c = this.contests.find(x => x.attacker === rider.number || x.defender === rider.number);
+    if (!c) return null;
+    const isDefender = c.defender === rider.number;
+    const other = engine.rider(isDefender ? c.attacker : c.defender);
+    const lane = isDefender ? TRACK_LANE.INNER : Math.max(rider.laneOffset, other.laneOffset + 16);
+    return { action: ACTION.FULL_CONTEST, speed: this.sprintSpeed(rider) + (isDefender ? .2 : 0), lane,
+      reason: isDefender ? `${other.number}番を内で張って踏み合い中` : `${other.number}番の外で並んで踏み合い中`, silent: true };
+  }
+
+  _noteFatigue(rider, engine, m, rem) {
+    if (m.tiredLogged || rem < 30 || rider.energy > .22) return;
+    if (![ACTION.ATTACK, ACTION.DEFEND, ACTION.FULL_CONTEST, ACTION.CONTROL_PACE, ACTION.FINAL_SPRINT].includes(rider.action)) return;
+    if (engine.positionRank(rider) > 3) return; // only worth announcing for riders at the front
+    m.tiredLogged = true;
+    engine.emitDecision({ riderNumber: rider.number, category: 'FATIGUE', action: ACTION.FADE, message: `脚が一杯になりタレ始める (残脚${pct(rider.energy)}・${rider.speed.toFixed(1)}m/s)` });
   }
 
   // ---------- SOLO ----------
@@ -334,6 +425,7 @@ export class RaceAI {
     const key = `${d.action}|${d.followTarget?.number ?? ''}`;
     if (key === m.key) return;
     m.key = key;
+    if (d.silent) return; // contest start/end is logged by the contest itself
     if (d.action === ACTION.FOLLOW && !/引いて|叩かれ|離れた|単騎/.test(d.reason)) return; // ordinary following is noise
     engine.emitDecision({ riderNumber: rider.number, category: 'AI_DECISION', action: d.action, message: d.reason });
   }

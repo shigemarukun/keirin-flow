@@ -3,6 +3,11 @@ import { LineManager } from './line-manager.js';
 import { TenkaiPredictor } from './tenkai-predictor.js';
 import { KeirinProtocolController } from './keirin-protocol-controller.js';
 import { ScenarioPhaseManager } from './scenario-phase-manager.js';
+import { RaceAI } from './race-ai.js';
+
+// RACE_MODE.AUTONOMOUS: every rider decides from its own sensors, profile and line role.
+// RACE_MODE.TEACHER: the fixed CR-0013 teaching script (kept for reference only).
+export const RACE_MODE=Object.freeze({AUTONOMOUS:'AUTONOMOUS',TEACHER:'TEACHER'});
 
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const PACER_STATE=Object.freeze({LEADING:'LEADING',EXITING:'EXITING',EXITED:'EXITED'});
@@ -39,11 +44,14 @@ export class PhysicsEngine{
   this.tenkaiPredictor=new TenkaiPredictor();
   this.keirinProtocol=new KeirinProtocolController();
   this.scenarioPhaseManager=new ScenarioPhaseManager();
+  this.raceAI=new RaceAI();
   this.applyRaceSetup(setup);
  }
 
  applyRaceSetup(setup){
   this.setup=normalizeRaceSetup(setup);
+  this.mode=setup?.mode===RACE_MODE.TEACHER?RACE_MODE.TEACHER:RACE_MODE.AUTONOMOUS;
+  this.setup.mode=this.mode;
   this.profile=RACE_PROFILES[this.setup.trackProfile]??RACE_PROFILES.PROFILE_400;
   this.totalDistance=this.profile.RACE_DISTANCE;
   this.lineManager=new LineManager(this.setup);
@@ -74,7 +82,9 @@ export class PhysicsEngine{
   this.pacer={distance:0,speed:this.profile.FORMATION_SPEED,state:PACER_STATE.LEADING,laneOffset:-18,exitProgress:0};
   for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.history=[];r.raceIntent=null;r.laneMotion=null;r.laneVelocity=0;r.visualAngleOffset=0;r.lastDecisionAction=null;r.lastDecisionLogTime=null;}
   this.keirinProtocol.initialize(this,this.prediction);
-  this.scenarioPhaseManager.initialize(this);
+  this.raceAI.reset();
+  if(this.mode===RACE_MODE.TEACHER)this.scenarioPhaseManager.initialize(this);
+  else this.emitDecision({category:'RACE',message:'自律モード: 各選手が能力・脚の残り・ライン内の役割から判断します'});
  }
 
  start(){if(this.riders.every(r=>r.finished))this.reset();this.isStarted=true;}
@@ -225,7 +235,10 @@ export class PhysicsEngine{
  }
 
  _canPacerExit(){
-  return this.scenarioPhaseManager?.canPacerExit(this) ?? false;
+  if(this.mode===RACE_MODE.TEACHER)return this.scenarioPhaseManager?.canPacerExit(this) ?? false;
+  // Autonomous: the pacer leaves once a pacer-cut attacker has actually reached
+  // the front line, or at the latest before the bell (safety fallback).
+  return this.raceAI.pacerCanExit(this);
  }
  _updatePacer(dt){
   if(this.pacer.state===PACER_STATE.EXITED)return;
@@ -254,7 +267,12 @@ export class PhysicsEngine{
   if([ACTION.ATTACK,ACTION.LINE_ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.DEFEND,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))factor=1.55;
   if(plan.action===ACTION.BLOCK)factor=1.30;
   if([ACTION.SAVE_ENERGY,ACTION.YIELD,ACTION.RETREAT].includes(plan.action))factor=.55;
-  const load=(.0022+.0105*demand*demand)*factor/Math.max(.55,rider.profile.endurance);
+  // Slipstream: riding close behind someone in the same corridor saves energy.
+  let draft=1;
+  if(this.mode!==RACE_MODE.TEACHER){
+   for(const o of this.riders){if(o===rider||o.finished)continue;const g=o.distance-rider.distance;if(g>0&&g<26&&Math.abs(o.laneOffset-rider.laneOffset)<11){draft=1-.45*(rider.profile.draftSkill??.75);break;}}
+  }
+  const load=(.0022+(this.mode===RACE_MODE.TEACHER?.0105:.0150)*demand*demand)*factor*draft/Math.max(.55,rider.profile.endurance);
   rider.energy=clamp(rider.energy-load*dt,0,1);
  }
 
@@ -300,12 +318,37 @@ export class PhysicsEngine{
   return safe;
  }
 
+ _laneBlocked(rider,laneBefore){
+  const MIN_GAP=13.5,SAME_CORRIDOR=11.0;
+  for(const other of this.riders){
+   if(other.number===rider.number||other.finished)continue;
+   if(Math.abs(other.distance-rider.distance)>=MIN_GAP)continue;
+   const wasClear=Math.abs(other.laneOffset-laneBefore)>=SAME_CORRIDOR;
+   const nowInside=Math.abs(other.laneOffset-rider.laneOffset)<SAME_CORRIDOR;
+   const closer=Math.abs(other.laneOffset-rider.laneOffset)<Math.abs(other.laneOffset-laneBefore);
+   if(nowInside&&(wasClear||closer))return true;
+  }
+  return false;
+ }
+
  _getOuterLaneLoad(rider){
   const outside=Math.max(0,rider.laneOffset-TRACK_LANE.INNER);
   return clamp(outside/900,0,.065);
  }
 
  _getBlockResistance(rider){
+  if(this.mode!==RACE_MODE.TEACHER){
+   // Any rider of another line that is actively BLOCKing nearby slows this rider.
+   let resistance=0;
+   for(const blocker of this.riders){
+    if(blocker.finished||blocker.number===rider.number||blocker.action!==ACTION.BLOCK)continue;
+    if(blocker.lineId&&blocker.lineId===rider.lineId)continue;
+    const longitudinal=Math.abs(blocker.distance-rider.distance),lateral=Math.abs(blocker.laneOffset-rider.laneOffset);
+    if(longitudinal>22||lateral>26)continue;
+    resistance=Math.max(resistance,(1-clamp(longitudinal/22,0,1))*(blocker.profile?.blockSkill??.75)*1.15);
+   }
+   return resistance;
+  }
   if(!this.scenarioPhaseManager?.phase4BlockActive)return 0;
   const d=this.scenarioPhaseManager.definition;
   const attackLeader=this.rider(this.lineManager.leaderNumber(d.middleLineId));
@@ -338,7 +381,12 @@ export class PhysicsEngine{
   else rider.speed=Math.max(desired,rider.speed-braking*dt);
   rider.speed=Math.max(0,rider.speed); // reverse is impossible
 
+  const laneBefore=rider.laneOffset;
   this._updateLaneMotion(rider,plan.laneTarget,plan,dt);
+  if(this.mode!==RACE_MODE.TEACHER&&this._laneBlocked(rider,laneBefore)){
+   // Cannot move sideways into a rider who is right next to us: hold the line.
+   rider.laneOffset=laneBefore;rider.laneMotion=null;rider.laneVelocity=0;
+  }
 
   let next=rider.distance+rider.speed*dt;
   const target=rider.followTargetNumber?this.rider(rider.followTargetNumber):null;
@@ -355,17 +403,18 @@ export class PhysicsEngine{
 
  _step(dt){
   this.elapsedTime+=dt;
-  this.scenarioPhaseManager.update(this,dt);
-  this._updatePacer(dt);
+  const teacher=this.mode===RACE_MODE.TEACHER;
+  if(teacher)this.scenarioPhaseManager.update(this,dt);
+    this._updatePacer(dt);
   const plans=new Map();
-  for(const rider of this.riders)if(!rider.finished)plans.set(rider.number,this.scenarioPhaseManager.plan(rider,this));
+  for(const rider of this.riders)if(!rider.finished)plans.set(rider.number,teacher?this.scenarioPhaseManager.plan(rider,this):this.raceAI.plan(rider,this,dt));
   for(const rider of this.riders){
    if(rider.finished)continue;
    const plan=plans.get(rider.number);this._applyEnergy(rider,plan,dt);const before=rider.distance;this._move(rider,plan,dt);
    if(before<this.totalDistance&&rider.distance>=this.totalDistance)this._recordFinish(rider);
   }
   const leaderDistance=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),triggered=this.raceClock.update(this.pacer.distance,leaderDistance,this);
-  if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:'打鐘。フェーズ駆動シナリオを継続'});this.onBellCallback?.();}
+  if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:teacher?'打鐘。教材シナリオを継続':'打鐘。ここから各選手が自由に判断'});this.onBellCallback?.();}
  }
 
  update(dt){
@@ -395,5 +444,5 @@ export class PhysicsEngine{
   return {gaps,minGap:gaps.length?Math.min(...gaps.map(x=>x.gap)):null,maxGap:gaps.length?Math.max(...gaps.map(x=>x.gap)):null};
  }
 
- getState(){return{riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,scenario:this.scenarioPhaseManager.state(),protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
+ getState(){return{riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,mode:this.mode,scenario:this.mode===RACE_MODE.TEACHER?this.scenarioPhaseManager.state():null,protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
 }

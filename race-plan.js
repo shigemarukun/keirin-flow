@@ -178,8 +178,14 @@ export const DEFAULT_RACE_SETUP = Object.freeze({
   }
 });
 
+// Abilities (0..1) decide the physical numbers unless they are given explicitly:
+//   power        -> top speed it can hold
+//   acceleration -> extra sprint speed on top of that
 export function mergeRiderProfile(profile = {}) {
-  return { ...DEFAULT_RIDER_PROFILE, ...profile };
+  const merged = { ...DEFAULT_RIDER_PROFILE, ...profile };
+  if (profile.topSpeed === undefined) merged.topSpeed = 15.5 + merged.power * 6.0;
+  if (profile.sprintBonus === undefined) merged.sprintBonus = 1.5 + merged.acceleration * 3.5;
+  return merged;
 }
 
 export function normalizeRaceSetup(input = DEFAULT_RACE_SETUP) {

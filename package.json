@@ -1,10 +1,10 @@
 {
-  "name": "keirin-flow-cr0014-real-physics",
-  "version": "0.14.0",
+  "name": "keirin-flow",
+  "version": "0.17.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node cr0014-real-physics-check.mjs",
-    "test:legacy": "node cr0013-fusion-check.mjs"
+    "test": "node autonomy-check.mjs",
+    "test:teacher": "node cr0014-real-physics-check.mjs"
   }
 }

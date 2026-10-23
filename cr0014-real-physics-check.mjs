@@ -5,7 +5,7 @@ const scales=[0.5,1,2,3];
 const expected='4-5-2-6-1-3-7-8-9';
 const results=[];
 for(const scale of scales){
-  const e=new PhysicsEngine(DEFAULT_RACE_SETUP); e.setSpeedScale(scale); e.start();
+  const e=new PhysicsEngine({...DEFAULT_RACE_SETUP,mode:"TEACHER"}); e.setSpeedScale(scale); e.start();
   let frames=0, minCorridor=Infinity, reverse=false, overlap=false;
   const prev=new Map(e.riders.map(r=>[r.number,r.distance]));
   while(e.isStarted && frames<30000){

@@ -35,17 +35,19 @@ export class RaceRecorder {
 }
 
 // ---------- 決まり手 ----------
-// 逃げ: 最終ホーム・バック・直線入口(4コーナー出口・残り約55m)のどこでも先頭、そのまま1着
+// 逃げ: バックと直線入口(4コーナー出口・残り約55m)で先頭、そのまま1着 (捲って先頭に立った選手は除く)
 // 捲り: バックでは先頭ではなく、直線入口までに先頭を奪って1着 (番手捲りも含む)
 // 差し: 直線入口で先頭ではなく、直線で前を抜いて1着
 // マーク: (2着・3着) 同じラインで前を走っていた選手のすぐ後ろでゴール
-export function kimarite(snapshots, ranking, frontMateOf) {
+export function kimarite(snapshots, ranking, frontMateOf, logs = []) {
   const winner = ranking[0]?.number;
   if (winner == null) return null;
   const leadAt = key => snapshots[key]?.order?.[0];
   const posAtBack = snapshots.back?.order?.indexOf(winner) ?? -1;
   let winnerHow;
-  if (leadAt('straight') === winner && leadAt('back') === winner && leadAt('home') === winner) winnerHow = '逃げ'; // 最終ホームから先頭のまま
+  // 先頭のまま押し切っても、捲って先頭に立った選手は「捲り」
+  const madeMakuri = logs.some(l => l.riderNumber === winner && l.remaining <= 600 && /捲りに出る|番手捲り/.test(l.message));
+  if (leadAt('straight') === winner && leadAt('back') === winner && (leadAt('home') === winner || !madeMakuri)) winnerHow = '逃げ';
   else if (leadAt('straight') === winner && posAtBack !== 0) winnerHow = '捲り'; // 直線に入るまでに先頭を奪った (番手捲りも含む)
   else winnerHow = '差し';
   // マーク: ラインで自分のすぐ前を走っていた選手の、すぐ後ろの着順でゴール
@@ -137,6 +139,9 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
   }
   const contest = firstLog(riderLogs, l => /秒の踏み合い/.test(l.message) && l.remaining <= 500);
   if (contest) add('攻防', contest.message.replace(/\s*\(残脚.*\)/, '').replace(/^/, `${name(contest.riderNumber)}: `));
+  const seriStart = firstLog(riderLogs, l => /番手を巡って/.test(l.message));
+  const seriEnd = firstLog(riderLogs, l => /秒の競りに勝って/.test(l.message));
+  if (seriStart) add('競り', `${name(seriStart.riderNumber)}が${seriStart.message.replace(/\s*\(.*\)/, '')}。${seriEnd ? `${name(seriEnd.riderNumber)}が${seriEnd.message.replace(/^.*?秒の競りに勝って、/, '').replace(/\s*\(.*\)/, '')}。` : ''}`);
   const switched = firstLog(riderLogs, l => /切り替える/.test(l.message));
   if (switched) add('攻防', `${name(switched.riderNumber)}は${switched.message.replace(/\s*\(.*\)/, '')}`);
 
@@ -149,7 +154,7 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
 
   // 結果
   const frontMateOf = n => { const l = setup.lines.find(x => x.members.includes(n)); const i = l ? l.members.indexOf(n) : -1; return i > 0 ? l.members[i - 1] : null; };
-  const k = kimarite(snapshots, ranking, frontMateOf);
+  const k = kimarite(snapshots, ranking, frontMateOf, logs);
   if (k && ranking.length >= 3) {
     const [a, b, c] = ranking;
     add('ゴール', `${name(a.number)}が${k.how}で1着。2着${name(b.number)}${k.marks.includes(b.number) ? '(マーク)' : ''}、3着${name(c.number)}${k.marks.includes(c.number) ? '(マーク)' : ''}。`);

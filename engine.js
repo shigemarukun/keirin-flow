@@ -276,6 +276,7 @@ export class PhysicsEngine{
   let factor=1;
   if([ACTION.ATTACK,ACTION.LINE_ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.DEFEND,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))factor=1.55;
   if(plan.action===ACTION.BLOCK)factor=1.30;
+  if(Number.isFinite(plan.effortFactor))factor=plan.effortFactor; // AIが「一定のペースで踏んでいるだけ」と伝えたとき
   if([ACTION.SAVE_ENERGY,ACTION.YIELD,ACTION.RETREAT].includes(plan.action))factor=.55;
   // Slipstream: riding close behind someone in the same corridor saves energy.
   let draft=1;
@@ -429,8 +430,19 @@ export class PhysicsEngine{
   rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
  }
 
- _recordFinish(rider){rider.coastDistance=rider.distance-this.totalDistance;rider.distance=this.totalDistance+rider.coastDistance;rider.finished=true;rider.finishTime=this.elapsedTime;this.ranking.push({rank:0,number:rider.number,lineId:rider.lineId,time:rider.finishTime,margin:''});}
- _finalizeRanking(){this.ranking.sort((a,b)=>a.time-b.time||a.number-b.number);this.ranking.forEach((item,index)=>{item.rank=index+1;item.margin=index===0?'先頭':'';});}
+ _recordFinish(rider){rider.coastDistance=rider.distance-this.totalDistance;rider.distance=this.totalDistance+rider.coastDistance;rider.finished=true;
+  // 写真判定: 同じ計算の刻みでゴールした選手は、線を越えた正確な時刻で着順を決める
+  rider.finishTime=this.elapsedTime-(rider.coastDistance/Math.max(rider.speed,1));this.ranking.push({rank:0,number:rider.number,lineId:rider.lineId,time:rider.finishTime,margin:''});}
+ _finalizeRanking(){
+  this.ranking.sort((a,b)=>a.time-b.time||a.number-b.number);
+  // 着差: 前の選手とのゴールの時間差を、自転車1台分(約1.8m)の長さに直して表す
+  this.ranking.forEach((item,index)=>{
+   item.rank=index+1;
+   if(index===0){item.margin='';return;}
+   const len=(item.time-this.ranking[index-1].time)*18/1.8;
+   item.margin=len<0.08?'同着に近い':len<0.25?'タイヤ差':len<0.5?'1/2車輪':len<0.8?'1/2車身':len<1.3?'1車身':len<1.8?'1車身半':len<2.6?'2車身':len<4?`${Math.round(len)}車身`:'大差';
+  });
+ }
 
  _step(dt){
   this.elapsedTime+=dt;

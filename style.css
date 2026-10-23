@@ -45,7 +45,7 @@ main {
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
 }
 
-canvas { display: block; width: 100%; height: auto; aspect-ratio: 1; }
+canvas { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; }
 
 #race-info-overlay {
     position: absolute;
@@ -166,8 +166,8 @@ button:hover { filter: brightness(1.08); }
     #rider-legend { left: 10px; bottom: 8px; font-size: 0.68rem; gap: 4px 8px; padding: 5px 8px; }
 }
 
-/* スマホ: レース情報と凡例をコースの上下に出して、コースに重ねない */
-@media (max-width: 720px) {
+/* レース情報と凡例はコースの下に出して、コースに重ねない (パソコン・スマホ共通) */
+@media (min-width: 0px) {
     #race-info-overlay {
         position: static;
         display: flex;

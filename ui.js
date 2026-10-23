@@ -706,10 +706,13 @@ export class UIRenderer {
 
             resultList.innerHTML =
                 state.ranking.length
-                    ? state.ranking
+                    ? [...state.ranking].sort((a, b) => a.time - b.time)
                         .map(
-                            item =>
-                                `<li><strong>${item.rank}着 ${item.number}番</strong><span>${item.margin}</span></li>`
+                            (item, index) => {
+                                const name = state.setup?.meta?.names?.[item.number];
+                                const safe = name ? String(name).replace(/[&<>"']/g, '') : '';
+                                return `<li><strong>${index + 1}着 ${item.number}番${safe ? ` <small>${safe}</small>` : ''}</strong><span>${item.margin ?? ''}</span></li>`;
+                            }
                         )
                         .join('')
                     : '<li class="empty-result">レース終了後に表示</li>';

@@ -191,6 +191,18 @@ check(er.logs.some(l => l.c === 'FATIGUE' && l.n === 1) && fade1.peak - fade1.la
   check(ts.decisionLogs.some(l => l.riderNumber === 1 && /突っ張る/.test(l.message)), '前受けに「突っ張る」を指定すると、地力が下でも突っ張る');
 }
 
+// 11b. 番手競り: 単騎が番手を競り、強ければ番手を奪い、負けた番手は3番手に回る
+{
+  const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
+  const runSeri = score => { const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines('123/456/78/9'); Object.assign(d.riders[8], { score, style: '追' }); d.riders[1].score = 104; d.tactics = { 9: 'SERI:1' };
+    const e = new PhysicsEngine(toRaceSetup(d)); e.start(); let order = null;
+    for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) { e.update(1 / 60); if (!order && e.raceClock.remainingDistance < 500) order = [...e.riders].sort((a, b) => b.distance - a.distance).map(r => r.number).join(''); }
+    return { e, order }; };
+  const strong = runSeri(122), weak = runSeri(100);
+  check(strong.e.decisionLogs.some(l => /番手を奪う/.test(l.message)) && strong.order.startsWith('192'), '強い単騎が番手を競ると、番手を奪い、元の番手は3番手に回る', `残500mの隊列 ${strong.order}`);
+  check(weak.e.decisionLogs.some(l => /番手を守る/.test(l.message)) && weak.order.startsWith('12'), '弱い単騎が競っても、番手は守られる', `残500mの隊列 ${weak.order}`);
+}
+
 // 12. 競輪のいろいろな動きが、いろいろな並び・能力の中で実際に起きる
 {
   const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');

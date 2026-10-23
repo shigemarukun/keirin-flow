@@ -16,6 +16,8 @@
 import { ACTION, ROLE, MINDSET, TRACK_LANE } from './race-plan.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+export let SENKO_EFFORT = 1.2;
+export const setSenkoEffort = v => { SENKO_EFFORT = v; };
 const pct = v => `${Math.round(v * 100)}%`;
 
 // Speeds in m/s. Real keirin: cruising ~14-16, bell ~16-17, sprint ~18-20+.
@@ -33,9 +35,9 @@ export const TACTICS = Object.freeze(['SENKO', 'KAMASHI', 'MAKURI', 'OIKOMI']);
 export const TACTIC_LABEL = Object.freeze({ SENKO: '先行', KAMASHI: 'カマシ', MAKURI: '捲り', OIKOMI: '追込' });
 
 export class RaceAI {
-  constructor() { this.memory = new Map(); this.pacerCut = null; this.contests = []; }
+  constructor() { this.memory = new Map(); this.pacerCut = null; this.contests = []; this.seri = new Map(); }
 
-  reset() { this.memory.clear(); this.pacerCut = null; this.contests = []; }
+  reset() { this.memory.clear(); this.pacerCut = null; this.contests = []; this.seri = new Map(); }
 
   mem(rider) {
     if (!this.memory.has(rider.number)) {
@@ -65,7 +67,7 @@ export class RaceAI {
 
   sprintSpeed(rider) {
     const p = rider.profile, e = rider.energy;
-    const fatigue = e < .4 ? .80 + .5 * e : 1; // an empty rider cannot hold its top speed
+    const fatigue = e < .4 ? .72 + .7 * e : 1; // an empty rider cannot hold its top speed
     return (p.topSpeed * (.90 + .10 * e) + p.sprintBonus * e * 1.4) * fatigue;
   }
   strength(rider) { const p = rider.profile; return p.power * .45 + p.acceleration * .25 + rider.energy * .30; }
@@ -87,6 +89,7 @@ export class RaceAI {
 
   // ---------- main entry ----------
   plan(rider, engine) {
+    this._engine = engine;
     const rem = engine.raceClock.remainingDistance;
     const m = this.mem(rider);
     if (!m.style) {
@@ -100,6 +103,7 @@ export class RaceAI {
     this._noteFatigue(rider, engine, m, rem);
 
     let d = this._contestDecision(rider, engine, rem);
+    if (!d && rider.profile.seriTarget && rem > PACE.FINAL_STRAIGHT) d = this._seriDecision(rider, engine, m, rem);
     if (!d && rem <= PACE.FINAL_STRAIGHT) d = this.finalStraight(rider, engine, m);
     if (!d) {
       const role = rider.role;
@@ -127,7 +131,16 @@ export class RaceAI {
   }
 
   // Who is really at the front: riders dropping back after a lost contest don't count.
-  _retreating(o) { const om = this.memory.get(o.number); return o.action === ACTION.RETREAT || (om?.gaveUp && !om?.retreatDone); }
+  _retreating(o, depth = 0) {
+    const om = this.memory.get(o.number);
+    if (o.action === ACTION.RETREAT || (om?.gaveUp && !om?.retreatDone)) return true;
+    // 下げているラインの後ろの選手も、一緒に下げている
+    if (depth === 0 && o.leaderNumber && o.leaderNumber !== o.number && o.lineId) {
+      const leader = this._engine?.rider(o.leaderNumber);
+      if (leader && !leader.finished && this._retreating(leader, 1) && o.followTargetNumber != null) return true;
+    }
+    return false;
+  }
   _frontRunner(engine) {
     let best = null;
     for (const o of engine.riders) if (!o.finished && !this._retreating(o) && (!best || o.distance > best.distance)) best = o;
@@ -274,7 +287,8 @@ export class RaceAI {
       // front-runner (先行) winds the pace up from its strike point to hold everyone off
       if (rem <= m.strikeAt && rider.energy > .12) {
         m.struck = true;
-        return { action: ACTION.ATTACK, speed: this.sprintSpeed(rider) - 2.4, lane: TRACK_LANE.INNER, reason: `残${rem.toFixed(0)}mから主導権を握って先行 (残脚${pct(rider.energy)})` };
+        // 先頭で一定のペースを刻む先行は、仕掛けや踏み合いほど脚を使わない
+        return { action: ACTION.ATTACK, speed: this.sprintSpeed(rider) - 2.4, lane: TRACK_LANE.INNER, effortFactor: SENKO_EFFORT, reason: `残${rem.toFixed(0)}mから主導権を握って先行 (残脚${pct(rider.energy)})` };
       }
       const pace = rem <= PACE.BELL ? PACE.BELL_PACE : PACE.CRUISE;
       return { action: ACTION.CONTROL_PACE, speed: pace, lane: TRACK_LANE.INNER, reason: rem <= PACE.BELL ? '打鐘。先頭でペースを上げて主導権を維持' : '先頭でペースを作る' };
@@ -367,6 +381,10 @@ export class RaceAI {
   follower(rider, engine, m, rem) {
     const front = engine.rider(rider.frontLineMate);
     const leader = engine.rider(rider.leaderNumber);
+
+    // 番手の競りに負けた: 競り勝った選手の後ろ(3番手)を走る
+    const lostSeri = this._lostSeriDecision(rider, engine);
+    if (lostSeri) return lostSeri;
 
     // 番手捲り: 前の選手が脚を使い切りそうで、後ろから捲りが来るなら、自分から踏んで出る
     if (rider.role === ROLE.BANTE && rem < 280 && rem > PACE.FINAL_STRAIGHT && leader && !this._retreating(leader) && rider.energy > .45) {
@@ -504,6 +522,73 @@ export class RaceAI {
     engine.emitDecision({ riderNumber: rider.number, category: 'FATIGUE', action: ACTION.FADE, message: `脚が一杯になりタレ始める (残脚${pct(rider.energy)}・${rider.speed.toFixed(1)}m/s)` });
   }
 
+  // ---------- 番手競り (単騎の選手が、他のラインの番手の位置を取り合う) ----------
+  _seriState(challenger, engine) {
+    if (!this.seri.has(challenger.number)) {
+      const leader = engine.rider(challenger.profile.seriTarget);
+      const holder = leader ? engine.rider(leader.rearLineMate) : null;
+      this.seri.set(challenger.number, { challenger: challenger.number, leader: leader?.number, holder: holder?.number, start: null, result: holder ? null : 'NONE' });
+    }
+    return this.seri.get(challenger.number);
+  }
+
+  _seriDecision(rider, engine, m, rem) {
+    const st = this._seriState(rider, engine);
+    const leader = engine.rider(st.leader), holder = engine.rider(st.holder);
+    if (!leader || leader.finished) return null;
+    if (st.result === 'CHALLENGER') {
+      if (this._retreating(leader) || leader.distance - rider.distance > 40) return null;
+      return this._followPlan(leader, `競り勝った${leader.number}番の番手を守る`, { lane: leader.laneOffset });
+    }
+    if (st.result === 'HOLDER' || st.result === 'NONE' || !holder || holder.finished) return null; // 負けたら普通の単騎として走る
+
+    const gap = holder.distance - rider.distance;
+    const alongside = Math.abs(gap) < 3.5;
+    if (alongside && st.start == null) {
+      st.start = engine.elapsedTime;
+      engine.emitDecision({ riderNumber: rider.number, category: 'SERI', action: ACTION.CONTEST, message: `${leader.number}番の番手を巡って、${holder.number}番の外に並んで競る` });
+    }
+    const elapsed = st.start == null ? 0 : engine.elapsedTime - st.start;
+    const leaderGoing = [ACTION.ATTACK, ACTION.FULL_CONTEST, ACTION.DEFEND].includes(leader.action);
+    if (st.start != null && (elapsed >= 5 || leaderGoing || rem < 380)) {
+      const score = r => r.profile.power * .35 + r.profile.blockSkill * .35 + r.energy * .2 + r.profile.aggression * .1;
+      const sc = score(rider), sh = score(holder) + .04; // 内側にいる番手が少し有利
+      st.result = sc > sh ? 'CHALLENGER' : 'HOLDER';
+      st.decidedAt = engine.elapsedTime;
+      const secs = elapsed.toFixed(1);
+      if (st.result === 'CHALLENGER') {
+        engine.emitDecision({ riderNumber: rider.number, category: 'SERI', action: ACTION.FOLLOW, message: `${secs}秒の競りに勝って、${leader.number}番の番手を奪う (競り力${sc.toFixed(2)} > ${sh.toFixed(2)})` });
+        engine.emitDecision({ riderNumber: holder.number, category: 'SERI', action: ACTION.FOLLOW, message: `番手の競りに負けて、${rider.number}番の後ろ(3番手)に回る` });
+      } else {
+        engine.emitDecision({ riderNumber: holder.number, category: 'SERI', action: ACTION.FOLLOW, message: `${secs}秒の競りに勝って、${leader.number}番の番手を守る (競り力${sh.toFixed(2)} ≧ ${sc.toFixed(2)})` });
+        engine.emitDecision({ riderNumber: rider.number, category: 'SERI', action: ACTION.FOLLOW, message: `番手の競りに負けて、後ろへ回る` });
+      }
+      if (st.result === 'CHALLENGER') return this._followPlan(leader, `競り勝った${leader.number}番の番手に入る`, { lane: leader.laneOffset });
+      return null;
+    }
+    // 番手の外に並びに行く / 並んだまま競る
+    return {
+      action: st.start == null ? ACTION.MOVE_UP : ACTION.CONTEST,
+      speed: holder.speed + clamp(gap * .5, -2, 3),
+      lane: holder.laneOffset + 14,
+      reason: st.start == null ? `${leader.number}番の番手を競りに、${holder.number}番の外へ上がる` : `${holder.number}番と番手を競り合う`,
+      silent: st.start != null
+    };
+  }
+
+  // 競り負けた番手: 競り勝った選手が前に入れるよう少し下げ、そのあと後ろ(3番手)に付く
+  _lostSeriDecision(rider, engine) {
+    for (const st of this.seri.values()) {
+      if (st.holder !== rider.number || st.result !== 'CHALLENGER') continue;
+      const c = engine.rider(st.challenger), leader = engine.rider(st.leader);
+      if (!c || c.finished) return null;
+      const inFront = c.distance > rider.distance + engine.spacing.cutIn + 1 && Math.abs(c.laneOffset - rider.laneOffset) < 6;
+      if (inFront) return this._followPlan(c, `競り負けたので${c.number}番の後ろを走る`, { lane: c.laneOffset });
+      return { action: ACTION.YIELD, speed: Math.max(PACE.CRUISE - 3, (leader?.speed ?? rider.speed) - 1.8), lane: rider.laneOffset, reason: `競り負けたので、${c.number}番を内に入れるため少し下げる` };
+    }
+    return null;
+  }
+
   // ---------- SOLO ----------
   solo(rider, engine, m, rem) {
     const ahead = this._nearestAheadInCorridor(rider, engine, 80) ?? (engine.findNearestAhead(rider) ? { rider: engine.findNearestAhead(rider) } : null);
@@ -550,7 +635,7 @@ export class RaceAI {
     const lane = Number.isFinite(d.lane) ? d.lane : rider.laneOffset;
     return {
       action: d.action, targetSpeed: Math.max(0, speed ?? PACE.CRUISE), laneTarget: lane,
-      followTargetNumber, reason: d.reason, scenarioControlled: false,
+      followTargetNumber, reason: d.reason, scenarioControlled: false, effortFactor: d.effortFactor,
       laneRate: [ACTION.ATTACK, ACTION.BLOCK, ACTION.FINAL_SPRINT].includes(d.action) ? 2.8 : 2.2
     };
   }

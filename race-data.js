@@ -32,6 +32,7 @@ export const CONVERSION_RULES_VERSION = 'v0';
 
 // 「展開を選ぶ」で指定できる戦法 (ライン先頭・単騎の選手に付ける)
 //   data.tactics       = { 1: 'SENKO', 4: 'MAKURI' }   先行 / カマシ / 捲り / 追込
+//                        { 8: 'SERI:1' }                単騎の8番が、1番のラインの番手を競る
 //   data.frontResponse = { 1: 'TSUPPARI' }            前受けの選手が 突っ張る / 出させる
 export const TACTIC_CODES = Object.freeze(['SENKO', 'KAMASHI', 'MAKURI', 'OIKOMI']);
 
@@ -57,7 +58,18 @@ export function validateRaceData(data) {
   if (missing.length) errors.push(`並びに入っていない選手がいます: ${missing.join(', ')}番`);
   if (unknown.length) errors.push(`並びに出走しない車番があります: ${unknown.join(', ')}番`);
   if (twice.length) errors.push(`並びで ${[...new Set(twice)].join(', ')}番 が2回出てきます`);
-  for (const [car, t] of Object.entries(data?.tactics ?? {})) if (t && !TACTIC_CODES.includes(t)) errors.push(`${car}番の戦法「${t}」は指定できません`);
+  for (const [car, t] of Object.entries(data?.tactics ?? {})) {
+    if (!t) continue;
+    const seri = /^SERI:([1-9])$/.exec(t);
+    if (seri) {
+      const target = Number(seri[1]), lineOfTarget = lines.find(l => l.map(Number)[0] === target);
+      const own = lines.find(l => l.map(Number).includes(Number(car)));
+      if (!lineOfTarget || lineOfTarget.length < 2) errors.push(`${car}番が競る相手のライン(${target}番が先頭)が見つかりません`);
+      else if (own && own.length > 1) errors.push(`番手を競れるのは単騎の選手だけです (${car}番)`);
+      continue;
+    }
+    if (!TACTIC_CODES.includes(t)) errors.push(`${car}番の戦法「${t}」は指定できません`);
+  }
   for (const [car, f] of Object.entries(data?.frontResponse ?? {})) if (f && !['TSUPPARI', 'YIELD'].includes(f)) errors.push(`${car}番の前受けの対応「${f}」は指定できません`);
   return errors;
 }
@@ -136,12 +148,24 @@ export function toRaceSetup(data) {
 
   let lines = data.lines.map(l => l.map(Number));
   if (data.autoFormation) lines = orderLinesAuto(lines, infoByCar);
+  // 番手を競る単騎は、競る相手のラインのすぐ後ろからスタートする
+  for (const [car, t] of Object.entries(data.tactics ?? {})) {
+    const seri = /^SERI:([1-9])$/.exec(t ?? '');
+    if (!seri) continue;
+    const from = lines.findIndex(g => g.length === 1 && g[0] === Number(car));
+    if (from < 0) continue;
+    const [solo] = lines.splice(from, 1);
+    const to = lines.findIndex(g => g[0] === Number(seri[1]));
+    lines.splice(to + 1, 0, solo);
+  }
 
   const riders = {};
   for (const [car, info] of Object.entries(infoByCar)) {
     riders[car] = { ...info.profile };
     const tactic = data.tactics?.[car], front = data.frontResponse?.[car];
     if (TACTIC_CODES.includes(tactic)) riders[car].tactic = tactic;
+    const seri = /^SERI:([1-9])$/.exec(tactic ?? '');
+    if (seri) riders[car].seriTarget = Number(seri[1]); // 単騎で、この選手のラインの番手を競る
     if (front === 'TSUPPARI' || front === 'YIELD') riders[car].frontResponse = front;
   }
   const setupLines = [];

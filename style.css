@@ -232,3 +232,8 @@ body #app {
 .ri-json textarea { width: 100%; box-sizing: border-box; margin: 6px 0; font: 12px ui-monospace, monospace; color: #e2e8f0; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 6px; padding: 6px; }
 .line-members small { color: var(--muted); font-weight: 400; font-size: 0.72rem; margin-left: 2px; }
 .race-input-panel { grid-column: 1 / -1; }
+.ri-keypad { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; }
+.ri-key { min-height: 40px; border-radius: 8px; border: 1px solid rgba(255,255,255,.35); font-weight: 800; font-size: 1rem; cursor: pointer; padding: 0; }
+.ri-key:active { transform: scale(0.94); }
+.ri-key-sep, .ri-key-back, .ri-key-clear { grid-column: span 3; background: #1e293b; color: #e2e8f0; font-size: 0.8rem; font-weight: 700; }
+.ri-key-sep { background: #0e7490; color: #fff; }

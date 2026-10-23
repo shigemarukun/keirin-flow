@@ -30,8 +30,15 @@ export function mountRaceInput(container, { onApply }) {
     <div class="ri-head"><span>車</span><span>選手名</span><span>得点</span><span>脚質</span><span>B</span><span>S</span></div>
     <div class="ri-rows">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(rowHtml).join('')}</div>
     <label class="ri-lines-label">並び (周回の前から)
-      <input class="ri-lines" type="text" inputmode="numeric" placeholder="例: 123/456/789 (単騎は 7/8 のように1人で)">
+      <input class="ri-lines" type="text" inputmode="none" autocomplete="off" placeholder="下のボタンで入力 例: 123/456/789">
     </label>
+    <div class="ri-keypad" aria-label="並びの入力ボタン">
+      ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button type="button" class="ri-key car-${n}" data-key="${n}">${n}</button>`).join('')}
+      <button type="button" class="ri-key ri-key-sep" data-key="/">区切り /</button>
+      <button type="button" class="ri-key ri-key-back" data-key="back">1文字消す</button>
+      <button type="button" class="ri-key ri-key-clear" data-key="clear">並びを消す</button>
+    </div>
+    <p class="ri-help">ラインの区切りは「区切り /」。単騎の選手は1人だけで区切ります (例: 12/45/7/89)。</p>
     <label class="ri-check"><input class="ri-auto" type="checkbox"> ラインの前後の順番はAIに任せる</label>
     <div class="ri-errors" role="alert"></div>
     <div class="ri-actions">
@@ -92,6 +99,19 @@ export function mountRaceInput(container, { onApply }) {
     onApply(toRaceSetup(data), data);
     return true;
   };
+
+  // 並びの専用キー: iPhoneの数字キーボードにはスラッシュが無いので、画面上のボタンで入力する
+  const linesInput = $('.ri-lines');
+  container.querySelector('.ri-keypad').addEventListener('click', event => {
+    const key = event.target.closest('[data-key]')?.dataset.key;
+    if (!key) return;
+    let v = linesInput.value.replace(/\s+/g, '');
+    if (key === 'back') v = v.slice(0, -1);
+    else if (key === 'clear') v = '';
+    else if (key === '/') { if (v && !v.endsWith('/')) v += '/'; }
+    else if (!v.includes(key)) v += key; // 同じ車番は2回入れない
+    linesInput.value = v.split('/').join(' / ');
+  });
 
   $('.ri-apply').addEventListener('click', () => {
     if (apply(read())) container.closest('details')?.removeAttribute('open');

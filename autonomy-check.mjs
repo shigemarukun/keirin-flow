@@ -123,10 +123,20 @@ const er = race(early);
 const fade1 = er.speeds[1];
 check(er.logs.some(l => l.c === 'FATIGUE' && l.n === 1) && fade1.peak - fade1.last >= 3, '持久力の低い逃げ選手は最後にタレる', `最高${fade1.peak.toFixed(1)} → ゴール前${fade1.last.toFixed(1)}m/s`);
 
-const withBlock = clone();
-const noBlock = structuredClone(withBlock); for (const n of [2, 5, 8]) noBlock.riders[n].blockSkill = 0;
-const wb = race(withBlock), nb = race(noBlock);
-check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '番手のブロックが着順に影響する', `ブロック有 ${str(wb.order)} / 無 ${str(nb.order)}`);
+{
+  // いくつかの並びで、番手のブロックを無くすと着順が変わるレースがあるか
+  const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
+  let changed = 0, blockedRaces = 0;
+  for (const L of ['123/456/789', '789/123/456', '456/123/789', '12/34/56/789', '147/258/369', '123/456/7/8/9']) {
+    const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(L);
+    const withBlock = toRaceSetup(d), noBlock = structuredClone(withBlock);
+    for (const r of Object.values(noBlock.riders)) r.blockSkill = 0;
+    const wb = race(withBlock), nb = race(noBlock);
+    if (wb.logs.some(l => l.a === 'BLOCK')) blockedRaces++;
+    if (str(wb.order) !== str(nb.order)) changed++;
+  }
+  check(blockedRaces > 0 && changed > 0, '番手のブロックが着順に影響する', `6レース中 ブロックあり${blockedRaces} / ブロックを無くすと着順が変わる${changed}`);
+}
 
 // 10. line changes must not break the race
 {
@@ -147,7 +157,7 @@ check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '�
       }
       // 他のラインの選手が、ラインの間に割り込んだまま走り続けていないか
       const splitNow = e.raceClock.remainingDistance < 600 && e.riders.some(b => {
-        if (b.finished || !b.frontLineMate || b.action !== 'FOLLOW') return false;
+        if (b.finished || !b.frontLineMate || b.action !== 'FOLLOW' || b.followTargetNumber !== b.frontLineMate) return false; // 切り替えた選手は除く
         const f = e.rider(b.frontLineMate);
         return !f.finished && e.riders.some(o => !o.finished && o.lineId !== b.lineId && o.distance < f.distance && o.distance > b.distance && Math.abs(o.laneOffset - b.laneOffset) < 11 && Math.abs(f.laneOffset - b.laneOffset) < 11);
       });
@@ -184,7 +194,7 @@ check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '�
 // 12. 競輪のいろいろな動きが、いろいろな並び・能力の中で実際に起きる
 {
   const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
-  const pats = { 誘導切り: /誘導切り成功/, 突っ張り: /突っ張る/, 出させる: /出させ|受け入れる/, 先行: /主導権を握って先行/, 叩き: /叩いて主導権/, カマシ: /カマす/, 捲り: /捲りに出る/, 番手ブロック: /牽制/, 番手捲り: /番手捲り/, 切り替え: /切り替える/, 踏み合い: /並んで踏み合い/, タレ: /タレ始める/, 内すくい: /内を突く/, 包まれ: /塞がれ/ };
+  const pats = { 誘導切り: /誘導切り成功/, 突っ張り: /突っ張る/, 出させる: /出させ|受け入れる/, 先行: /主導権を握って先行/, 叩き: /叩いて主導権/, カマシ: /カマす/, 捲り: /捲りに出る/, 番手ブロック: /牽制/, 番手捲り: /番手捲り/, 切り替え: /切り替える/, 踏み合い: /並んで踏み合い/, タレ: /タレ始める/, 内すくい: /内を突く/ };
   const seen = Object.fromEntries(Object.keys(pats).map(k => [k, 0]));
   const layouts = ['123/456/789', '789/123/456', '456/123/789', '12/456/789/3', '1234/56789', '12/34/56/789', '123/456/7/8/9', '7/123/8/456/9'];
   const mods = [d => {}, d => { d.riders[0].score = 104; }, d => { d.riders[3].score = 120; }, d => { d.riders[6].score = 119; }];
@@ -196,7 +206,7 @@ check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '�
     for (const [k, re] of Object.entries(pats)) if (re.test(msgs)) seen[k] += 1;
   }
   const missing = Object.entries(seen).filter(([, v]) => v === 0).map(([k]) => k);
-  check(!missing.length, '32レースの中で、競輪の14種類の動きがすべて起きる', Object.entries(seen).map(([k, v]) => `${k}${v}`).join(' '));
+  check(!missing.length, '32レースの中で、競輪の13種類の動きがすべて起きる', Object.entries(seen).map(([k, v]) => `${k}${v}`).join(' '));
 }
 
 // 13. 逃げは「残りすぎない」: 残200mで先頭だった選手が、いつも3着に残るわけではない

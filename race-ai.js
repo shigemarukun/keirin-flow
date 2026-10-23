@@ -261,11 +261,12 @@ export class RaceAI {
     const iLead = lead?.number === rider.number;
     const threat = this._incomingAttack(rider, engine);
     // 先頭にいたのに他のラインに前へ出られた = 叩かれた (番手が切り替えを考えるきっかけ)
-    if (m.wasFront && !iLead && lead && lead.lineId !== rider.lineId && rem < 600 && rem > PACE.FINAL_STRAIGHT && !m.beaten) {
+    if (m.wasFront && !iLead && lead && lead.lineId !== rider.lineId && lead.distance - rider.distance > engine.spacing.follow && rem < 600 && rem > PACE.FINAL_STRAIGHT && !m.beaten) {
       m.beaten = true;
       engine.emitDecision({ riderNumber: rider.number, category: 'AI_DECISION', action: ACTION.FOLLOW, message: `${lead.number}番に叩かれて先頭を明け渡す (残脚${pct(rider.energy)})` });
     }
-    m.wasFront = iLead;
+    if (iLead) m.wasFront = true;
+    else if (lead && lead.distance - rider.distance > engine.spacing.follow) m.wasFront = false;
 
     if (iLead) {
       if (threat) return this._defendOrConcede(rider, engine, m, threat, rem);

@@ -4,6 +4,7 @@ import { TenkaiPredictor } from './tenkai-predictor.js';
 import { KeirinProtocolController } from './keirin-protocol-controller.js';
 import { ScenarioPhaseManager } from './scenario-phase-manager.js';
 import { RaceAI } from './race-ai.js';
+import { RaceRecorder, buildStory } from './race-story.js';
 
 // RACE_MODE.AUTONOMOUS: every rider decides from its own sensors, profile and line role.
 // RACE_MODE.TEACHER: the fixed CR-0013 teaching script (kept for reference only).
@@ -46,6 +47,7 @@ export class PhysicsEngine{
   this.keirinProtocol=new KeirinProtocolController();
   this.scenarioPhaseManager=new ScenarioPhaseManager();
   this.raceAI=new RaceAI();
+  this.recorder=new RaceRecorder();
   this.applyRaceSetup(setup);
  }
 
@@ -90,6 +92,7 @@ export class PhysicsEngine{
   for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.coastDistance=0;r.boxedBy=null;r.boxedFor=0;r.history=[];r.raceIntent=null;r.laneMotion=null;r.laneVelocity=0;r.visualAngleOffset=0;r.lastDecisionAction=null;r.lastDecisionLogTime=null;}
   this.keirinProtocol.initialize(this,this.prediction);
   this.raceAI.reset();
+  this.recorder.reset();
   if(this.mode===RACE_MODE.TEACHER)this.scenarioPhaseManager.initialize(this);
   else this.emitDecision({category:'RACE',message:'自律モード: 各選手が能力・脚の残り・ライン内の役割から判断します'});
  }
@@ -446,6 +449,7 @@ export class PhysicsEngine{
    if(before<this.totalDistance&&rider.distance>=this.totalDistance)this._recordFinish(rider);
   }
   const leaderDistance=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),triggered=this.raceClock.update(this.pacer.distance,leaderDistance,this);
+  this.recorder.observe(this);
   if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:teacher?'打鐘。教材シナリオを継続':'打鐘。ここから各選手が自由に判断'});this.onBellCallback?.();}
  }
 
@@ -476,5 +480,11 @@ export class PhysicsEngine{
   return {gaps,minGap:gaps.length?Math.min(...gaps.map(x=>x.gap)):null,maxGap:gaps.length?Math.max(...gaps.map(x=>x.gap)):null};
  }
 
- getState(){return{riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,mode:this.mode,scenario:this.mode===RACE_MODE.TEACHER?this.scenarioPhaseManager.state():null,protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
+ // 展開の文章と決まり手 (レース後、または途中までの内容で)
+ getStory(){
+  const ranking=[...this.ranking].sort((a,b)=>a.time-b.time||a.number-b.number);
+  return buildStory({setup:this.setup,prediction:this.prediction,snapshots:this.recorder.snapshots,logs:this.decisionLogs,ranking,names:this.setup.meta?.names??{}});
+ }
+
+ getState(){return{snapshots:this.recorder.snapshots,riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,mode:this.mode,scenario:this.mode===RACE_MODE.TEACHER?this.scenarioPhaseManager.state():null,protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
 }

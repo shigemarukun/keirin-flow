@@ -255,3 +255,37 @@ body #app {
 .tp-chip:active { transform: scale(0.96); }
 
 .tp-title b { margin-left: 6px; letter-spacing: 0.04em; }
+
+/* AIの展開予想 */
+.forecast-panel { grid-column: 1 / -1; }
+#forecast-ui { display: grid; gap: 12px; }
+.fc-label { color: var(--accent); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em; }
+.fc-label small { color: var(--muted); font-weight: 400; letter-spacing: 0; }
+.fc-main { display: grid; gap: 6px; padding: 12px; border-radius: 12px; background: linear-gradient(135deg, rgba(8, 145, 178, 0.25), rgba(15, 23, 42, 0.8)); border: 1px solid rgba(34, 211, 238, 0.35); }
+.fc-order { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.fc-place { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; }
+.fc-place em { font-style: normal; color: #cbd5e1; font-size: 0.75rem; }
+.fc-place small { color: #cbd5e1; font-weight: 400; font-size: 0.75rem; }
+.fc-car { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; font-weight: 800; font-size: 0.78rem; border: 1px solid rgba(255, 255, 255, 0.6); flex: none; }
+.fc-place .fc-car { width: 30px; height: 30px; font-size: 0.95rem; }
+.fc-kimarite { font-size: 0.85rem; color: #e2e8f0; }
+.fc-story { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.fc-story li { display: grid; grid-template-columns: 96px 1fr; gap: 8px; font-size: 0.85rem; line-height: 1.55; padding-bottom: 6px; border-bottom: 1px dashed rgba(148, 163, 184, 0.2); }
+.fc-phase { color: #67e8f9; font-weight: 700; font-size: 0.75rem; padding-top: 2px; }
+.fc-future { display: grid; gap: 8px; padding-top: 4px; }
+.fc-bars { display: grid; gap: 5px; }
+.fc-bar-row { display: grid; grid-template-columns: 26px 1fr 72px; gap: 8px; align-items: center; }
+.fc-bar { position: relative; height: 14px; border-radius: 7px; background: rgba(51, 65, 85, 0.6); overflow: hidden; }
+.fc-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 7px; }
+.fc-bar-top3 { background: rgba(34, 211, 238, 0.3); }
+.fc-bar-win { background: #22d3ee; }
+.fc-bar-num { font-size: 0.75rem; text-align: right; line-height: 1.2; }
+.fc-bar-num small { color: var(--muted); }
+.fc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.fc-sub { color: #cbd5e1; font-size: 0.75rem; font-weight: 700; margin: 4px 0; }
+.fc-combo { display: flex; align-items: center; gap: 2px; font-size: 0.8rem; margin-bottom: 4px; }
+.fc-combo .fc-car { width: 20px; height: 20px; font-size: 0.7rem; }
+.fc-combo span:last-child { margin-left: auto; color: #e2e8f0; }
+.fc-dash { color: var(--muted); margin: 0 1px; }
+.fc-branches { margin: 0; padding-left: 18px; font-size: 0.8rem; line-height: 1.7; color: #e2e8f0; }
+@media (max-width: 720px) { .fc-story li { grid-template-columns: 80px 1fr; } }

@@ -3,6 +3,7 @@ import { PhysicsEngine } from './engine.js';
 import { UIRenderer } from './ui.js';
 import { mountRaceInput } from './race-input.js';
 import { mountTacticsPanel } from './tactics-panel.js';
+import { mountForecastPanel } from './forecast-panel.js';
 
 window.addEventListener('DOMContentLoaded',()=>{
  const aiModel=new AIModel();
@@ -13,9 +14,12 @@ window.addEventListener('DOMContentLoaded',()=>{
  const renderSetup=(applied)=>{
   if(typeof ui.renderRaceSetup==='function')ui.renderRaceSetup(applied);
   else ui.renderLineList(applied.lines.map(line=>line.members));
-  ui.renderTenkaiSummary?.(physics.getPrediction());
+  if(!document.getElementById('forecast-ui'))ui.renderTenkaiSummary?.(physics.getPrediction());
  };
  renderSetup(setup);
+ // AIの展開予想: 出走表や展開を変えるたびに計算し直す
+ const watchRace=async()=>{await ensureAudioReady();physics.reset();physics.start();document.getElementById('bank-container')?.scrollIntoView({behavior:'smooth',block:'start'});};
+ const forecast=mountForecastPanel(document.getElementById('forecast-ui'),{onWatch:()=>watchRace()});
 
  let audioContext=null;
  const ensureAudioReady=async()=>{try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return false;audioContext??=new C();if(audioContext.state==='suspended')await audioContext.resume();return audioContext.state==='running';}catch{return false;}};
@@ -33,6 +37,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   physics.applyRaceSetup(newSetup);
   renderSetup(physics.getState().setup);
   ui.renderDecisionLog?.([]);
+  forecast.update(physics.getState().setup);
  };
 
  // 出走表の手入力 → このレースで予想 / 展開をタップで選ぶ
@@ -43,10 +48,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   getSetup:()=>physics.getState().setup,getPrediction:()=>physics.getPrediction()
  });
  tactics.render();
- document.getElementById('btn-run-tactics')?.addEventListener('click',async()=>{
-  await ensureAudioReady();physics.reset();physics.start();
-  document.getElementById('bank-container')?.scrollIntoView({behavior:'smooth',block:'start'});
- });
+ document.getElementById('btn-run-tactics')?.addEventListener('click',()=>watchRace());
 
  let lastTime=performance.now();
  const frame=now=>{

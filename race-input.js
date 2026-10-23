@@ -6,6 +6,31 @@ import { STYLE, SAMPLE_RACE_DATA, parseLines, formatLines, validateRaceData, toR
 const STORAGE_KEY = 'keirin-flow:race-input:v1';
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// ---------- 予想のリンク共有: レースデータを URL の # の後ろに入れる ----------
+export function encodeRaceData(data) {
+  const json = JSON.stringify(data, (k, v) => (v === undefined || v === '' ? undefined : v));
+  const bytes = new TextEncoder().encode(json);
+  let bin = ''; for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+export function decodeRaceData(code) {
+  const bin = atob(code.replace(/-/g, '+').replace(/_/g, '/'));
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+export function shareUrl(data) {
+  return `${location.origin}${location.pathname}#r=${encodeRaceData(data)}`;
+}
+function fromLink() {
+  try {
+    const m = location.hash.match(/[#&]r=([A-Za-z0-9_-]+)/);
+    if (!m) return null;
+    const data = decodeRaceData(m[1]);
+    history.replaceState(null, '', location.pathname + location.search); // 一度読んだら URL から消す
+    return data;
+  } catch { return null; }
+}
+
 function load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; } }
 function save(data) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* 保存できない環境でも動く */ } }
 
@@ -133,7 +158,9 @@ export function mountRaceInput(container, { onApply }) {
   });
 
   // 前回入力した出走表があれば、それで始める (なければサンプル)
-  const saved = load();
+  // 共有リンクで開いたらそのレース、なければ前回の出走表、それもなければサンプル
+  const linked = fromLink();
+  const saved = linked && !validateRaceData(linked).length ? linked : load();
   const start = saved && !validateRaceData(saved).length ? saved : structuredClone(SAMPLE_RACE_DATA);
   fill(start);
   apply(start);

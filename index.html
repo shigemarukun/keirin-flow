@@ -70,6 +70,8 @@
                     <p class="ri-help">タップすると、その展開でレースを組み直します。</p>
                     <div id="tactics-ui"></div>
                     <button id="btn-run-tactics" class="primary-btn" type="button">▶ この展開で走らせる</button>
+                    <button id="btn-share" class="secondary-btn" type="button">この予想をリンクで送る</button>
+                    <p id="share-note" class="ri-help" role="status"></p>
                 </section>
 
                 <section class="panel-section">
@@ -101,9 +103,23 @@
                         <li class="empty-result">レース終了後に表示</li>
                     </ol>
                 </section>
+
+                <details class="panel-section results-panel">
+                    <summary><h2>答え合わせ</h2><span class="ri-summary-hint">実際の結果を入れる</span></summary>
+                    <div id="results-ui"></div>
+                </details>
             </aside>
         </main>
     </div>
+
+    <!-- スマホ: 画面の下にいつも出ている操作ボタン -->
+    <nav id="mobile-bar" aria-label="レース操作">
+        <button type="button" data-act="start" aria-label="スタート">▶</button>
+        <button type="button" data-act="pause" aria-label="一時停止">⏸</button>
+        <button type="button" data-act="reset" aria-label="最初から">↺</button>
+        <button type="button" data-act="speed" class="mb-speed" aria-label="再生速度">1x</button>
+        <span class="mb-status" id="mobile-bar-status">PRE-RACE</span>
+    </nav>
 
     <script type="module" src="./main.js"></script>
     <script>

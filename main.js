@@ -4,6 +4,8 @@ import { UIRenderer } from './ui.js';
 import { mountRaceInput } from './race-input.js';
 import { mountTacticsPanel } from './tactics-panel.js';
 import { mountForecastPanel } from './forecast-panel.js';
+import { mountResultsPanel } from './results-panel.js';
+import { shareUrl } from './race-input.js';
 
 window.addEventListener('DOMContentLoaded',()=>{
  const aiModel=new AIModel();
@@ -38,10 +40,11 @@ window.addEventListener('DOMContentLoaded',()=>{
   renderSetup(physics.getState().setup);
   ui.renderDecisionLog?.([]);
   forecast.update(physics.getState().setup);
+  results?.reset();
  };
 
  // 出走表の手入力 → このレースで予想 / 展開をタップで選ぶ
- let tactics=null;
+ let tactics=null,results=null;
  const raceInput=mountRaceInput(document.getElementById('race-input-ui'),{onApply:newSetup=>{window.KEIRIN_FLOW_APPLY_SETUP(newSetup);tactics?.render();}});
  tactics=mountTacticsPanel(document.getElementById('tactics-ui'),{
   getData:()=>raceInput?.getData(),apply:data=>raceInput.apply(data),
@@ -50,12 +53,49 @@ window.addEventListener('DOMContentLoaded',()=>{
  tactics.render();
  document.getElementById('btn-run-tactics')?.addEventListener('click',()=>watchRace());
 
+ // 答え合わせ
+ results=mountResultsPanel(document.getElementById('results-ui'),{getSetup:()=>physics.getState().setup,getForecast:()=>forecast.getLast()});
+
+ // この予想 (出走表 + 展開の指定) をリンクにして送る
+ document.getElementById('btn-share')?.addEventListener('click',async()=>{
+  const note=document.getElementById('share-note');
+  const data=raceInput?.getData();if(!data)return;
+  const url=shareUrl(data);
+  try{
+   if(navigator.share){await navigator.share({title:'KEIRIN FLOW の展開予想',text:'このレースの展開予想を見てみて',url});if(note)note.textContent='送りました。';return;}
+  }catch(e){if(e?.name==='AbortError')return;}
+  try{await navigator.clipboard.writeText(url);if(note)note.textContent='リンクをコピーしました。LINEなどに貼り付けて送ってください。';}
+  catch{if(note)note.textContent=url;}
+ });
+
+ // スマホの下の操作ボタン
+ const bar=document.getElementById('mobile-bar');
+ const speeds=[1,2,3,0.5];
+ bar?.addEventListener('click',event=>{
+  const act=event.target.closest('[data-act]')?.dataset.act;
+  if(act==='start')document.getElementById('btn-start')?.click();
+  if(act==='pause')document.getElementById('btn-pause')?.click();
+  if(act==='reset')document.getElementById('btn-reset')?.click();
+  if(act==='speed'){
+   const b=event.target.closest('[data-act]');const next=speeds[(speeds.indexOf(Number(b.dataset.v??1))+1)%speeds.length];
+   b.dataset.v=next;b.textContent=`${next}x`;physics.setSpeedScale(next);
+   if(speed){speed.value=next;if(speedVal)speedVal.textContent=next.toFixed(1);}
+  }
+ });
+ const barStatus=document.getElementById('mobile-bar-status');
+
  let lastTime=performance.now();
  const frame=now=>{
   const dt=(now-lastTime)/1000;lastTime=now;
   physics.update(dt);
   const state=physics.getState();
   ui.drawBank();ui.drawRiders(state);ui.updateUI(state);
+  if(barStatus){
+   const rem=Math.max(0,Math.ceil(state.raceClock?.remainingDistance??0));
+   const top=state.ranking?.length?[...state.ranking].sort((a,b)=>a.time-b.time).slice(0,3).map(r=>r.number).join('-'):null;
+   const text=top&&state.ranking.length===state.riders.length?`結果 ${top}`:state.isStarted?`残り${rem}m`:(rem<800?`停止中 残り${rem}m`:'スタート前');
+   if(barStatus.textContent!==text)barStatus.textContent=text;
+  }
   requestAnimationFrame(frame);
  };
  requestAnimationFrame(frame);

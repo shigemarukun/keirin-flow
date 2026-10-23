@@ -107,5 +107,5 @@ export function mountForecastPanel(container, { onWatch } = {}) {
     }
   };
 
-  return { update };
+  return { update, getLast: () => state };
 }

@@ -2,6 +2,7 @@ import { AIModel } from './ai.js';
 import { PhysicsEngine } from './engine.js';
 import { UIRenderer } from './ui.js';
 import { mountRaceInput } from './race-input.js';
+import { mountTacticsPanel } from './tactics-panel.js';
 
 window.addEventListener('DOMContentLoaded',()=>{
  const aiModel=new AIModel();
@@ -34,8 +35,18 @@ window.addEventListener('DOMContentLoaded',()=>{
   ui.renderDecisionLog?.([]);
  };
 
- // 出走表の手入力 → このレースで予想
- mountRaceInput(document.getElementById('race-input-ui'),{onApply:newSetup=>window.KEIRIN_FLOW_APPLY_SETUP(newSetup)});
+ // 出走表の手入力 → このレースで予想 / 展開をタップで選ぶ
+ let tactics=null;
+ const raceInput=mountRaceInput(document.getElementById('race-input-ui'),{onApply:newSetup=>{window.KEIRIN_FLOW_APPLY_SETUP(newSetup);tactics?.render();}});
+ tactics=mountTacticsPanel(document.getElementById('tactics-ui'),{
+  getData:()=>raceInput?.getData(),apply:data=>raceInput.apply(data),
+  getSetup:()=>physics.getState().setup,getPrediction:()=>physics.getPrediction()
+ });
+ tactics.render();
+ document.getElementById('btn-run-tactics')?.addEventListener('click',async()=>{
+  await ensureAudioReady();physics.reset();physics.start();
+  document.getElementById('bank-container')?.scrollIntoView({behavior:'smooth',block:'start'});
+ });
 
  let lastTime=performance.now();
  const frame=now=>{

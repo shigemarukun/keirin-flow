@@ -54,6 +54,7 @@ export function mountRaceInput(container, { onApply }) {
     </details>`;
 
   const $ = sel => container.querySelector(sel);
+  let current = null; // 最後に走らせたレースデータ
   const rows = [...container.querySelectorAll('.ri-row')];
   const errorsBox = $('.ri-errors');
 
@@ -71,7 +72,9 @@ export function mountRaceInput(container, { onApply }) {
         start: row.querySelector('.ri-start').value.trim() === '' ? undefined : Number(row.querySelector('.ri-start').value)
       });
     }
-    return { race: {}, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked };
+    // 展開の指定(戦法・前受けの対応)は「展開を選ぶ」で付けたものを引き継ぐ
+    return { race: current?.race ?? {}, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
+      tactics: { ...(current?.tactics ?? {}) }, frontResponse: { ...(current?.frontResponse ?? {}) } };
   };
 
   const fill = data => {
@@ -96,6 +99,7 @@ export function mountRaceInput(container, { onApply }) {
     showErrors(errors);
     if (errors.length) return false;
     save(data);
+    current = structuredClone(data);
     onApply(toRaceSetup(data), data);
     return true;
   };
@@ -128,8 +132,14 @@ export function mountRaceInput(container, { onApply }) {
     }
   });
 
-  // 前回入力した出走表があれば、それで始める
+  // 前回入力した出走表があれば、それで始める (なければサンプル)
   const saved = load();
-  fill(saved ?? SAMPLE_RACE_DATA);
-  if (saved && !validateRaceData(saved).length) onApply(toRaceSetup(saved), saved);
+  const start = saved && !validateRaceData(saved).length ? saved : structuredClone(SAMPLE_RACE_DATA);
+  fill(start);
+  apply(start);
+
+  return {
+    getData: () => structuredClone(current),
+    apply: data => { fill(data); return apply(data); }
+  };
 }

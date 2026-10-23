@@ -203,3 +203,32 @@ body #app {
 @media (min-width: 721px) {
     body #app { padding-top: max(28px, env(safe-area-inset-top)); padding-left: 20px; padding-right: 20px; }
 }
+
+/* 出走表の手入力 */
+.race-input-panel > summary { display: flex; align-items: baseline; justify-content: space-between; cursor: pointer; list-style: none; }
+.race-input-panel > summary::-webkit-details-marker { display: none; }
+.race-input-panel > summary h2 { margin: 0; }
+.ri-summary-hint { color: var(--muted); font-size: 0.75rem; }
+.race-input-panel[open] .ri-summary-hint { display: none; }
+#race-input-ui { margin-top: 12px; display: grid; gap: 8px; }
+.ri-help { margin: 0; color: var(--muted); font-size: 0.75rem; line-height: 1.5; }
+.ri-head, .ri-row { display: grid; grid-template-columns: 28px minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 0.6fr) minmax(0, 0.6fr); gap: 4px; align-items: center; }
+.ri-head { color: var(--muted); font-size: 0.7rem; padding: 0 2px; }
+.ri-rows { display: grid; gap: 4px; }
+.ri-row input, .ri-row select, .ri-lines {
+    width: 100%; min-width: 0; box-sizing: border-box; padding: 7px 6px; font-size: 16px; /* 16px未満だとiPhoneが勝手に拡大する */
+    color: #f8fafc; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 6px;
+}
+.ri-row select { padding: 7px 2px; }
+.ri-car { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; font-weight: 800; font-size: 0.8rem; border: 1px solid rgba(255,255,255,.6); }
+.car-1 { background: #ffffff; color: #111; } .car-2 { background: #222; color: #fff; } .car-3 { background: #e60012; color: #fff; }
+.car-4 { background: #0068b7; color: #fff; } .car-5 { background: #ffd400; color: #111; } .car-6 { background: #00a651; color: #fff; }
+.car-7 { background: #f08300; color: #111; } .car-8 { background: #ff69b4; color: #111; } .car-9 { background: #7f3fbf; color: #fff; }
+.ri-lines-label { display: grid; gap: 4px; font-size: 0.8rem; color: #cbd5e1; margin-top: 4px; }
+.ri-check { display: flex; gap: 6px; align-items: center; font-size: 0.8rem; color: #cbd5e1; }
+.ri-errors ul { margin: 0; padding-left: 18px; color: #fca5a5; font-size: 0.8rem; }
+.ri-actions { display: grid; gap: 6px; }
+.ri-json summary { cursor: pointer; color: #cbd5e1; font-size: 0.8rem; }
+.ri-json textarea { width: 100%; box-sizing: border-box; margin: 6px 0; font: 12px ui-monospace, monospace; color: #e2e8f0; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 6px; padding: 6px; }
+.line-members small { color: var(--muted); font-weight: 400; font-size: 0.72rem; margin-left: 2px; }
+.race-input-panel { grid-column: 1 / -1; }

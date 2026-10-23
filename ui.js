@@ -778,26 +778,27 @@ export class UIRenderer {
     renderRaceSetup(setup) {
         const container = document.getElementById('line-list-ui');
         if (!container) return;
+        const names = setup?.meta?.names ?? {};
+        const esc = v => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const label = n => names[n] ? `${n} <small>${esc(names[n])}</small>` : `${n}`;
+        const lineOf = n => (setup?.lines ?? []).find(line => line.members.includes(n));
 
-        const lineRows = (setup?.lines ?? []).map((line, index) => `
+        // 周回の並び順 (formation) があればその順、なければライン → 単騎の順
+        const groups = setup?.formation?.length
+            ? setup.formation
+            : [...(setup?.lines ?? []).map(line => line.members),
+               ...Object.entries(setup?.riders ?? {}).filter(([, r]) => r?.solo).map(([n]) => [Number(n)])];
+
+        let lineNo = 0;
+        container.innerHTML = groups.map(group => {
+            const isLine = group.length > 1 && lineOf(group[0]);
+            const title = isLine ? `ライン${++lineNo}` : '単騎';
+            const members = group.map(label).join(' - ');
+            return `
             <div class="line-row">
-                <span class="line-name">${line.id ?? `ライン${index + 1}`}</span>
-                <span class="line-members">${line.members.join(' - ')}</span>
-            </div>
-        `);
-
-        const soloNumbers = Object.entries(setup?.riders ?? {})
-            .filter(([, rider]) => rider?.solo === true)
-            .map(([number]) => Number(number))
-            .sort((a, b) => a - b);
-
-        const soloRows = soloNumbers.map(number => `
-            <div class="line-row">
-                <span class="line-name">単騎</span>
-                <span class="line-members">${number}</span>
-            </div>
-        `);
-
-        container.innerHTML = [...lineRows, ...soloRows].join('');
+                <span class="line-name">${title}</span>
+                <span class="line-members">${members}</span>
+            </div>`;
+        }).join('');
     }
 }

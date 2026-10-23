@@ -1,6 +1,7 @@
 import { AIModel } from './ai.js';
 import { PhysicsEngine } from './engine.js';
 import { UIRenderer } from './ui.js';
+import { mountRaceInput } from './race-input.js';
 
 window.addEventListener('DOMContentLoaded',()=>{
  const aiModel=new AIModel();
@@ -32,6 +33,9 @@ window.addEventListener('DOMContentLoaded',()=>{
   renderSetup(physics.getState().setup);
   ui.renderDecisionLog?.([]);
  };
+
+ // 出走表の手入力 → このレースで予想
+ mountRaceInput(document.getElementById('race-input-ui'),{onApply:newSetup=>window.KEIRIN_FLOW_APPLY_SETUP(newSetup)});
 
  let lastTime=performance.now();
  const frame=now=>{

@@ -217,7 +217,11 @@ export function normalizeRaceSetup(input = DEFAULT_RACE_SETUP) {
   const assigned = new Set(lines.flatMap(line => line.members));
   const riders = {};
 
-  for (let number = 1; number <= 9; number += 1) {
+  // 出走する車番: input.riders に書かれた車番とラインの車番 (書かれていなければ1〜9番)
+  const listed = Object.keys(input.riders ?? {}).map(Number).filter(n => Number.isInteger(n) && n >= 1 && n <= 9);
+  const entrants = listed.length ? [...new Set([...listed, ...assigned])].sort((a, b) => a - b) : [1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+  for (const number of entrants) {
     const raw = input.riders?.[number] ?? {};
     const solo = raw.solo === true || !assigned.has(number);
     riders[number] = {
@@ -232,6 +236,8 @@ export function normalizeRaceSetup(input = DEFAULT_RACE_SETUP) {
   return {
     trackProfile: input.trackProfile ?? 'PROFILE_400',
     lines,
-    riders
+    riders,
+    ...(input.formation ? { formation: input.formation.map(group => [...group]) } : {}),
+    ...(input.meta ? { meta: structuredClone(input.meta) } : {})
   };
 }

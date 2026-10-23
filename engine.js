@@ -64,7 +64,10 @@ export class PhysicsEngine{
  _buildRiders(){
   const ordered=[];
   for(const line of this.lineManager.linesArray())ordered.push(...line.members);
-  for(let number=1;number<=9;number+=1)if(!ordered.includes(number))ordered.push(number);
+  // Solo riders take their place in the formation order when it is given, otherwise go to the back.
+  const formation=(this.setup.formation??[]).flat();
+  if(formation.length){ordered.length=0;for(const n of formation)if(this.setup.riders[n]&&!ordered.includes(n))ordered.push(n);}
+  for(const number of Object.keys(this.setup.riders).map(Number).sort((a,b)=>a-b))if(!ordered.includes(number))ordered.push(number);
 
   this.riders=ordered.map((number,index)=>{
    const ctx=this.lineManager.context(number);

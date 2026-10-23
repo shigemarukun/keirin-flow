@@ -1,0 +1,115 @@
+// KEIRIN FLOW — 出走表の手入力画面
+// 入力された出走表を「レースデータ」(race-data.js) にして、シミュレーションへ渡す。
+
+import { STYLE, SAMPLE_RACE_DATA, parseLines, formatLines, validateRaceData, toRaceSetup } from './race-data.js';
+
+const STORAGE_KEY = 'keirin-flow:race-input:v1';
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; } }
+function save(data) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* 保存できない環境でも動く */ } }
+
+export function mountRaceInput(container, { onApply }) {
+  if (!container) return;
+
+  const rowHtml = car => `
+    <div class="ri-row" data-car="${car}">
+      <span class="ri-car car-${car}">${car}</span>
+      <input class="ri-name" type="text" placeholder="選手名" autocomplete="off" aria-label="${car}番 選手名">
+      <input class="ri-score" type="text" inputmode="decimal" placeholder="得点" aria-label="${car}番 競走得点">
+      <select class="ri-style" aria-label="${car}番 脚質">
+        <option value="">脚質</option>
+        ${Object.values(STYLE).map(s => `<option value="${s}">${s}</option>`).join('')}
+      </select>
+      <input class="ri-back" type="text" inputmode="numeric" placeholder="B" aria-label="${car}番 バック回数">
+      <input class="ri-start" type="text" inputmode="numeric" placeholder="S" aria-label="${car}番 S回数">
+    </div>`;
+
+  container.innerHTML = `
+    <p class="ri-help">名前か得点を入れた車番だけが出走します。B=バック回数、S=S回数(分からなければ空欄で大丈夫)。</p>
+    <div class="ri-head"><span>車</span><span>選手名</span><span>得点</span><span>脚質</span><span>B</span><span>S</span></div>
+    <div class="ri-rows">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(rowHtml).join('')}</div>
+    <label class="ri-lines-label">並び (周回の前から)
+      <input class="ri-lines" type="text" inputmode="numeric" placeholder="例: 123/456/789 (単騎は 7/8 のように1人で)">
+    </label>
+    <label class="ri-check"><input class="ri-auto" type="checkbox"> ラインの前後の順番はAIに任せる</label>
+    <div class="ri-errors" role="alert"></div>
+    <div class="ri-actions">
+      <button type="button" class="primary-btn ri-apply">この出走表で予想する</button>
+      <button type="button" class="secondary-btn ri-sample">サンプルを入れる</button>
+      <button type="button" class="secondary-btn ri-clear">全部消す</button>
+    </div>
+    <details class="ri-json">
+      <summary>データを貼り付けて読み込む</summary>
+      <p class="ri-help">Claudeに出走表のスクショを渡して作ってもらったデータは、ここに貼り付けると読み込めます。</p>
+      <textarea class="ri-json-text" rows="5" spellcheck="false" placeholder='{"riders":[...],"lines":[[1,2,3],...]}'></textarea>
+      <button type="button" class="secondary-btn ri-json-load">貼り付けたデータを読み込む</button>
+    </details>`;
+
+  const $ = sel => container.querySelector(sel);
+  const rows = [...container.querySelectorAll('.ri-row')];
+  const errorsBox = $('.ri-errors');
+
+  const read = () => {
+    const riders = [];
+    for (const row of rows) {
+      const car = Number(row.dataset.car);
+      const name = row.querySelector('.ri-name').value.trim();
+      const score = row.querySelector('.ri-score').value.trim();
+      if (!name && !score) continue;
+      riders.push({
+        car, name, score: score === '' ? undefined : Number(score.replace(/[^\d.]/g, '')),
+        style: row.querySelector('.ri-style').value || undefined,
+        back: row.querySelector('.ri-back').value.trim() === '' ? undefined : Number(row.querySelector('.ri-back').value),
+        start: row.querySelector('.ri-start').value.trim() === '' ? undefined : Number(row.querySelector('.ri-start').value)
+      });
+    }
+    return { race: {}, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked };
+  };
+
+  const fill = data => {
+    for (const row of rows) {
+      const r = (data?.riders ?? []).find(x => Number(x.car) === Number(row.dataset.car)) ?? {};
+      row.querySelector('.ri-name').value = r.name ?? '';
+      row.querySelector('.ri-score').value = r.score ?? '';
+      row.querySelector('.ri-style').value = r.style ?? '';
+      row.querySelector('.ri-back').value = r.back ?? '';
+      row.querySelector('.ri-start').value = r.start ?? '';
+    }
+    $('.ri-lines').value = formatLines(data?.lines);
+    $('.ri-auto').checked = !!data?.autoFormation;
+  };
+
+  const showErrors = list => {
+    errorsBox.innerHTML = list.length ? `<ul>${list.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : '';
+  };
+
+  const apply = data => {
+    const errors = validateRaceData(data);
+    showErrors(errors);
+    if (errors.length) return false;
+    save(data);
+    onApply(toRaceSetup(data), data);
+    return true;
+  };
+
+  $('.ri-apply').addEventListener('click', () => {
+    if (apply(read())) container.closest('details')?.removeAttribute('open');
+  });
+  $('.ri-sample').addEventListener('click', () => { fill(SAMPLE_RACE_DATA); showErrors([]); });
+  $('.ri-clear').addEventListener('click', () => { fill({ riders: [], lines: [] }); showErrors([]); });
+  $('.ri-json-load').addEventListener('click', () => {
+    try {
+      const data = JSON.parse($('.ri-json-text').value);
+      fill(data);
+      if (apply({ ...data, lines: (data.lines ?? []).map(l => l.map(Number)) })) container.closest('details')?.removeAttribute('open');
+    } catch {
+      showErrors(['貼り付けたデータを読めませんでした。全部コピーできているか確認してください']);
+    }
+  });
+
+  // 前回入力した出走表があれば、それで始める
+  const saved = load();
+  fill(saved ?? SAMPLE_RACE_DATA);
+  if (saved && !validateRaceData(saved).length) onApply(toRaceSetup(saved), saved);
+}

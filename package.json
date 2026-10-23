@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node autonomy-check.mjs",
+    "test": "node autonomy-check.mjs && node race-data-check.mjs",
     "test:teacher": "node cr0014-real-physics-check.mjs"
   }
 }

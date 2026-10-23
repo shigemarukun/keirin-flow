@@ -679,7 +679,9 @@ export class UIRenderer {
 
 
         if (protocolStatus) {
-            protocolStatus.textContent = `Scenario: ${state.scenario?.currentPhase ?? 'PHASE_1_PACER_CUT'}`;
+            protocolStatus.textContent = state.mode === 'TEACHER'
+                ? `教材シナリオ: ${state.scenario?.currentPhase ?? 'PHASE_1_PACER_CUT'}`
+                : 'AI: 各選手が自律判断';
         }
 
         this.renderDecisionLog(state.decisionLogs ?? []);

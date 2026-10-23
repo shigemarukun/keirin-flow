@@ -345,7 +345,9 @@ export class PhysicsEngine{
     if(blocker.lineId&&blocker.lineId===rider.lineId)continue;
     const longitudinal=Math.abs(blocker.distance-rider.distance),lateral=Math.abs(blocker.laneOffset-rider.laneOffset);
     if(longitudinal>22||lateral>26)continue;
-    resistance=Math.max(resistance,(1-clamp(longitudinal/22,0,1))*(blocker.profile?.blockSkill??.75)*1.15);
+    // closer (both along and across the track) = harder check
+    const along=1-clamp(longitudinal/22,0,1),across=1-clamp((lateral-11)/15,0,1);
+    resistance=Math.max(resistance,along*across*(blocker.profile?.blockSkill??.75)*3.6);
    }
    return resistance;
   }

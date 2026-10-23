@@ -10,6 +10,7 @@
 //   6. ラインIDの名前を変えても結果が変わらない (ラインIDハードコードなし)
 //   7. Decision Log の判断にはすべて理由が付いている
 //   8. race-ai.js に車番の決め打ちが書かれていない
+//   9. 競輪らしい攻防が起きる: 踏み合い(並走して競る) / 逃げのタレ / 番手ブロックが結果に効く
 
 import { readFileSync } from 'node:fs';
 import { PhysicsEngine } from './engine.js';
@@ -29,9 +30,11 @@ function race(setup, { scale = 1, frame = 1 / 60 } = {}) {
   e.start();
   let reverse = false, minCorridorGap = Infinity, t = 0;
   const last = new Map(e.riders.map(r => [r.number, r.distance]));
+  e.__speeds = Object.fromEntries(e.riders.map(r => [r.number, { peak: 0, last: 0 }]));
   while (!e.riders.every(r => r.finished) && t < 200) {
     e.update(frame); t += frame;
     for (const r of e.riders) {
+      if (!r.finished) { const sp = e.__speeds[r.number]; sp.peak = Math.max(sp.peak, r.speed); sp.last = r.speed; }
       if (r.distance < last.get(r.number) - 1e-9) reverse = true;
       last.set(r.number, r.distance);
       if (r.finished) continue;
@@ -45,7 +48,8 @@ function race(setup, { scale = 1, frame = 1 / 60 } = {}) {
     order: e.ranking.map(x => x.number),
     finished: e.ranking.length,
     reverse, minCorridorGap,
-    logs: e.decisionLogs.map(d => ({ n: d.riderNumber, a: d.action, m: d.message }))
+    logs: e.decisionLogs.map(d => ({ n: d.riderNumber, a: d.action, m: d.message, c: d.category })),
+    speeds: e.__speeds
   };
 }
 
@@ -102,6 +106,20 @@ check(unexplained.length === 0, 'Decision Log の判断にすべて理由が付�
 const src = readFileSync(new URL('./race-ai.js', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
 const hard = src.match(/number\s*===\s*\d|\[\s*\d\s*,\s*\d\s*,\s*\d\s*\]|rider\(\s*\d\s*\)/g);
 check(!hard, 'race-ai.js に車番の決め打ちがない', hard ? hard.join(', ') : '');
+
+// 9. keirin-like battles
+const contestSecs = a.logs.filter(l => l.c === 'CONTEST' && /秒の踏み合い/.test(l.m)).map(l => Number(l.m.match(/([\d.]+)秒/)[1]));
+check(contestSecs.length > 0 && Math.max(...contestSecs) >= 1.0, '突っ張り・捲りで並走の踏み合いが起き、1秒以上競る', contestSecs.map(x => `${x}秒`).join(', '));
+
+const early = clone(); Object.assign(early.riders[1], { endurance: .55, aggression: .95 });
+const er = race(early);
+const fade1 = er.speeds[1];
+check(er.logs.some(l => l.c === 'FATIGUE' && l.n === 1) && fade1.peak - fade1.last >= 3, '持久力の低い逃げ選手は最後にタレる', `最高${fade1.peak.toFixed(1)} → ゴール前${fade1.last.toFixed(1)}m/s`);
+
+const withBlock = clone(); Object.assign(withBlock.riders[4], { power: .96, acceleration: .98 });
+const noBlock = structuredClone(withBlock); for (const n of [2, 5, 8]) noBlock.riders[n].blockSkill = 0;
+const wb = race(withBlock), nb = race(noBlock);
+check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '番手のブロックが着順に影響する', `ブロック有 ${str(wb.order)} / 無 ${str(nb.order)}`);
 
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

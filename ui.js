@@ -359,7 +359,7 @@ export class UIRenderer {
 
         c.fill();
 
-        c.lineWidth = 2;
+        c.lineWidth = border === '#ffffff' || border === '#f8fafc' ? 2 : 3.5;
         c.strokeStyle = border;
 
         c.stroke();
@@ -382,19 +382,21 @@ export class UIRenderer {
             y
         );
 
-        // A circular marker has no visible yaw by itself.  Draw a short heading
-        // tick so the S-curve lean/heading is visible without changing the
-        // established marker radius or bank scale.
+        // 進行方向: 円の外側に小さな三角を付ける (番号の上に線を引かない)。
+        // 車線変更中は少し傾くので、どちらへ動いているかも分かる。
         if (Number.isFinite(headingAngle)) {
+            const tipX = x + Math.cos(headingAngle) * (radius + 6);
+            const tipY = y + Math.sin(headingAngle) * (radius + 6);
+            const baseX = x + Math.cos(headingAngle) * (radius + 1);
+            const baseY = y + Math.sin(headingAngle) * (radius + 1);
+            const side = headingAngle + Math.PI / 2;
             c.beginPath();
-            c.moveTo(x, y);
-            c.lineTo(
-                x + Math.cos(headingAngle) * (radius + 7),
-                y + Math.sin(headingAngle) * (radius + 7)
-            );
-            c.lineWidth = 2;
-            c.strokeStyle = border;
-            c.stroke();
+            c.moveTo(tipX, tipY);
+            c.lineTo(baseX + Math.cos(side) * 4, baseY + Math.sin(side) * 4);
+            c.lineTo(baseX - Math.cos(side) * 4, baseY - Math.sin(side) * 4);
+            c.closePath();
+            c.fillStyle = 'rgba(255, 255, 255, 0.75)';
+            c.fill();
         }
     }
 
@@ -543,12 +545,20 @@ export class UIRenderer {
                 );
 
 
+            // 縁の色で状態を見せる: 仕掛け=水色 / 踏み合い=橙 / ブロック=赤 / 脚切れ=灰
+            const ring =
+                rider.action === 'FULL_CONTEST' ? '#f97316'
+                : rider.action === 'BLOCK' ? '#ef4444'
+                : ['ATTACK', 'SWITCH_TO_SELF_POWER', 'MOVE_UP'].includes(rider.action) ? '#38bdf8'
+                : (rider.energy ?? 1) < 0.15 || rider.action === 'FADE' ? '#64748b'
+                : '#ffffff';
+
             this.drawMarker(
                 point.x,
                 point.y,
                 12,
                 rider.style.background,
-                '#ffffff',
+                ring,
                 String(rider.number),
                 rider.style.text,
                 12,

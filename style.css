@@ -145,3 +145,23 @@ button:hover { filter: brightness(1.08); }
 @media (max-width: 1050px) {
     #control-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* 選手の縁の色の凡例 */
+#rider-legend {
+    position: absolute;
+    left: 16px;
+    bottom: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(7, 11, 20, 0.72);
+    color: #cbd5e1;
+    font-size: 0.75rem;
+}
+#rider-legend span { display: inline-flex; align-items: center; gap: 5px; }
+#rider-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+@media (max-width: 720px) {
+    #rider-legend { left: 10px; bottom: 8px; font-size: 0.68rem; gap: 4px 8px; padding: 5px 8px; }
+}

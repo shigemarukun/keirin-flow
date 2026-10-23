@@ -206,6 +206,12 @@ export class UIRenderer {
     }
 
 
+    // シミュレーションの走路位置 (内 -18 〜 外 44) を、画面のバンク幅いっぱいに広げて描く。
+    // そのままだと隣の走路の選手どうしが画面上で重なって見えるため。
+    riderLaneToScreen(laneOffset) {
+        return -38 + (laneOffset + 18) * 1.35;
+    }
+
     getBankCoordinates(
         distance,
         laneOffset = 0
@@ -436,7 +442,7 @@ export class UIRenderer {
                 const basePoint =
                     this.getBankCoordinates(
                         state.pacer.distance,
-                        -18
+                        this.riderLaneToScreen(-18)
                     );
 
 
@@ -502,7 +508,7 @@ export class UIRenderer {
                 point =
                     this.getBankCoordinates(
                         state.pacer.distance,
-                        state.pacer.laneOffset
+                        this.riderLaneToScreen(state.pacer.laneOffset)
                     );
             }
 
@@ -541,7 +547,7 @@ export class UIRenderer {
             const point =
                 this.getBankCoordinates(
                     rider.distance,
-                    rider.laneOffset
+                    this.riderLaneToScreen(rider.laneOffset)
                 );
 
 
@@ -556,7 +562,7 @@ export class UIRenderer {
             this.drawMarker(
                 point.x,
                 point.y,
-                12,
+                11,
                 rider.style.background,
                 ring,
                 String(rider.number),

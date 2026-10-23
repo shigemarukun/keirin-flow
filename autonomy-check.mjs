@@ -10,6 +10,7 @@
 //   6. ラインIDの名前を変えても結果が変わらない (ラインIDハードコードなし)
 //   7. Decision Log の判断にはすべて理由が付いている
 //   8. race-ai.js に車番の決め打ちが書かれていない
+//  10. ラインを組み替えても破綻しない (全員完走・仕掛けた選手が遅い選手の真後ろで詰まり続けない)
 //   9. 競輪らしい攻防が起きる: 踏み合い(並走して競る) / 逃げのタレ / 番手ブロックが結果に効く
 
 import { readFileSync } from 'node:fs';
@@ -46,6 +47,7 @@ function race(setup, { scale = 1, frame = 1 / 60 } = {}) {
   }
   return {
     order: e.ranking.map(x => x.number),
+    times: Object.fromEntries(e.ranking.map(x => [x.number, x.time])),
     finished: e.ranking.length,
     reverse, minCorridorGap,
     logs: e.decisionLogs.map(d => ({ n: d.riderNumber, a: d.action, m: d.message, c: d.category })),
@@ -66,7 +68,7 @@ check(new Set(bySpeed).size === 1, '再生速度 0.5x/1x/2x/3x で着順が同�
 // 3. physical sanity
 check(a.finished === 9, '9人全員が完走する', `${a.finished}/9`);
 check(!a.reverse, '逆走しない');
-check(a.minCorridorGap >= 13.5 - 1e-6, '同じ走路で13.5m未満に重ならない', a.minCorridorGap.toFixed(2));
+check(a.minCorridorGap >= 9 - 1e-6, '同じ走路で前後に重ならない (前に割り込むときも9m以上空ける)', a.minCorridorGap.toFixed(2));
 
 // 4. abilities change the outcome
 const variants = {
@@ -116,10 +118,47 @@ const er = race(early);
 const fade1 = er.speeds[1];
 check(er.logs.some(l => l.c === 'FATIGUE' && l.n === 1) && fade1.peak - fade1.last >= 3, '持久力の低い逃げ選手は最後にタレる', `最高${fade1.peak.toFixed(1)} → ゴール前${fade1.last.toFixed(1)}m/s`);
 
-const withBlock = clone(); Object.assign(withBlock.riders[4], { power: .96, acceleration: .98 });
+const withBlock = clone();
 const noBlock = structuredClone(withBlock); for (const n of [2, 5, 8]) noBlock.riders[n].blockSkill = 0;
 const wb = race(withBlock), nb = race(noBlock);
 check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '番手のブロックが着順に影響する', `ブロック有 ${str(wb.order)} / 無 ${str(nb.order)}`);
+
+// 10. line changes must not break the race
+{
+  const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
+  const layouts = ['123/456/789', '789/123/456', '456/123/789', '12/456/789/3', '1234/56789', '12/34/56/789', '147/258/369', '15/2/3/4/6/7/8/9', '12345/6789', '123/456/7/8/9', '7/123/8/456/9', '12/34/5/6/7/89', '1/2/3/4/5/6/7/8/9'];
+  const bad = [];
+  for (const layout of layouts) {
+    const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(layout);
+    const e = new PhysicsEngine(toRaceSetup(d)); e.start();
+    const stuck = {}; let worst = 0, t = 0, split = 0, worstSplit = 0;
+    while (!e.riders.every(r => r.finished) && t < 150) {
+      e.update(1 / 60); t += 1 / 60;
+      for (const r of e.riders) {
+        if (r.finished || r.action !== 'ATTACK') { stuck[r.number] = 0; continue; }
+        const blocker = e.riders.find(o => !o.finished && o !== r && o.distance - r.distance > 0 && o.distance - r.distance < 20 && Math.abs(o.laneOffset - r.laneOffset) < 11 && o.speed < r.speed - 2);
+        stuck[r.number] = blocker ? (stuck[r.number] ?? 0) + 1 / 60 : 0;
+        worst = Math.max(worst, stuck[r.number]);
+      }
+      // 他のラインの選手が、ラインの間に割り込んだまま走り続けていないか
+      const splitNow = e.raceClock.remainingDistance < 600 && e.riders.some(b => {
+        if (b.finished || !b.frontLineMate || b.action !== 'FOLLOW') return false;
+        const f = e.rider(b.frontLineMate);
+        return !f.finished && e.riders.some(o => !o.finished && o.lineId !== b.lineId && o.distance < f.distance && o.distance > b.distance && Math.abs(o.laneOffset - b.laneOffset) < 11 && Math.abs(f.laneOffset - b.laneOffset) < 11);
+      });
+      split = splitNow ? split + 1 / 60 : 0; worstSplit = Math.max(worstSplit, split);
+    }
+    if (e.ranking.length !== e.riders.length || worst > 2 || worstSplit > 3) bad.push(`${layout}: 完走${e.ranking.length}/${e.riders.length} 詰まり${worst.toFixed(1)}秒 割り込み${worstSplit.toFixed(1)}秒`);
+  }
+  check(bad.length === 0, 'ラインを組み替えても破綻しない (13通りの並び・単騎3人以上や全員単騎も含む: 全員完走・詰まらない・ラインの間に割り込まれ続けない)', bad.join(' / '));
+
+  // 前受けが「出させる」を選んだら、誘導切りのラインが本当に前に出て、ラインのまま並ぶ
+  const yieldCase = clone(); Object.assign(yieldCase.riders[1], { power: .6, acceleration: .6, endurance: .6 });
+  const ye = new PhysicsEngine(yieldCase); ye.start();
+  while (ye.raceClock.remainingDistance > 480) ye.update(1 / 60);
+  const order = [...ye.riders].sort((a, b) => b.distance - a.distance).map(r => r.number).join('');
+  check(order.startsWith('789'), '前受けが出させたら、誘導切りのラインがラインのまま前に入る', `残480mの隊列 ${order}`);
+}
 
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

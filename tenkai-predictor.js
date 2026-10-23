@@ -4,8 +4,13 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 export class TenkaiPredictor {
   predict(setup, lineManager) {
-    const lines = lineManager.linesArray();
-    if (!lines.length) throw new Error('TenkaiPredictor requires at least one line.');
+    // ラインが1本以下(単騎だらけ)のレースは、単騎も1人のグループとして周回の順に扱う
+    let lines = lineManager.linesArray();
+    if (lines.length < 2) {
+      const order = (setup.formation?.length ? setup.formation : [...lines.map(l => l.members), ...Object.values(setup.riders).filter(r => r.solo).map(r => [r.number])]);
+      lines = order.map((group, i) => lines.find(l => l.members[0] === group[0]) ?? { id: `SOLO_${group[0]}`, members: [...group], leader: group[0] });
+    }
+    if (!lines.length) throw new Error('TenkaiPredictor requires at least one rider.');
 
     const initialFront = lines[0];
     const candidates = lines.slice(1).map((line, index) => ({

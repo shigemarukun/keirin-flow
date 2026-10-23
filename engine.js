@@ -10,6 +10,7 @@ import { RaceAI } from './race-ai.js';
 export const RACE_MODE=Object.freeze({AUTONOMOUS:'AUTONOMOUS',TEACHER:'TEACHER'});
 
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const PACE_FLOOR=9;
 const PACER_STATE=Object.freeze({LEADING:'LEADING',EXITING:'EXITING',EXITED:'EXITED'});
 const CAR_STYLES=Object.freeze({
 1:{background:'#ffffff',text:'#111111'},2:{background:'#222222',text:'#ffffff'},3:{background:'#e60012',text:'#ffffff'},
@@ -83,7 +84,7 @@ export class PhysicsEngine{
   if(setup){this.applyRaceSetup(setup);return;}
   this.isStarted=false;this.elapsedTime=0;this.accumulator=0;this.ranking=[];this.raceEvents=[];this.decisionLogs=[];this.bellRung=false;this.establishedFrontLineId=null;this.settlingLineId=null;this.raceClock.reset();
   this.pacer={distance:0,speed:this.profile.FORMATION_SPEED,state:PACER_STATE.LEADING,laneOffset:-18,exitProgress:0};
-  for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.history=[];r.raceIntent=null;r.laneMotion=null;r.laneVelocity=0;r.visualAngleOffset=0;r.lastDecisionAction=null;r.lastDecisionLogTime=null;}
+  for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.coastDistance=0;r.boxedBy=null;r.boxedFor=0;r.history=[];r.raceIntent=null;r.laneMotion=null;r.laneVelocity=0;r.visualAngleOffset=0;r.lastDecisionAction=null;r.lastDecisionLogTime=null;}
   this.keirinProtocol.initialize(this,this.prediction);
   this.raceAI.reset();
   if(this.mode===RACE_MODE.TEACHER)this.scenarioPhaseManager.initialize(this);
@@ -322,16 +323,19 @@ export class PhysicsEngine{
  }
 
  _laneBlocked(rider,laneBefore){
-  const MIN_GAP=13.5,SAME_CORRIDOR=11.0;
+  const MIN_GAP=13.5,SAME_CORRIDOR=11.0,CUT_IN_GAP=9;
   for(const other of this.riders){
    if(other.number===rider.number||other.finished)continue;
    if(Math.abs(other.distance-rider.distance)>=MIN_GAP)continue;
+   // Cutting in front of someone is allowed once we are clearly ahead of him (CUT_IN_GAP);
+   // he then simply cannot close up below the follow spacing.
+   if(other.distance<=rider.distance-CUT_IN_GAP)continue;
    const wasClear=Math.abs(other.laneOffset-laneBefore)>=SAME_CORRIDOR;
    const nowInside=Math.abs(other.laneOffset-rider.laneOffset)<SAME_CORRIDOR;
    const closer=Math.abs(other.laneOffset-rider.laneOffset)<Math.abs(other.laneOffset-laneBefore);
-   if(nowInside&&(wasClear||closer))return true;
+   if(nowInside&&(wasClear||closer))return other;
   }
-  return false;
+  return null;
  }
 
  _getOuterLaneLoad(rider){
@@ -375,6 +379,12 @@ export class PhysicsEngine{
    desired*=1-this._getOuterLaneLoad(rider);
   }
   desired=Math.max(0,desired-this._getBlockResistance(rider));
+  // Boxed in by a rider slightly ahead of us: ease off so we can slip behind him and change lanes.
+  // (Without this two riders can lock each other side by side forever.)
+  if(this.mode!==RACE_MODE.TEACHER&&rider.boxedFor>.6){
+   const box=this.rider(rider.boxedBy);
+   if(box&&!box.finished&&box.distance>=rider.distance&&box.action!==ACTION.YIELD)desired=Math.min(desired,Math.max(PACE_FLOOR,box.speed-1.5));
+  }
   if(!plan.scenarioControlled && rider.energy<.18)
     desired=Math.min(desired,rider.profile.topSpeed*(.72+1.2*rider.energy));
   const prev=rider.speed;
@@ -388,10 +398,12 @@ export class PhysicsEngine{
 
   const laneBefore=rider.laneOffset;
   this._updateLaneMotion(rider,plan.laneTarget,plan,dt);
-  if(this.mode!==RACE_MODE.TEACHER&&this._laneBlocked(rider,laneBefore)){
+  const blockedBy=this.mode!==RACE_MODE.TEACHER?this._laneBlocked(rider,laneBefore):null;
+  if(blockedBy){
    // Cannot move sideways into a rider who is right next to us: hold the line.
    rider.laneOffset=laneBefore;rider.laneMotion=null;rider.laneVelocity=0;
-  }
+   rider.boxedBy=blockedBy.number;rider.boxedFor=(rider.boxedFor??0)+dt;
+  }else{rider.boxedBy=null;rider.boxedFor=0;}
 
   let next=rider.distance+rider.speed*dt;
   const target=rider.followTargetNumber?this.rider(rider.followTargetNumber):null;
@@ -403,7 +415,7 @@ export class PhysicsEngine{
   rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
  }
 
- _recordFinish(rider){rider.distance=this.totalDistance;rider.finished=true;rider.finishTime=this.elapsedTime;this.ranking.push({rank:0,number:rider.number,lineId:rider.lineId,time:rider.finishTime,margin:''});}
+ _recordFinish(rider){rider.coastDistance=rider.distance-this.totalDistance;rider.distance=this.totalDistance+rider.coastDistance;rider.finished=true;rider.finishTime=this.elapsedTime;this.ranking.push({rank:0,number:rider.number,lineId:rider.lineId,time:rider.finishTime,margin:''});}
  _finalizeRanking(){this.ranking.sort((a,b)=>a.time-b.time||a.number-b.number);this.ranking.forEach((item,index)=>{item.rank=index+1;item.margin=index===0?'先頭':'';});}
 
  _step(dt){
@@ -414,7 +426,11 @@ export class PhysicsEngine{
   const plans=new Map();
   for(const rider of this.riders)if(!rider.finished)plans.set(rider.number,teacher?this.scenarioPhaseManager.plan(rider,this):this.raceAI.plan(rider,this,dt));
   for(const rider of this.riders){
-   if(rider.finished)continue;
+   if(rider.finished){
+    // After the line: keep rolling and ease off instead of stacking everyone on the finish line.
+    rider.speed=Math.max(6,rider.speed-2.2*dt);rider.coastDistance=(rider.coastDistance??0)+rider.speed*dt;
+    rider.distance=this.totalDistance+rider.coastDistance;rider.action=ACTION.FADE;continue;
+   }
    const plan=plans.get(rider.number);this._applyEnergy(rider,plan,dt);const before=rider.distance;this._move(rider,plan,dt);
    if(before<this.totalDistance&&rider.distance>=this.totalDistance)this._recordFinish(rider);
   }

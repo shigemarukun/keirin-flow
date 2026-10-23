@@ -94,6 +94,8 @@ export class RaceAI {
     if (!d) {
       const role = rider.role;
       if (role === ROLE.LEADER) d = this.leader(rider, engine, m, rem);
+      // 自力型の単騎 (逃・両) は「1人のライン」として先頭の判断をする。追込型の単騎は他のラインに付ける
+      else if (role === ROLE.SOLO && rider.profile.aggression >= 0.62) d = this.leader(rider, engine, m, rem);
       else if (role === ROLE.SOLO) d = this.solo(rider, engine, m, rem);
       else d = this.follower(rider, engine, m, rem);
     }
@@ -121,6 +123,13 @@ export class RaceAI {
     for (const o of engine.riders) if (!o.finished && !this._retreating(o) && (!best || o.distance > best.distance)) best = o;
     return best;
   }
+  // Keep following the same wheel while it is still a sensible wheel (stops target flicker).
+  _sticky(rider, candidate, engine) {
+    const cur = rider.followTargetNumber ? engine.rider(rider.followTargetNumber) : null;
+    if (cur && !cur.finished && !this._retreating(cur) && cur.distance > rider.distance && cur.distance - rider.distance < 40) return cur;
+    return candidate;
+  }
+
   // Don't slot into the middle of someone else's line: aim for that line's last rider instead.
   _lineTailAhead(target, rider, engine) {
     if (!target?.lineId || target.lineId === rider.lineId) return target;
@@ -249,7 +258,7 @@ export class RaceAI {
 
     const corridor = this._nearestAheadInCorridor(rider, engine, 80);
     let ahead = corridor && !this._retreating(corridor.rider) ? corridor : (this._aheadNotRetreating(rider, engine) ? { rider: this._aheadNotRetreating(rider, engine) } : null);
-    if (ahead) ahead = { rider: this._lineTailAhead(ahead.rider, rider, engine) };
+    if (ahead) ahead = { rider: this._sticky(rider, this._lineTailAhead(ahead.rider, rider, engine), engine) };
     if (ahead) return this._followPlan(ahead.rider, m.gaveUp ? '一度引いて脚を回復。後方から再仕掛けを待つ' : `前のラインの後ろで脚を溜める (仕掛け予定 残${m.strikeAt.toFixed(0)}m)`, { lane: TRACK_LANE.INNER });
     return { action: ACTION.CONTROL_PACE, speed: PACE.CRUISE, lane: TRACK_LANE.INNER, reason: '位置を保つ' };
   }
@@ -427,7 +436,7 @@ export class RaceAI {
     if (rem <= m.strikeAt * .6 && rider.energy > .3 && engine.positionRank(rider) >= 4) {
       return { action: ACTION.ATTACK, speed: this.sprintSpeed(rider), lane: this._attackLane(rider, engine), reason: `単騎で自力発進 (残脚${pct(rider.energy)})` };
     }
-    if (ahead) { const t = this._lineTailAhead(ahead.rider, rider, engine); return this._followPlan(t, `単騎。${t.number}番の後ろに付けて脚を溜める`, { lane: t.laneOffset }); }
+    if (ahead) { const t = this._sticky(rider, this._lineTailAhead(ahead.rider, rider, engine), engine); return this._followPlan(t, `単騎。${t.number}番の後ろに付けて脚を溜める`, { lane: t.laneOffset }); }
     return { action: ACTION.CONTROL_PACE, speed: PACE.CRUISE, lane: TRACK_LANE.INNER, reason: '単騎で位置を保つ' };
   }
 

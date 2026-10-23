@@ -126,7 +126,7 @@ check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '�
 // 10. line changes must not break the race
 {
   const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
-  const layouts = ['123/456/789', '789/123/456', '456/123/789', '12/456/789/3', '1234/56789', '12/34/56/789', '147/258/369', '15/2/3/4/6/7/8/9', '12345/6789'];
+  const layouts = ['123/456/789', '789/123/456', '456/123/789', '12/456/789/3', '1234/56789', '12/34/56/789', '147/258/369', '15/2/3/4/6/7/8/9', '12345/6789', '123/456/7/8/9', '7/123/8/456/9', '12/34/5/6/7/89', '1/2/3/4/5/6/7/8/9'];
   const bad = [];
   for (const layout of layouts) {
     const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(layout);
@@ -150,7 +150,7 @@ check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '�
     }
     if (e.ranking.length !== e.riders.length || worst > 2 || worstSplit > 3) bad.push(`${layout}: 完走${e.ranking.length}/${e.riders.length} 詰まり${worst.toFixed(1)}秒 割り込み${worstSplit.toFixed(1)}秒`);
   }
-  check(bad.length === 0, 'ラインを組み替えても破綻しない (9通りの並び: 全員完走・詰まらない・ラインの間に割り込まれ続けない)', bad.join(' / '));
+  check(bad.length === 0, 'ラインを組み替えても破綻しない (13通りの並び・単騎3人以上や全員単騎も含む: 全員完走・詰まらない・ラインの間に割り込まれ続けない)', bad.join(' / '));
 
   // 前受けが「出させる」を選んだら、誘導切りのラインが本当に前に出て、ラインのまま並ぶ
   const yieldCase = clone(); Object.assign(yieldCase.riders[1], { power: .6, acceleration: .6, endurance: .6 });

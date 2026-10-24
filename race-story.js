@@ -106,14 +106,17 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
   // 赤板〜打鐘: 誘導切り
   const cutStart = firstLog(riderLogs, l => /誘導切りへ外を上昇/.test(l.message));
   const tsuppari = firstLog(riderLogs, l => /突っ張る/.test(l.message) && R(l) > 500);
-  const yielded = firstLog(riderLogs, l => /(誘導切りを受け入れる|出させて一旦引く)/.test(l.message));
+  const yielded = firstLog(riderLogs, l => /(誘導切りを受け入れる|出させて)/.test(l.message));
   const cutLost = firstLog(riderLogs, l => /踏み合いで.*競り負け/.test(l.message) && R(l) > 500);
   const cutWon = firstLog(riderLogs, l => /踏み合いを制して.*叩き切る/.test(l.message) && R(l) > 500);
   if (cutStart) {
     let t = `赤板で${name(cutStart.riderNumber)}が外から誘導切りへ。`;
     if (tsuppari && cutLost) t += `${name(tsuppari.riderNumber)}が突っ張り、${name(cutLost.riderNumber)}は踏み合いで競り負けて後方へ下げる。`;
     else if (tsuppari && cutWon) t += `${name(tsuppari.riderNumber)}が突っ張るが、${name(cutWon.riderNumber)}が踏み勝って前に出る。`;
-    else if (yielded) t += `${name(yielded.riderNumber)}は無理に張り合わず、${cutStart.riderNumber}番${lineOf(cutStart.riderNumber) ? 'のライン' : ''}を前に入れる。`;
+    else if (yielded) {
+      const how = /後方へ引く/.test(yielded.message) ? '後方まで引いて巻き返しを狙う' : /中団/.test(yielded.message) ? 'その後ろの中団を取る' : '';
+      t += `${name(yielded.riderNumber)}は無理に張り合わず、${cutStart.riderNumber}番${lineOf(cutStart.riderNumber) ? 'のライン' : ''}を前に入れ${how ? `て、${how}` : 'る'}。`;
+    }
     add('赤板', t);
   }
   if (snapshots.bell) add('打鐘', `打鐘の隊列は ${fmtOrder(snapshots.bell.order, lineOf)}。`);
@@ -148,7 +151,11 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
   const chigire = firstLog(riderLogs, l => /千切れる/.test(l.message));
   if (chigire) add('攻防', `${name(chigire.riderNumber)}は${chigire.message.replace(/\s*\(.*\)/, '')}。`);
   const switched = firstLog(riderLogs, l => /切り替える/.test(l.message));
-  if (switched) add('攻防', `${name(switched.riderNumber)}は${switched.message.replace(/\s*\(.*\)/, '')}`);
+  if (switched) {
+    // 切り替えたあと、巻き返した先頭に付き直したなら、そこまで書く (矛盾しないように)
+    const rejoin = riderLogs.find(l => l.riderNumber === switched.riderNumber && /巻き返した/.test(l.message) && R(l) < R(switched));
+    add('攻防', `${name(switched.riderNumber)}は${switched.message.replace(/\s*\(.*\)/, '')}${rejoin ? `が、${rejoin.message.replace(/、再び.*$/, '')}付き直す` : ''}。`.replace(/。。$/, '。'));
+  }
 
   // バック・直線
   if (snapshots.back) add('バック', `バックでは ${fmtOrder(snapshots.back.order, lineOf)}。`);

@@ -220,15 +220,19 @@ check(fades.length > 0 && fades.every(f => f.ok), '持久力の低い逃げ選�
   const seen = Object.fromEntries(Object.keys(pats).map(k => [k, 0]));
   const layouts = ['123/456/789', '789/123/456', '456/123/789', '12/456/789/3', '1234/56789', '12/34/56/789', '123/456/7/8/9', '7/123/8/456/9'];
   const mods = [d => {}, d => { d.riders[0].score = 104; }, d => { d.riders[3].score = 120; }, d => { d.riders[6].score = 119; }];
-  for (const L of layouts) for (const mod of mods) {
+  // (画面の「何通りもの未来」と同じく、選手の調子を少しゆらした条件で走らせる)
+  const { withCondition } = await import('./forecast.js');
+  let seedN = 0;
+  // (内すくい・番手捲りのようなまれな動きもあるので、調子を変えて2回ずつ = 64レース)
+  for (const L of layouts) for (const mod of mods) for (let rep = 0; rep < 2; rep++) {
     const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(L); mod(d);
-    const e = new PhysicsEngine(toRaceSetup(d)); e.start();
+    const e = new PhysicsEngine(withCondition(toRaceSetup(d), 4000 + seedN++).setup); e.start();
     for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
     const msgs = e.decisionLogs.map(x => x.message).join('\n');
     for (const [k, re] of Object.entries(pats)) if (re.test(msgs)) seen[k] += 1;
   }
   const missing = Object.entries(seen).filter(([, v]) => v === 0).map(([k]) => k);
-  check(!missing.length, '32レースの中で、競輪の13種類の動きがすべて起きる', Object.entries(seen).map(([k, v]) => `${k}${v}`).join(' '));
+  check(!missing.length, '64レースの中で、競輪の13種類の動きがすべて起きる', Object.entries(seen).map(([k, v]) => `${k}${v}`).join(' '));
 }
 
 // 13. 実際の競輪のデータに近い結果になる (いろいろな並び・得点で72レース)
@@ -311,13 +315,15 @@ check(fades.length > 0 && fades.every(f => f.ok), '持久力の低い逃げ選�
 // ---------- 7車立て・ライン位置別 (実データは男子7車): ラインがまとまって走り、3番手は強さ次第 ----------
 {
   const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
+  const { withCondition } = await import('./forecast.js');
   let rs = 11; const rnd = () => { rs = (rs * 16807) % 2147483647; return rs / 2147483647; };
   const pos = { 先頭: [0, 0, 0], 番手: [0, 0, 0], '3番手': [0, 0, 0], 単騎: [0, 0, 0] };
   let n = 0, mark2 = 0, chigire = 0, thirds = 0;
   for (const L of ['123/45/67', '45/67/123', '67/123/45', '123/456/7', '12/34/567', '1234/567', '12/345/67']) for (let i = 0; i < 6; i++) {
     const d = structuredClone(SAMPLE_RACE_DATA); d.riders = d.riders.filter(r => r.car <= 7); d.lines = parseLines(L);
     for (const r of d.riders) r.score = +(103 + rnd() * 16).toFixed(1);
-    const e = new PhysicsEngine(toRaceSetup(d)); e.start();
+    // (画面の「何通りもの未来」と同じく、選手の調子を少しゆらした条件で走らせる)
+    const e = new PhysicsEngine(withCondition(toRaceSetup(d), 7000 + n).setup); e.start();
     for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
     n++; const st = e.getStory(); if (st.kimarite.marks.includes(e.ranking[1].number)) mark2++;
     const order = e.ranking.map(r => r.number);

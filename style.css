@@ -446,3 +446,5 @@ body #app {
 .re-bar { height: 6px; background: rgba(148, 163, 184, 0.2); border-radius: 3px; margin: 4px 0 2px; overflow: hidden; }
 .re-bar i { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #a78bfa); border-radius: 3px; }
 .re-sub { font-size: 0.72rem; color: #94a3b8; line-height: 1.45; }
+
+.tp-note { font-size: 0.7rem; color: var(--muted); margin: 4px 0 0; line-height: 1.4; }

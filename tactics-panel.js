@@ -54,15 +54,19 @@ export function mountTacticsPanel(container, { getData, apply, getSetup, getPred
       }
       if (leader === frontLeader) {
         // AIのおすすめ (指定を外したときの対応): 前受けの性格から
-        const aiFront = rider.mindset === 'TSUPPARI' ? '突っ張り' : rider.mindset === 'YIELD_AND_ROLL' ? '出させる' : '相手次第';
-        const front = data.frontResponse?.[leader] ?? '';
+        // AIのおすすめ: EXデータ(突っ張りの回数など)や脚質から出した割合。おまかせなら、何通りもの未来でこの割合で選ぶ
+        const probs = rider.frontPlanFromEx ? (rider.frontPlanProbs ?? {}) : {};
+        const pct = v => (v == null ? '' : `${Math.round(v * 100)}%`);
+        const front = data.frontResponse?.[leader] === 'YIELD' ? 'CHUDAN' : (data.frontResponse?.[leader] ?? '');
         html += `
           <div class="tp-sub">前受けで、誘導切りに来られたら</div>
           <div class="tp-chips">
-            ${chip(leader, 'front', '', `おまかせ(${aiFront})`, !front)}
-            ${chip(leader, 'front', 'TSUPPARI', '突っ張る', front === 'TSUPPARI')}
-            ${chip(leader, 'front', 'YIELD', '出させる', front === 'YIELD')}
-          </div>`;
+            ${chip(leader, 'front', '', rider.frontPlanFromEx ? 'おまかせ' : 'おまかせ(相手次第)', !front)}
+            ${chip(leader, 'front', 'TSUPPARI', `突っ張る ${pct(probs.TSUPPARI)}`, front === 'TSUPPARI')}
+            ${chip(leader, 'front', 'HIKU', `引く ${pct(probs.HIKU)}`, front === 'HIKU')}
+            ${chip(leader, 'front', 'CHUDAN', `中団 ${pct(probs.CHUDAN)}`, front === 'CHUDAN')}
+          </div>
+          <p class="tp-note">${rider.frontPlanFromEx ? '%はEXデータ(突っ張りの回数など)から見た割合。おまかせなら、何通りもの未来でこの割合で選びます。' : 'EXデータが無いので、おまかせなら誘導切りに来た相手と力を比べて決めます。'} 引く=後方まで下げて巻き返す / 中団=前に入れたラインの後ろを取る</p>`;
       }
       return html + '</div>';
     }).join('') + `<button type="button" class="secondary-btn tp-reset">展開の指定をすべておまかせに戻す</button>`;

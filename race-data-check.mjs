@@ -243,5 +243,27 @@ check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い
   check(f.marks[f.scenarios[0].order[0]] === '◎' && f.marks[f.scenarios[0].order[1]] === '○' && f.runs.length === 12, '印は本線に合わせる (◎=本線の1着、○=2着)', JSON.stringify(f.marks));
 }
 
+// ---------- 答え合わせの採点 (確定した予想 → 結果) ----------
+{
+  const { makeLock, scoreLock, summarize, fingerprint } = await import('./scoring.js');
+  const { forecastRaces } = await import('./forecast.js');
+  const { buildAdvice } = await import('./advice.js');
+  const setup = toRaceSetup(SAMPLE_RACE_DATA);
+  const f = forecastRaces(setup, 12);
+  const adv = buildAdvice({ runs: f.runs, scenario: f.scenarios[0], marks: f.marks });
+  const lock = makeLock({ setup, forecast: f, advice: adv, now: new Date('2026-10-25T10:00:00Z') });
+  check(lock.orders.length === 12 && lock.main.length === 3 && lock.fingerprint === fingerprint(setup) && JSON.stringify(lock).length < 20000,
+    '予想を確定すると、本線・印・買い目・未来の着順が小さく保存される', `${JSON.stringify(lock).length}文字`);
+  const hit = scoreLock(lock, lock.main), miss = scoreLock(lock, [...lock.cars].reverse().slice(0, 3));
+  check(hit.trifectaHit && hit.p > miss.p && hit.vsRandom > 1 && hit.logLoss < miss.logLoss && hit.adviceHit === '本命',
+    '本線どおりの結果は、確率が高く当てずっぽうより良い採点になる (買い目は本命で的中)', `本線 ${(hit.p * 100).toFixed(1)}% ${hit.vsRandom.toFixed(1)}倍 / 外れ ${(miss.p * 100).toFixed(2)}%`);
+  // 全組み合わせの確率の合計は1 (どの結果でも採点できる)
+  const { buildModel, trifectaTable } = await import('./prob.js');
+  const total = trifectaTable(buildModel(lock.orders, lock.cars), lock.cars).reduce((a, x) => a + x.p, 0);
+  check(Math.abs(total - 1) < 1e-9, '3連単の確率は全組み合わせで合計1', total.toFixed(6));
+  const s = summarize([{ ...lock, result: hit }, { ...lock, result: miss }, { ...lock }]);
+  check(s.n === 2 && Math.abs(s.vsRandom - Math.sqrt(hit.vsRandom * miss.vsRandom)) < 1e-9, '通算は採点済みの確定予想だけ・当てずっぽうとの比は掛け算の平均', `${s.n}レース ${s.vsRandom.toFixed(2)}倍`);
+}
+
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

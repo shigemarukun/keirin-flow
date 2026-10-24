@@ -328,6 +328,15 @@ body #app {
 .rs-undo { margin-left: 8px; font-size: .75rem; padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(148,163,184,.35); background: #1e293b; color: #e2e8f0; }
 .rs-list { margin: 0; padding-left: 18px; font-size: .85rem; line-height: 1.7; }
 .rs-ok { color: #4ade80; } .rs-ng { color: #f87171; }
+.rs-step { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid rgba(148,163,184,.15); }
+.rs-step:last-of-type { border-bottom: 0; }
+.rs-warn { color: #fbbf24; }
+.rs-note { color: #4ade80; }
+.rs-sub { color: #94a3b8; font-size: .75rem; }
+.rs-target { margin-left: 6px; padding: 4px 6px; border-radius: 6px; background: #1e293b; color: #e2e8f0; border: 1px solid rgba(148,163,184,.35); }
+.rs-history { margin-top: 10px; font-size: .8rem; color: #cbd5e1; }
+.rs-history summary { cursor: pointer; padding: 6px 0; }
+.rs-del { margin-left: 6px; font-size: .7rem; padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(248,113,113,.4); background: transparent; color: #fca5a5; }
 .rs-summary { font-size: .8rem; color: #cbd5e1; padding: 8px 10px; border-radius: 8px; background: rgba(15,23,42,.6); border: 1px solid rgba(148,163,184,.18); }
 .primary-btn:disabled { opacity: .45; }
 

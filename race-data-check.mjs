@@ -222,5 +222,26 @@ check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い
   check(themes.length >= 2 && themes.every(t => /番ラインが主導権/.test(t)) && new Set(themes).size === themes.length, '本線・対抗・穴は「どのラインが主導権を取るか」で分かれ、展開の名前が付く', themes.join(' / '));
 }
 
+// ---------- 展開ごとの買い目アドバイス (3連単) ----------
+{
+  const { buildAdvice, groupedKeys, adviceText } = await import('./advice.js');
+  const mk = (orders, mainLine = 1) => orders.map(o => ({ order: o, mainLine, how: '差し', ev: { chigire: [], kamashi: [], makuri: [], banteMakuriBy: [] } }));
+  const firm = mk(Array.from({ length: 20 }, (_, i) => (i < 16 ? [1, 2, 3, 4, 5, 6, 7] : [2, 1, 3, 4, 5, 6, 7])));
+  const af = buildAdvice({ runs: firm, scenario: { mainLine: 1 }, marks: { 1: '◎', 2: '○', 3: '▲' } });
+  check(af.points >= 3 && af.points <= 6 && af.difficulty === '固い' && af.honmei[0].key === '1-2-3', '固い展開は少ない点数 (本命が先頭に来る)', `${af.points}点 ${af.honmei.map(x => x.key).join(' ')}`);
+  let rs = 3; const rnd = () => { rs = (rs * 16807) % 2147483647; return rs / 2147483647; };
+  const wild = mk(Array.from({ length: 30 }, () => [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => rnd() - .5)));
+  const aw = buildAdvice({ runs: wild, scenario: { mainLine: 1 }, marks: { 1: '◎', 2: '○', 3: '▲' } });
+  check(aw.points > af.points && aw.points <= 24 && aw.difficulty === '荒れそう', '荒れる展開ほど点数が増える (最大24点)', `${aw.points}点`);
+  check(aw.ana.every(x => x.key.split('-').slice(0, 2).some(c => !['1', '2', '3'].includes(c))), '穴は、印の薄い選手が1・2着に絡む組み合わせ');
+  check(JSON.stringify(groupedKeys([{ key: '2-4-9' }, { key: '2-4-5' }, { key: '3-4-9' }])) === '["2-4-9,5","3-4-9"]' && /本命: 1-2-3/.test(adviceText(af)),
+    '買い目は1・2着が同じものをまとめて書く (例 2-4-9,5)、コピー用の文字も作れる');
+  const thin = buildAdvice({ runs: [...firm, ...mk([[3, 4, 5, 1, 2, 6, 7]], 3)], scenario: { mainLine: 3 }, marks: {} });
+  check(thin.thin && thin.notes.length === 0, 'その展開になった回が少ないときは「参考程度」とし、起きそうなことは出さない');
+  const { forecastRaces } = await import('./forecast.js');
+  const f = forecastRaces(toRaceSetup({ ...SAMPLE_RACE_DATA }), 12);
+  check(f.marks[f.scenarios[0].order[0]] === '◎' && f.marks[f.scenarios[0].order[1]] === '○' && f.runs.length === 12, '印は本線に合わせる (◎=本線の1着、○=2着)', JSON.stringify(f.marks));
+}
+
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

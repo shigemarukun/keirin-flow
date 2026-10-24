@@ -3,6 +3,7 @@
 
 import { predictRace, forecastRaces } from './forecast.js';
 import { RaceAI } from './race-ai.js';
+import { buildAdvice, adviceText, groupedKeys } from './advice.js';
 
 const STYLE_LABEL = { SENKO: '先行', MAKURI: '捲り', KAMASHI: 'カマシ', OIKOMI: '追込' };
 const ai = new RaceAI();
@@ -104,6 +105,23 @@ export function mountForecastPanel(container, { onWatch } = {}) {
       </ol>
       <button type="button" class="primary-btn fc-watch" data-seed="${shown.seed ?? ''}">▶ この展開をコースで見る</button>`;
 
+    // この展開の買い目 (3連単)
+    const adv = sc && forecast?.runs ? buildAdvice({ runs: forecast.runs, scenario: sc, marks, names }) : null;
+    state.advice = adv; state.adviceLabel = sc ? `${sc.label}(${sc.theme ?? ''}) ` : '';
+    if (adv) {
+      const row = (title, arr, cls) => arr.length ? `<div class="ad-row ${cls}"><span class="ad-kind">${title}</span><div class="ad-combos">${groupedKeys(arr).map(g => `<span class="ad-combo">${esc(g)}</span>`).join('')}</div></div>` : '';
+      html += `
+      <div class="ad-box">
+        <div class="fc-label">この展開の買い目 <small>3連単 ${adv.points}点・${esc(adv.difficulty)}・この展開の約${Math.round(adv.cover * 100)}%を押さえる</small></div>
+        ${adv.thin ? `<p class="ad-thin">この展開は${forecast.n}回中${adv.n}回だけなので、参考程度に</p>` : ''}
+        ${row('本命', adv.honmei, 'ad-honmei')}${row('抑え', adv.osae, 'ad-osae')}${row('穴', adv.ana, 'ad-ana')}
+        ${adv.notes.length ? `<ul class="ad-notes">${adv.notes.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+        <button type="button" class="secondary-btn ad-copy">買い目をコピー</button>
+        <p class="ri-help ad-copied" role="status"></p>
+        <p class="ri-help">オッズは使っていません。穴は「AIの見立てでは確率が低いけど、この展開なら起きうる」組み合わせです。</p>
+      </div>`;
+    }
+
     if (!forecast) {
       html += `<div class="fc-future"><div class="fc-label">何通りもの未来</div><p class="ri-help">選手の調子を少しずつ変えて${RUNS}回走らせています… ${progress}/${RUNS}</p></div>`;
     } else {
@@ -139,6 +157,13 @@ export function mountForecastPanel(container, { onWatch } = {}) {
   container.addEventListener('click', event => {
     const tab = event.target.closest('.fc-tab');
     if (tab) { state.sel = Number(tab.dataset.sel); render(); return; }
+    if (event.target.closest('.ad-copy')) {
+      const text = adviceText(state.advice, state.adviceLabel);
+      const note = container.querySelector('.ad-copied');
+      (navigator.clipboard?.writeText(text) ?? Promise.reject()).then(() => { if (note) note.textContent = 'コピーしました'; })
+        .catch(() => { if (note) note.textContent = text; });
+      return;
+    }
     const w = event.target.closest('.fc-watch');
     if (w) onWatch?.(w.dataset.seed ? Number(w.dataset.seed) : null);
   });

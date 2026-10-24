@@ -69,7 +69,11 @@ export function runRace(setup) {
       blocked: has(/牽制/),
       banteMakuri: has(/番手捲り/),
       backLeader: e.recorder.snapshots.back?.order?.[0] ?? null,
-      chigire: [...new Set(logs.filter(l => /千切れ/.test(l.message)).map(l => l.riderNumber))]
+      chigire: [...new Set(logs.filter(l => /千切れ/.test(l.message)).map(l => l.riderNumber))],
+      // 買い目のアドバイス用: 誰が仕掛けたか
+      kamashi: [...new Set(logs.filter(l => /カマす/.test(l.message)).map(l => l.riderNumber))],
+      makuri: [...new Set(logs.filter(l => /捲りに出る/.test(l.message)).map(l => l.riderNumber))],
+      banteMakuriBy: [...new Set(logs.filter(l => /番手捲り/.test(l.message)).map(l => l.riderNumber))]
     }
   };
 }
@@ -96,7 +100,7 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
     const home = r.snapshots.home?.order?.[0] ?? null;
     const mainLine = home == null ? null : (setup.lines.find(l => l.members.includes(home))?.leader ?? home);
     const frontCar = setup.formation?.[0]?.[0];
-    runs.push({ seed: runSeed, order, kimarite: r.kimarite, story: r.story, condition, mainLine, frontPlan: setup.riders[frontCar]?.frontResponse ?? plans?.[frontCar] ?? null, frontCar });
+    runs.push({ seed: runSeed, order, kimarite: r.kimarite, story: r.story, condition, mainLine, frontPlan: setup.riders[frontCar]?.frontResponse ?? plans?.[frontCar] ?? null, frontCar, ev: r.events });
     win[order[0]]++; for (const c of order.slice(0, 2)) top2[c]++; for (const c of order.slice(0, 3)) top3[c]++;
     const ex = `${order[0]}-${order[1]}`, tri = `${order[0]}-${order[1]}-${order[2]}`;
     exacta.set(ex, (exacta.get(ex) ?? 0) + 1); trifecta.set(tri, (trifecta.get(tri) ?? 0) + 1);
@@ -110,10 +114,14 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
   }
   const top = (map, k) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([key, count]) => ({ key, rate: count / n }));
   const rate = obj => Object.fromEntries(Object.entries(obj).map(([c, v]) => [c, v / n]));
+  const scenarios = pickScenarios(runs, n);
   return {
     n,
-    scenarios: pickScenarios(runs, n),
-    marks: marksFrom(rate(win), rate(top3)),
+    scenarios,
+    // 印は「1つの答え」として本線に合わせる: ◎○▲=本線の1〜3着、△=ほかで3着以内に来やすい2人
+    marks: scenarios[0] ? marksFromMain(scenarios[0].order, rate(top3)) : marksFrom(rate(win), rate(top3)),
+    // 買い目のアドバイス用に、1回ごとの着順と展開を軽くして残す
+    runs: runs.map(r => ({ order: r.order, mainLine: r.mainLine, how: r.kimarite?.how ?? null, ev: { chigire: r.ev.chigire, kamashi: r.ev.kamashi, makuri: r.ev.makuri, banteMakuriBy: r.ev.banteMakuriBy } })),
     win: rate(win), top2: rate(top2), top3: rate(top3),
     exacta: top(exacta, 5), trifecta: top(trifecta, 5),
     kimarite: top(kimarite, 3),
@@ -154,8 +162,15 @@ export function pickScenarios(runs, n) {
       for (const r of list) for (const [car, c] of Object.entries(r.condition)) cond[car] = (cond[car] ?? 0) + c / list.length;
       const notable = Object.entries(cond).filter(([, c]) => Math.abs(c) >= 0.012).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 2)
         .map(([car, c]) => ({ car: Number(car), condition: c }));
-      return { label: labels[i], theme, exacta: bestEx, exactaCount: exCount, count: list.length, rate: list.length / n, seed: rep.seed, order: rep.order, kimarite: rep.kimarite, story: rep.story, notable };
+      return { label: labels[i], theme, mainLine: key.startsWith('L') ? Number(key.slice(1)) : null, exacta: bestEx, exactaCount: exCount, count: list.length, rate: list.length / n, seed: rep.seed, order: rep.order, kimarite: rep.kimarite, story: rep.story, notable };
     });
+}
+
+export function marksFromMain(order, top3) {
+  const marks = {};
+  ['◎', '○', '▲'].forEach((m, i) => { if (order[i] != null) marks[order[i]] = m; });
+  Object.keys(top3).map(Number).filter(c => !marks[c]).sort((a, b) => (top3[b] - top3[a]) || a - b).slice(0, 2).forEach(c => { if (top3[c] > 0.15) marks[c] = '△'; });
+  return marks;
 }
 
 // 印: 1着になりやすい順に ◎ ○ ▲、残りで3着以内に入りやすい2人に △

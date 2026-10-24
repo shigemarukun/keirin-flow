@@ -145,6 +145,8 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
   const seriStart = firstLog(riderLogs, l => /番手を巡って/.test(l.message));
   const seriEnd = firstLog(riderLogs, l => /秒の競りに勝って/.test(l.message));
   if (seriStart) add('競り', `${name(seriStart.riderNumber)}が${seriStart.message.replace(/\s*\(.*\)/, '')}。${seriEnd ? `${name(seriEnd.riderNumber)}が${seriEnd.message.replace(/^.*?秒の競りに勝って、/, '').replace(/\s*\(.*\)/, '')}。` : ''}`);
+  const chigire = firstLog(riderLogs, l => /千切れる/.test(l.message));
+  if (chigire) add('攻防', `${name(chigire.riderNumber)}は${chigire.message.replace(/\s*\(.*\)/, '')}。`);
   const switched = firstLog(riderLogs, l => /切り替える/.test(l.message));
   if (switched) add('攻防', `${name(switched.riderNumber)}は${switched.message.replace(/\s*\(.*\)/, '')}`);
 
@@ -154,6 +156,8 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
   const top3Cars = ranking.slice(0, 3).map(r => r.number);
   const tired = riderLogs.filter(l => l.category === 'FATIGUE' && R(l) <= 260).slice(0, 2);
   for (const t of tired) add('直線', top3Cars.includes(t.riderNumber) ? `${name(t.riderNumber)}は脚が一杯になりながらも粘る。` : `${name(t.riderNumber)}は脚が一杯でタレる。`);
+  const naka = firstLog(riderLogs, l => /中を割って/.test(l.message));
+  if (naka && ranking.slice(0, 3).some(r => r.number === naka.riderNumber)) add('直線', `${name(naka.riderNumber)}が中を割って伸びる。`);
   const inner = firstLog(riderLogs, l => /内を突く/.test(l.message));
   if (inner && ranking.slice(0, 3).some(r => r.number === inner.riderNumber)) add('直線', `${name(inner.riderNumber)}が内を突いて伸びる。`);
 

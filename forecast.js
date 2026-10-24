@@ -54,7 +54,8 @@ export function runRace(setup) {
       cutSucceeded: has(/誘導切り成功|叩き切る/),
       blocked: has(/牽制/),
       banteMakuri: has(/番手捲り/),
-      backLeader: e.recorder.snapshots.back?.order?.[0] ?? null
+      backLeader: e.recorder.snapshots.back?.order?.[0] ?? null,
+      chigire: [...new Set(logs.filter(l => /千切れ/.test(l.message)).map(l => l.riderNumber))]
     }
   };
 }
@@ -70,6 +71,7 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
   const top3 = Object.fromEntries(cars.map(c => [c, 0]));
   const exacta = new Map(), trifecta = new Map(), kimarite = new Map(), backLeader = new Map();
   let tsuppari = 0, cut = 0;
+  const chigire = Object.fromEntries(cars.map(c => [c, 0]));
   const runs = [];
   for (let i = 0; i < n; i++) {
     const runSeed = seed + i * 7919;
@@ -85,6 +87,7 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
     if (r.events.backLeader != null) backLeader.set(r.events.backLeader, (backLeader.get(r.events.backLeader) ?? 0) + 1);
     if (r.events.tsuppari) tsuppari++;
     if (r.events.cutSucceeded) cut++;
+    for (const c of r.events.chigire ?? []) chigire[c] = (chigire[c] ?? 0) + 1;
     onProgress?.(i + 1, n);
   }
   const top = (map, k) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([key, count]) => ({ key, rate: count / n }));
@@ -97,7 +100,8 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
     exacta: top(exacta, 5), trifecta: top(trifecta, 5),
     kimarite: top(kimarite, 3),
     backLeader: top(backLeader, 3),
-    branches: { tsuppari: tsuppari / n, cutSucceeded: cut / n }
+    branches: { tsuppari: tsuppari / n, cutSucceeded: cut / n },
+    chigire: rate(chigire)
   };
 }
 

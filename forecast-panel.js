@@ -2,6 +2,48 @@
 // 本命の展開 (隊列 → 展開の文章 → 着順) と、何通りもの未来 (調子をゆらして何十回も走らせた結果) を表示する。
 
 import { predictRace, forecastRaces } from './forecast.js';
+import { RaceAI } from './race-ai.js';
+
+const STYLE_LABEL = { SENKO: '先行', MAKURI: '捲り', KAMASHI: 'カマシ', OIKOMI: '追込' };
+const ai = new RaceAI();
+
+// AIの選手の見立て: 得点・級班・経歴から決めた地力と、ラインでの役割・戦法・千切れの危なさ
+function riderEvalHtml(setup, forecast, marks) {
+  if (!setup?.riders) return '';
+  const names = setup.meta?.names ?? {}, levels = setup.meta?.levels ?? {};
+  const roleOf = n => {
+    const line = setup.lines?.find(l => l.members.includes(n));
+    if (!line) return { label: '単騎', front: null };
+    const i = line.members.indexOf(n);
+    return { label: ['先頭', '番手', '3番手', '4番手'][i] ?? `${i + 1}番手`, front: i > 0 ? line.members[i - 1] : null, leader: line.members[0] };
+  };
+  const order = (setup.formation ?? []).flat().filter(n => setup.riders[n]);
+  const rows = order.map(n => {
+    const p = setup.riders[n], role = roleOf(n), lv = levels[n] ?? {};
+    const style = role.label === '先頭' || role.label === '単騎' ? (STYLE_LABEL[p.tactic] ?? STYLE_LABEL[ai.styleOf({ profile: p, mindset: p.mindset })]) : 'マーク';
+    const notes = [];
+    if (lv.history) notes.push(lv.steps?.find(x => /本来|昇級|特別/.test(x)) ?? '');
+    // 千切れ: 前の選手との脚の差 (地力の差) が大きい追走選手は、全開の踏み出しに付いていけない
+    if (role.front) {
+      const gapPow = (setup.riders[role.leader]?.power ?? 0) - p.power;
+      const ch = forecast?.chigire?.[n] ?? null;
+      if (ch != null) { if (ch >= 0.1) notes.push(`⚠ 千切れやすい (${forecast.n}回中${Math.round(ch * forecast.n)}回で前に付いていけず)`); }
+      else if (gapPow >= 0.12) notes.push(`⚠ ${role.leader}番との脚の差が大きく、千切れに注意 (計算中)`);
+    }
+    const w = Math.round(Math.max(0, Math.min(1, (p.power - 0.4) / 0.6)) * 100);
+    return `<li class="re-row">
+      ${carChip(n)}<b class="fc-mark">${marks[n] ?? ''}</b>
+      <div class="re-main">
+        <div class="re-top"><span class="re-name">${esc(names[n] || `${n}番`)}</span><span class="re-tag">${esc(lv.cls ?? '')}</span><span class="re-tag">${esc(role.label)}</span><span class="re-tag re-style">${esc(style)}</span></div>
+        <div class="re-bar" title="地力 ${p.power}"><i style="width:${w}%"></i></div>
+        <div class="re-sub">得点${lv.raw ?? '—'}${lv.level != null && Math.abs(lv.level - lv.raw) >= 0.5 ? ` → 実力${lv.level}点相当` : ''} ・ 地力${p.power.toFixed(2)}${notes.filter(Boolean).length ? `<br>${notes.filter(Boolean).map(esc).join('<br>')}` : ''}</div>
+      </div>
+    </li>`;
+  });
+  return `<details class="re-panel" open><summary>AIの選手の見立て <small>(地力・役割・戦法)</small></summary>
+    <ol class="re-list">${rows.join('')}</ol>
+    <p class="ri-help">地力は、競走得点に級班(長い目で見た実力)と経歴(元S級・特別昇級など)を加えて決めています。並びは周回の前から。</p></details>`;
+}
 
 const RUNS = 30;
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -81,6 +123,7 @@ export function mountForecastPanel(container, { onWatch } = {}) {
           </ul>
         </div>`;
     }
+    html += riderEvalHtml(state.setup, forecast, marks);
     container.innerHTML = html;
   };
 
@@ -106,7 +149,7 @@ export function mountForecastPanel(container, { onWatch } = {}) {
   const update = setup => {
     jobId += 1;
     const id = jobId;
-    state = { main: null, forecast: null, progress: 0, sel: 0, names: setup?.meta?.names ?? {} };
+    state = { main: null, forecast: null, progress: 0, sel: 0, names: setup?.meta?.names ?? {}, setup };
     render();
     if (!setup) return;
     const plain = JSON.parse(JSON.stringify(setup));

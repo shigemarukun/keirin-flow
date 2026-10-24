@@ -63,7 +63,7 @@ export class RaceAI {
     if (style === 'OIKOMI') return 0; // 追込: 最後の直線まで仕掛けない
     if (style === 'KAMASHI') return clamp(520 + (p.acceleration - .8) * 200, 460, 600); // 打鐘前後に後方から一気に
     if (style === 'SENKO') return clamp(410 + (p.endurance - .8) * 300 + (p.aggression - .65) * 150, 300, 480);
-    return clamp((globalThis.KF_TUNE?.mk ?? 330) + (p.acceleration - .8) * 200 + (p.tacticalIQ - .8) * 100, 220, 400);
+    return clamp((globalThis.KF_TUNE?.mk ?? 330) + (p.acceleration - .8) * 200 + (p.tacticalIQ - .8) * 100 - (p.strikeLater ?? 0), 180, 400);
   }
 
   sprintSpeed(rider) {
@@ -72,6 +72,8 @@ export class RaceAI {
     const T = globalThis.KF_TUNE ?? {};
     return (p.topSpeed * (.90 + .10 * e) + p.sprintBonus * ((T.sb0 ?? 0) + (T.sb1 ?? 1.4) * e)) * fatigue;
   }
+  // 追走で出せる上限の速さ (自分の今のスプリント + 風よけで楽になる分)
+  followCap(rider) { return this.sprintSpeed(rider) + (globalThis.KF_TUNE?.fa ?? 0.6); }
   strength(rider) { const p = rider.profile; return p.power * .45 + p.acceleration * .25 + rider.energy * .30; }
 
   // ---------- pacer-cut (誘導切り) resolution, decided once at the red board ----------
@@ -410,11 +412,32 @@ export class RaceAI {
     const lostSeri = this._lostSeriDecision(rider, engine);
     if (lostSeri) return lostSeri;
 
+    // 千切れ: 前の選手のスピードに付いていけず、車間が空いていく
+    // (車間がいつもより自転車1台半ほど空いた状態が1秒続いたら「口が空いて千切れた」とみなす)
+    if (front && !front.finished && !this._retreating(front) && !this._retreating(rider) && rem < 700 && rem > PACE.FINAL_STRAIGHT) {
+      const gap = front.distance - rider.distance;
+      // 数えるのは「前に付いていこうとしているのに、空いた車間を詰められない」ときだけ
+      // (ブロックで外へ張る・踏み合いで並ぶ・切り替えなど、自分から車間を空けたときは千切れではない)
+      const trying = rider.action === ACTION.FOLLOW && rider.followTargetNumber === front.number && !m.switchedTo
+        && front.speed >= rider.speed - .1 // 車間を詰められていない (詰めている途中なら、口が空いただけ)
+        && Math.abs(front.laneOffset - rider.laneOffset) < 6 // 真後ろで付いているとき (前が外へ持ち出した直後の、走路の移り遅れは数えない)
+        && this._nearestAheadInCorridor(rider, engine, 40)?.rider === front // 間に他の選手が入っていない (割り込まれたのは千切れではない)
+        && ![ACTION.BLOCK, ACTION.FULL_CONTEST, ACTION.YIELD].includes(front.action);
+      if (trying && gap > engine.spacing.follow + (globalThis.KF_TUNE?.cg ?? 2.5)) m.gapSince ??= engine.elapsedTime; else m.gapSince = null;
+      if (!m.chigire && m.gapSince != null && engine.elapsedTime - m.gapSince > 1.0) {
+        m.chigire = true;
+        // 付いている相手は同じままなので、ふつうの記録では残らない。ここで必ず記録する
+        const msg = `${front.number}番の踏み出しに遅れて口が空き、千切れる (車間${gap.toFixed(0)}m・残脚${pct(rider.energy)})`;
+        engine.emitDecision({ riderNumber: rider.number, category: 'AI_DECISION', action: ACTION.FOLLOW, message: msg });
+        return this._followPlan(front, msg, { lane: front.laneOffset });
+      }
+    }
+
     // 番手捲り: 前の選手が脚を使い切りそうで、後ろから捲りが来るなら、自分から踏んで出る
     // (番手は基本的に前を残して差すのが仕事。前が明らかに力尽き、外から捲りが並びかけたときだけ自分から出る)
     if (rider.role === ROLE.BANTE && rem < 220 && rem > PACE.FINAL_STRAIGHT && leader && !this._retreating(leader) && rider.energy > .45) {
       const threat = this._incomingAttack(rider, engine) ?? this._incomingAttack(leader, engine);
-      if (m.banteMakuri || (threat && threat.gap < 12 && leader.energy < .2 && leader.speed < threat.rider.speed - 1 && this.strength(rider) >= this.strength(threat.rider) + .02)) {
+      if (m.banteMakuri || (threat && threat.gap < 12 && leader.energy < (globalThis.KF_TUNE?.bm ?? .25) && leader.speed < threat.rider.speed - 1 && this.strength(rider) >= this.strength(threat.rider) + .02)) {
         m.banteMakuri = true;
         return { action: ACTION.SWITCH_TO_SELF_POWER, speed: this.sprintSpeed(rider), lane: this._attackLane(rider, engine),
           reason: `番手捲り。前の${leader.number}番が一杯(残脚${pct(leader.energy)})で${threat ? `${threat.rider.number}番が来るため` : ''}自分から踏む` };
@@ -422,13 +445,24 @@ export class RaceAI {
     }
 
     // 切り替え: 自分のラインの先頭が叩かれたら、叩いた側のラインの後ろへ移る
-    if (rider.role === ROLE.BANTE && leader && this.memory.get(leader.number)?.beaten && rem < 600 && rem > PACE.FINAL_STRAIGHT && rider.profile.tacticalIQ >= .8) {
+    // ただし先頭が巻き返して自分より前を走っているなら、ラインの先頭に付いていく (見捨てない)
+    // (巻き返し = 先頭が自分より前で、もう一度踏んでいる。一度戻ったら、もう切り替えない)
+    const leaderFightsBack = leader && !leader.finished && !this._retreating(leader) && leader.distance > rider.distance + 2 && leader.energy > .12 && leader.action === ACTION.ATTACK;
+    if (m.switchedTo && leaderFightsBack) {
+      m.switchedTo = null; m.rejoined = true;
+      return this._followPlan(front, `${leader.number}番が巻き返したので、再び${front.number}番の後ろに付く`, { lane: front.laneOffset });
+    }
+    if (rider.role === ROLE.BANTE && leader && !m.rejoined && !leaderFightsBack && this.memory.get(leader.number)?.beaten && rem < 600 && rem > PACE.FINAL_STRAIGHT && rider.profile.tacticalIQ >= .8) {
+      // 一度決めた切り替え先は、その選手が走れている限り変えない (毎回選び直すと2人の間を行き来してしまう)
       const cur = m.switchedTo ? engine.rider(m.switchedTo) : null;
-      const target = cur && !cur.finished && cur.distance > rider.distance ? cur : this._aheadNotRetreating(rider, engine);
+      if (cur && !cur.finished && !this._retreating(cur) && cur.distance > rider.distance) {
+        return this._followPlan(cur, `${leader.number}番が叩かれたので、${cur.number}番の後ろに切り替える`, { lane: cur.laneOffset });
+      }
+      const target = this._aheadNotRetreating(rider, engine);
       if (target && target.lineId !== rider.lineId) {
         const tail = this._lineTailAhead(target, rider, engine);
         const t = tail.distance > rider.distance ? tail : target;
-        if (!m.switchedTo) m.switchedTo = t.number;
+        m.switchedTo = t.number;
         return this._followPlan(t, `${leader.number}番が叩かれたので、${t.number}番の後ろに切り替える`, { lane: t.laneOffset });
       }
     }
@@ -548,7 +582,7 @@ export class RaceAI {
   _noteFatigue(rider, engine, m, rem) {
     if (m.tiredLogged || rem < 30 || rider.energy > .22) return;
     if (![ACTION.ATTACK, ACTION.DEFEND, ACTION.FULL_CONTEST, ACTION.CONTROL_PACE, ACTION.FINAL_SPRINT].includes(rider.action)) return;
-    if (engine.positionRank(rider) > 4) return; // only worth announcing for riders near the front
+    if (engine.positionRank(rider) > 4 && !m.struck) return; // 前の方の選手か、自分から仕掛けた選手 (飲み込まれてからタレることもある)
     m.tiredLogged = true;
     engine.emitDecision({ riderNumber: rider.number, category: 'FATIGUE', action: ACTION.FADE, message: `脚が一杯になりタレ始める (残脚${pct(rider.energy)}・${rider.speed.toFixed(1)}m/s)` });
   }
@@ -647,10 +681,25 @@ export class RaceAI {
     const ahead = this._nearestAheadInCorridor(rider, engine, 22);
     let lane = rider.laneOffset, how = '追い込む';
     if (ahead && ahead.rider.speed < rider.speed + 1.5) {
-      // 前が詰まっている: 内が空いていれば内を突く(内すくい)、空いていなければ外へ持ち出す
+      // 前が詰まっている: 内が空いていれば内を突く(内すくい)
       const innerFree = rider.laneOffset <= 0 && !engine.riders.some(o => !o.finished && o !== rider && Math.abs(o.laneOffset - TRACK_LANE.INNER) < 11 && o.distance - rider.distance > -8 && o.distance - rider.distance < 30);
       if (innerFree) { lane = TRACK_LANE.INNER; how = '内を突く'; }
-      else { lane = clamp(ahead.rider.laneOffset + 13, -18, 42); how = '外へ持ち出して追い込む'; }
+      else {
+        // 空いているコースのうち、今の位置から一番近いところを踏む (外を大きく回ると距離を損する)。
+        // 前の番手が外へ持ち出して空いた「間」を割る(中割り)のもこれ
+        const mine = this.sprintSpeed(rider);
+        const open = lane => !engine.riders.some(o => {
+          if (o.finished || o === rider) return false;
+          const g = o.distance - rider.distance;
+          return Math.abs(o.laneOffset - lane) < 11 && ((g > -3 && g < 4) || (g >= 4 && g < 24 && o.speed < mine - .5));
+        });
+        const lanes = [];
+        for (let l = -18; l <= 42; l += 4) if (open(l)) lanes.push(l);
+        const best = lanes.sort((x, y) => Math.abs(x - rider.laneOffset) - Math.abs(y - rider.laneOffset))[0];
+        const outside = clamp(ahead.rider.laneOffset + 13, -18, 42);
+        if ((globalThis.KF_TUNE?.fs ?? 1) && best != null && best < outside - 4 && best > TRACK_LANE.INNER + 2) { lane = best; how = '中を割って伸びる'; }
+        else { lane = best ?? outside; how = '外へ持ち出して追い込む'; }
+      }
     }
     const pos = engine.positionRank(rider);
     return { action: ACTION.FINAL_SPRINT, speed: this.sprintSpeed(rider), lane, reason: `最後の直線。残脚${pct(rider.energy)}で${pos}番手から${how}` };
@@ -671,6 +720,17 @@ export class RaceAI {
       const t = d.followTarget, gap = t.distance - rider.distance;
       // (追走で極端に減速しない: 前の選手が後ろにいても歩くような速度にはしない)
       speed = Math.max(Math.min(t.speed, PACE.CRUISE) - 3, t.speed + clamp((gap - engine.spacing.follow) * .35, -2.5, 4) + clamp((t.speed - rider.speed) * .6, -2, 2));
+      // 踏み出しへの反応: 前が急に加速したら、後ろは一瞬遅れて踏み出す (3番手ほど遅れやすい)。
+      // 遅れて口が空くと風よけが弱まり、脚の差があればそのまま千切れる
+      const mm = this.mem(rider), T = globalThis.KF_TUNE ?? {};
+      const jumping = (t.acceleration ?? 0) > 1.2 && t.speed > rider.speed + .3;
+      if (jumping && mm.jumpAt == null) mm.jumpAt = engine.elapsedTime;
+      else if (!jumping && (t.acceleration ?? 0) < .3) mm.jumpAt = null;
+      const react = (rider.linePosition ?? 0) >= 2 ? (T.rt3 ?? .45) : (rider.linePosition === 1 ? (T.rt2 ?? .2) : (T.rt0 ?? .3));
+      if (mm.jumpAt != null && engine.elapsedTime - mm.jumpAt < react) speed = Math.min(speed, rider.speed + .1);
+      // 付いていける速さには限りがある: 今の残脚で出せる速さ + 風よけの分まで。
+      // 前の選手との脚の差がそれ以上あれば、口が空いて千切れる (3番手が千切れやすいのはこのため)
+      speed = Math.min(speed, this.followCap(rider));
     }
     // Nobody can ride faster than their own sprint ceiling, whatever the tactic asks for.
     speed = Math.min(speed ?? PACE.CRUISE, rider.profile.topSpeed + rider.profile.sprintBonus);
@@ -691,7 +751,7 @@ export class RaceAI {
     const family = [ACTION.ATTACK, ACTION.DEFEND].includes(d.action) ? 'PUSH' : d.action;
     if (family === 'PUSH' && m.lastPushLog != null && engine.elapsedTime - m.lastPushLog < 4) return;
     if (family === 'PUSH') m.lastPushLog = engine.elapsedTime;
-    if (d.action === ACTION.FOLLOW && !/引いて|叩かれ|離れた|単騎/.test(d.reason)) return; // ordinary following is noise
+    if (d.action === ACTION.FOLLOW && !/引いて|叩かれ|離れた|単騎|千切れ|巻き返した/.test(d.reason)) return; // ordinary following is noise
     engine.emitDecision({ riderNumber: rider.number, category: 'AI_DECISION', action: d.action, message: d.reason });
   }
 }

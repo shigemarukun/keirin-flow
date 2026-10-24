@@ -61,7 +61,7 @@ export class PhysicsEngine{
   this.mode=setup?.mode===RACE_MODE.TEACHER?RACE_MODE.TEACHER:RACE_MODE.AUTONOMOUS;
   // 車間 (m)。実際の競輪は前の車輪にほぼ付いて走るので、自律モードは詰めた隊列にする。
   // min: 同じ走路でこれ以上は近づけない / follow: 追走するときの車間 / cutIn: 前に割り込める差 / start: スタート時の間隔
-  this.spacing=this.mode===RACE_MODE.TEACHER?{min:13.5,follow:17,cutIn:9,start:17}:{min:7,follow:7.8,cutIn:5,start:9};
+  this.spacing=this.mode===RACE_MODE.TEACHER?{min:13.5,follow:17,cutIn:9,start:17}:{min:globalThis.KF_TUNE?.spm??7,follow:globalThis.KF_TUNE?.spf??7.8,cutIn:globalThis.KF_TUNE?.spc??5,start:9};
   this.setup.mode=this.mode;
   this.profile=RACE_PROFILES[this.setup.trackProfile]??RACE_PROFILES.PROFILE_400;
   // 400バンクを基準にした距離の倍率。AIや展開の文章は「400バンクに直した残り距離」で判断する
@@ -280,7 +280,10 @@ export class PhysicsEngine{
   }
  }
  _applyEnergy(rider,plan,dt){
-  const demand=Math.max(0,plan.targetSpeed-this.profile.FORMATION_SPEED)/this.profile.FORMATION_SPEED;
+  // 自律モードでは、脚の減りは「実際に出ている速さ(+加速の余裕)」で決める。
+  // 前を塞がれて進めないのに、出そうとしている速さの分まで脚を減らすことはない
+  const effort=this.mode!==RACE_MODE.TEACHER?Math.min(plan.targetSpeed,rider.speed+(globalThis.KF_TUNE?.eh??2)):plan.targetSpeed;
+  const demand=Math.max(0,effort-this.profile.FORMATION_SPEED)/this.profile.FORMATION_SPEED;
   let factor=1;
   if([ACTION.ATTACK,ACTION.LINE_ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.DEFEND,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))factor=1.55;
   if(plan.action===ACTION.BLOCK)factor=1.30;
@@ -295,7 +298,11 @@ export class PhysicsEngine{
   // Slipstream: riding close behind someone in the same corridor saves energy.
   let draft=1;
   if(this.mode!==RACE_MODE.TEACHER){
-   for(const o of this.riders){if(o===rider||o.finished)continue;const g=o.distance-rider.distance;if(g>0&&g<26&&Math.abs(o.laneOffset-rider.laneOffset)<11){draft=1-(globalThis.KF_TUNE?.draft??.55)*(rider.profile.draftSkill??.75);break;}}
+   // 風よけは前の選手にぴったり付いているときに一番効き、車間が空くほど弱くなる (口が空くと一気に脚を使い、さらに離れる=千切れ)
+   const T=globalThis.KF_TUNE??{},near=this.spacing.follow+(T.dn??2),fade=T.df??10;
+   let best=0;
+   for(const o of this.riders){if(o===rider||o.finished)continue;const g=o.distance-rider.distance;if(g>0&&g<near+fade&&Math.abs(o.laneOffset-rider.laneOffset)<11){best=Math.max(best,g<=near?1:1-(g-near)/fade);}}
+   draft=1-(T.draft??.55)*(rider.profile.draftSkill??.75)*best;
   }
   const load=(.0022+(this.mode===RACE_MODE.TEACHER?.0105:(globalThis.KF_TUNE?.k??.020))*demand*demand)*factor*draft/Math.max(.55,rider.profile.endurance);
   // 周長が違っても「残り2周で使える脚」は同じ: 長いバンクほど1mあたりの脚の減りを小さくする
@@ -412,7 +419,11 @@ export class PhysicsEngine{
   desired=Math.max(0,desired-this._getBlockResistance(rider));
   // Boxed in by a rider slightly ahead of us: ease off so we can slip behind him and change lanes.
   // (Without this two riders can lock each other side by side forever.)
-  if(this.mode!==RACE_MODE.TEACHER&&rider.boxedFor>.6){
+  // ただし前の選手に付いている(追走中で、その車輪がすぐ前にある)なら下げない: 横に並ばれても今の走路で車輪に付いて粘る
+  // (下げると、並んできた選手に位置を奪われる。3番手が他のラインに割り込まれて最後尾まで下がる原因だった)
+  const wheel=plan.action===ACTION.FOLLOW&&plan.followTargetNumber?this.rider(plan.followTargetNumber):null;
+  const holdingWheel=wheel&&!wheel.finished&&wheel.distance>rider.distance&&wheel.distance-rider.distance<this.spacing.follow*1.8&&(globalThis.KF_TUNE?.hw2??1);
+  if(this.mode!==RACE_MODE.TEACHER&&rider.boxedFor>.6&&!holdingWheel){
    const box=this.rider(rider.boxedBy);
    if(box&&!box.finished&&box.distance>=rider.distance&&box.action!==ACTION.YIELD)desired=Math.min(desired,Math.max(PACE_FLOOR,box.speed-1.5));
   }
@@ -446,6 +457,8 @@ export class PhysicsEngine{
    next=Math.min(next,target.distance-this.spacing.min);
   }
   next=this._resolveExclusiveSlot(rider,next);
+  // 前に止められて進めなかった分は、速度も前に合わせて落とす (壁の後ろで空回りしない)
+  if(this.mode!==RACE_MODE.TEACHER&&(globalThis.KF_TUNE?.sc??1)){const moved=Math.max(0,next-rider.distance)/Math.max(dt*geo,1e-6);if(moved<rider.speed-.05)rider.speed=Math.max(moved,rider.speed-6*dt);}
   rider.distance=Math.max(rider.distance,next);
   rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
  }

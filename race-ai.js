@@ -54,7 +54,8 @@ export class RaceAI {
     const p = rider.profile;
     const senko = p.endurance * .45 + p.power * .30 + p.aggression * .25 + (rider.mindset === MINDSET.TSUPPARI ? .05 : 0);
     const makuri = p.acceleration * .50 + p.power * .25 + p.tacticalIQ * .25 + (rider.mindset === MINDSET.YIELD_AND_ROLL ? .05 : 0);
-    return senko >= makuri ? 'SENKO' : 'MAKURI';
+    // 出走表の決まり手の実績 (逃げで勝つか、捲りで勝つか) で判断を傾ける
+    return senko + (p.styleBias ?? 0) >= makuri ? 'SENKO' : 'MAKURI';
   }
 
   strikeDistance(rider, style) {
@@ -105,7 +106,7 @@ export class RaceAI {
     this._noteFatigue(rider, engine, m, rem);
 
     let d = this._contestDecision(rider, engine, rem);
-    if (!d && rider.profile.seriTarget && rem > PACE.FINAL_STRAIGHT) d = this._seriDecision(rider, engine, m, rem);
+    if (!d && rider.profile.seriTarget && !engine.setup?.rules?.noBlock && rem > PACE.FINAL_STRAIGHT) d = this._seriDecision(rider, engine, m, rem);
     if (!d && rem <= PACE.FINAL_STRAIGHT) d = this.finalStraight(rider, engine, m);
     if (!d) {
       const role = rider.role;
@@ -194,14 +195,18 @@ export class RaceAI {
       if (o.finished || o.number === rider.number || this._retreating(o)) continue;
       if (o.lineId && o.lineId === rider.lineId) continue; // own line mates are behind us, not in the way
       const gap = o.distance - rider.distance;
-      if (gap > -10 && gap < 70) widest = Math.max(widest, o.laneOffset);
+      // 外を回って越えなければいけないのは「前にいる」選手だけ。横や後ろで外にいる選手のさらに外へ出る必要はない
+      // (横の選手の外へ出ようとすると、出られずに包まれた扱いになって減速してしまう)
+      if (gap > 1 && gap < 70) widest = Math.max(widest, o.laneOffset);
     }
     const wanted = clamp(widest + 16, -2, 42);
     // ...but never pick a lane where a slower rider sits right in front of us (we'd be stuck behind him).
+    // 「遅い」は自分が本来出せる速度と比べる (後ろで詰まると今の速度は前と同じになり、いつまでも抜け出せないため)
+    const mySpeed = Math.max(rider.speed, this.sprintSpeed(rider) - 1);
     const blocked = lane => engine.riders.some(o => {
       if (o.finished || o.number === rider.number) return false;
       const gap = o.distance - rider.distance;
-      return gap > 0 && gap < 45 && Math.abs(o.laneOffset - lane) < 11 && (this._retreating(o) || o.speed < rider.speed - 2.5);
+      return gap > 0 && gap < 45 && Math.abs(o.laneOffset - lane) < 11 && (this._retreating(o) || o.speed < mySpeed - 2.5);
     });
     const lanes = [-2, 14, 30, 42];
     // 外がすべて塞がっていれば、空いている内側の走路を探す (それも無ければ一番外で待つ)
@@ -430,7 +435,8 @@ export class RaceAI {
 
     // Bante block (番手の牽制) against an attacker of another line.
     // (a line that is dropping back after a lost contest has no position to defend)
-    if (rider.role === ROLE.BANTE && rem < 520 && rider.energy > .25 && !(leader && this._retreating(leader))) {
+    // (ガールズなどブロック禁止のレースでは張らない)
+    if (rider.role === ROLE.BANTE && !engine.setup?.rules?.noBlock && rem < 520 && rider.energy > .25 && !(leader && this._retreating(leader))) {
       const now = engine.elapsedTime;
       if (now < m.blockUntil) return { action: ACTION.BLOCK, speed: Math.min(rider.speed, (front?.speed ?? rider.speed) + .3), lane: m.blockLane, reason: m.blockReason };
       if (now >= m.blockCooldownUntil) {

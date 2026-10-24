@@ -273,5 +273,35 @@ check(er.logs.some(l => l.c === 'FATIGUE' && l.n === 1) && fade1.peak - fade1.la
     `333: 逃げ${Math.round(a.nige * 100)}% 差し${Math.round(a.sashi * 100)}% / 500: 逃げ${Math.round(b.nige * 100)}% 差し${Math.round(b.sashi * 100)}%`);
 }
 
+// ---------- 決まり手の実績とガールズ (出走表 → レース) ----------
+{
+  const { toRaceSetup } = await import('./race-data.js');
+  const run = setup => { const e = new PhysicsEngine(setup); e.start(); for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60); return { order: e.ranking.map(r => r.number), how: e.getStory().kimarite?.how }; };
+  let rs = 5; const rnd = () => { rs = (rs * 16807) % 2147483647; return rs / 2147483647; };
+  // 同じ選手に「逃げの実績」と「捲りの実績」を入れて、勝ち方が変わるか
+  const men = kim => ({ race: { venue: '小倉' }, lines: [[1, 2, 3], [4, 5], [7, 8]], riders: [
+    { car: 1, score: 112, style: '逃', back: 10 }, { car: 2, score: 110, style: '追' }, { car: 3, score: 106, style: '追' },
+    { car: 4, score: 113, style: '両', back: 4, kimarite: kim }, { car: 5, score: 109, style: '追' },
+    { car: 7, score: 111, style: '逃', back: 12 }, { car: 8, score: 108, style: '追' }] });
+  // 4番が「先行(主導権を取りにいく)」を選んだレースの数
+  const senkoRaces = kim => { let n = 0; for (let i = 0; i < 12; i++) { const d = men(kim); for (const r of d.riders) r.score += (rnd() - .5) * 4;
+    const e = new PhysicsEngine(toRaceSetup(d)); e.start(); for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
+    if (e.decisionLogs.some(l => l.riderNumber === 4 && /主導権を握って先行|叩いて主導権/.test(l.message))) n++; } return n; };
+  const byNige = senkoRaces({ nige: 7, makuri: 1 }), byMakuri = senkoRaces({ nige: 0, makuri: 8, sashi: 1 });
+  check(byNige >= byMakuri + 4, '決まり手の実績が走り方に効く: 逃げの実績なら先行し、捲りの実績なら先行しない', `先行したレース 逃げ実績${byNige} / 捲り実績${byMakuri} (12レース中)`);
+  // ガールズ: 実データは 1着の決まり手 逃げ21% / 捲り49% / 差し30% (捲りが一番多い)
+  const k = { 逃げ: 0, 捲り: 0, 差し: 0 }; let blocks = false, n = 0;
+  for (let i = 0; i < 24; i++) {
+    const cars = [1, 2, 3, 4, 5, 6, 7], styles = ['逃', '両', '追'];
+    const d = { race: { venue: '小倉', girls: true }, lines: [cars.sort(() => rnd() - .5).slice()], riders: cars.map(car => ({ car, score: +(48 + rnd() * 9).toFixed(1), style: styles[Math.floor(rnd() * 3)] })) };
+    const setup = toRaceSetup(d); const e = new PhysicsEngine(setup); e.start();
+    for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
+    if (e.decisionLogs.some(l => l.action === 'BLOCK')) blocks = true;
+    k[e.getStory().kimarite?.how] = (k[e.getStory().kimarite?.how] ?? 0) + 1; n++;
+  }
+  check(!blocks && k.捲り / n >= 0.3 && k.逃げ / n <= 0.4, 'ガールズ: ブロックなしで、捲りが決まりやすい (実データ 逃げ21/捲り49/差し30)',
+    `逃げ${Math.round(k.逃げ / n * 100)}% 捲り${Math.round(k.捲り / n * 100)}% 差し${Math.round(k.差し / n * 100)}%`);
+}
+
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

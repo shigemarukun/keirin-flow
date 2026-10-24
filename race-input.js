@@ -1,7 +1,7 @@
 // KEIRIN FLOW — 出走表の手入力画面
 // 入力された出走表を「レースデータ」(race-data.js) にして、シミュレーションへ渡す。
 
-import { STYLE, VENUES, bankOfVenue, SAMPLE_RACE_DATA, parseLines, formatLines, validateRaceData, toRaceSetup } from './race-data.js';
+import { STYLE, VENUES, KIMARITE_LABEL, bankOfVenue, SAMPLE_RACE_DATA, parseLines, formatLines, validateRaceData, toRaceSetup } from './race-data.js';
 
 const STORAGE_KEY = 'keirin-flow:race-input:v1';
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -60,11 +60,18 @@ export function mountRaceInput(container, { onApply }) {
       </label>
       <label>R <input class="ri-race-no" type="text" inputmode="numeric" placeholder="11" aria-label="レース番号"></label>
     </div>
+    <label class="ri-check ri-girls-label"><input class="ri-girls" type="checkbox"> ガールズケイリン (ラインなし・ブロックなし)</label>
     <p class="ri-help ri-bank-note"></p>
     <p class="ri-help">名前か得点を入れた車番だけが出走します。B=バック回数、S=S回数(分からなければ空欄で大丈夫)。</p>
     <div class="ri-head"><span>車</span><span>選手名</span><span>得点</span><span>脚質</span><span>B</span><span>S</span></div>
     <div class="ri-rows">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(rowHtml).join('')}</div>
-    <label class="ri-lines-label">並び (周回の前から)
+    <details class="ri-kim">
+      <summary>決まり手の回数 (逃・捲・差・マ) <small>入れると精度が上がります</small></summary>
+      <p class="ri-help">出走表の「決まり手」の回数です (WINTICKETなら選手の成績に載っています)。その選手が実際に逃げで勝つのか、捲りで勝つのかを走り方に反映します。脚質より実績を優先します。</p>
+      <div class="ri-kim-head"><span>車</span>${Object.values(KIMARITE_LABEL).map(l => `<span>${l}</span>`).join('')}</div>
+      ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(car => `<div class="ri-kim-row" data-car="${car}"><span class="ri-car car-${car}">${car}</span>${Object.entries(KIMARITE_LABEL).map(([k, l]) => `<input class="ri-k" data-k="${k}" type="text" inputmode="numeric" aria-label="${car}番 決まり手 ${l}">`).join('')}</div>`).join('')}
+    </details>
+    <label class="ri-lines-label"><span class="ri-lines-title">並び (周回の前から)</span>
       <input class="ri-lines" type="text" inputmode="none" autocomplete="off" placeholder="下のボタンで入力 例: 123/456/789">
     </label>
     <div class="ri-keypad" aria-label="並びの入力ボタン">
@@ -73,7 +80,7 @@ export function mountRaceInput(container, { onApply }) {
       <button type="button" class="ri-key ri-key-back" data-key="back">1文字消す</button>
       <button type="button" class="ri-key ri-key-clear" data-key="clear">並びを消す</button>
     </div>
-    <p class="ri-help">ラインの区切りは「区切り /」。単騎の選手は1人だけで区切ります (例: 12/45/7/89)。</p>
+    <p class="ri-help ri-lines-help">ラインの区切りは「区切り /」。単騎の選手は1人だけで区切ります (例: 12/45/7/89)。</p>
     <label class="ri-check"><input class="ri-auto" type="checkbox"> ラインの前後の順番はAIに任せる</label>
     <div class="ri-errors" role="alert"></div>
     <div class="ri-actions">
@@ -92,6 +99,17 @@ export function mountRaceInput(container, { onApply }) {
   let current = null; // 最後に走らせたレースデータ
   const rows = [...container.querySelectorAll('.ri-row')];
   container.querySelector('.ri-venue-name').addEventListener('change', () => bankNote());
+  const kimRow = car => container.querySelector(`.ri-kim-row[data-car="${car}"]`);
+  // ガールズ: ラインがないので、並びは周回の前からの順番だけを入れる
+  const girlsNote = () => {
+    const g = $('.ri-girls').checked;
+    $('.ri-auto').closest('label').hidden = g;
+    $('.ri-lines-title').textContent = g ? '周回の並び順 (前から)' : '並び (周回の前から)';
+    $('.ri-lines-help').textContent = g
+      ? 'ガールズはラインがないので、区切りは不要です。周回の並び順を前から入れてください (例: 1234567)。'
+      : 'ラインの区切りは「区切り /」。単騎の選手は1人だけで区切ります (例: 12/45/7/89)。';
+  };
+  container.querySelector('.ri-girls').addEventListener('change', () => girlsNote());
   const errorsBox = $('.ri-errors');
 
   const read = () => {
@@ -101,7 +119,10 @@ export function mountRaceInput(container, { onApply }) {
       const name = row.querySelector('.ri-name').value.trim();
       const score = row.querySelector('.ri-score').value.trim();
       if (!name && !score) continue;
+      const kim = {};
+      for (const input of kimRow(car).querySelectorAll('.ri-k')) if (input.value.trim() !== '') kim[input.dataset.k] = Number(input.value.replace(/[^\d]/g, '')) || 0;
       riders.push({
+        kimarite: Object.keys(kim).length ? kim : undefined,
         car, name, score: score === '' ? undefined : Number(score.replace(/[^\d.]/g, '')),
         style: row.querySelector('.ri-style').value || undefined,
         back: row.querySelector('.ri-back').value.trim() === '' ? undefined : Number(row.querySelector('.ri-back').value),
@@ -110,7 +131,7 @@ export function mountRaceInput(container, { onApply }) {
     }
     // 展開の指定(戦法・前受けの対応)は「展開を選ぶ」で付けたものを引き継ぐ
     const venue = $('.ri-venue-name').value, raceNo = Number($('.ri-race-no').value) || undefined;
-    return { race: { ...(current?.race ?? {}), venue: venue || undefined, raceNo }, bank: bankOfVenue(venue) ?? undefined, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
+    return { race: { ...(current?.race ?? {}), venue: venue || undefined, raceNo, girls: $('.ri-girls').checked || undefined }, bank: bankOfVenue(venue) ?? undefined, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
       tactics: { ...(current?.tactics ?? {}) }, frontResponse: { ...(current?.frontResponse ?? {}) } };
   };
 
@@ -121,7 +142,9 @@ export function mountRaceInput(container, { onApply }) {
   const fill = data => {
     $('.ri-venue-name').value = data?.race?.venue ?? '';
     $('.ri-race-no').value = data?.race?.raceNo ?? '';
-    bankNote();
+    $('.ri-girls').checked = !!(data?.girls ?? data?.race?.girls);
+    bankNote(); girlsNote();
+    let anyKim = false;
     for (const row of rows) {
       const r = (data?.riders ?? []).find(x => Number(x.car) === Number(row.dataset.car)) ?? {};
       row.querySelector('.ri-name').value = r.name ?? '';
@@ -129,7 +152,9 @@ export function mountRaceInput(container, { onApply }) {
       row.querySelector('.ri-style').value = r.style ?? '';
       row.querySelector('.ri-back').value = r.back ?? '';
       row.querySelector('.ri-start').value = r.start ?? '';
+      for (const input of kimRow(row.dataset.car).querySelectorAll('.ri-k')) { input.value = r.kimarite?.[input.dataset.k] ?? ''; if (input.value !== '') anyKim = true; }
     }
+    if (anyKim) $('.ri-kim').setAttribute('open', '');
     $('.ri-lines').value = formatLines(data?.lines);
     $('.ri-auto').checked = !!data?.autoFormation;
   };

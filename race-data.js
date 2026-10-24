@@ -8,11 +8,13 @@
 //   race:   { venue: '小倉', date: '2026-10-24', raceNo: 11, name: 'S級決勝' },
 //   riders: [
 //     { car: 1, name: '山田 太郎', class: 'S1', score: 112.5, style: '逃',
-//       back: 12, start: 3, gear: 3.92, comment: '自力' },
+//       back: 12, start: 3, gear: 3.92, comment: '自力',
+//       kimarite: { nige: 3, makuri: 6, sashi: 1, mark: 0 } },   // 決まり手の回数 (出走表の 逃・捲・差・マ)
 //     ...
 //   ],
 //   lines:  [[1, 2, 3], [4, 5, 6], [7, 8, 9]],   // 並び (周回の前から順に)。単騎は [8] のように1人で書く
-//   autoFormation: false                          // true ならAIが周回の並び順を決める
+//   autoFormation: false,                         // true ならAIが周回の並び順を決める
+//   girls: false                                  // ガールズケイリン: ラインなし(全員単騎)・ブロック禁止
 // }
 //
 // 変換ルール v0 (すべて仮の数字。実際のレース結果と比べて調整していく前提)
@@ -20,6 +22,8 @@
 //   脚質 style      → 戦法の傾向       : 逃=先行寄り / 両=捲り寄り / 追=番手・マーク寄り
 //   バック回数 back → 先行意欲 aggression
 //   S回数 start     → 前受け・位置取りの強さ (隊列をAIに任せたときに使う)
+//   決まり手 kimarite → 実際にどう勝って(連に絡んで)きたか。逃げが多い=先行型、捲りが多い=捲り型、
+//                      差し・マークが多い=追い込み型。回数が多いほど強く効く (脚質の入力より実績を優先)
 //   ギヤ倍数・年齢・級班 → v0 では使わない (効くかどうか後で検証する)
 
 // 競輪場とバンクの周長 (333・335m=7場 / 500m=3場 / ほかは400m)。前橋は335mだが333として扱う
@@ -60,7 +64,12 @@ export function validateRaceData(data) {
   for (const r of riders) {
     if (r.style && !Object.values(STYLE).includes(r.style)) errors.push(`${r.car}番の脚質「${r.style}」は 逃/両/追 のどれかにしてください`);
     if (r.score !== undefined && r.score !== '' && !Number.isFinite(Number(r.score))) errors.push(`${r.car}番の競走得点が数字ではありません`);
+    for (const [k, label] of Object.entries(KIMARITE_LABEL)) {
+      const v = r.kimarite?.[k];
+      if (v !== undefined && v !== '' && !(Number.isFinite(Number(v)) && Number(v) >= 0)) errors.push(`${r.car}番の決まり手「${label}」の回数が数字ではありません`);
+    }
   }
+  const girls = isGirls(data);
   const lines = Array.isArray(data?.lines) ? data.lines : [];
   const inLines = lines.flat().map(Number);
   const missing = cars.filter(c => !inLines.includes(c));
@@ -73,6 +82,7 @@ export function validateRaceData(data) {
   for (const [car, t] of Object.entries(data?.tactics ?? {})) {
     if (!t) continue;
     const seri = /^SERI:([1-9])$/.exec(t);
+    if (seri && girls) { errors.push('ガールズケイリンにはラインがないので、番手を競る指定はできません'); continue; }
     if (seri) {
       const target = Number(seri[1]), lineOfTarget = lines.find(l => l.map(Number)[0] === target);
       const own = lines.find(l => l.map(Number).includes(Number(car)));
@@ -99,10 +109,29 @@ export function formatLines(lines) {
   return (lines ?? []).map(group => group.join('')).join(' / ');
 }
 
+// 決まり手 (出走表の「逃・捲・差・マ」の回数)
+export const KIMARITE_LABEL = Object.freeze({ nige: '逃', makuri: '捲', sashi: '差', mark: 'マ' });
+export const isGirls = data => !!(data?.girls ?? data?.race?.girls);
+
+// 決まり手の回数から「どう勝ってきた選手か」を出す。回数が少ないうちは弱めに効かせる
+export function kimariteRecord(k) {
+  const c = Object.fromEntries(Object.keys(KIMARITE_LABEL).map(key => [key, Math.max(0, num(k?.[key], 0))]));
+  const total = c.nige + c.makuri + c.sashi + c.mark;
+  if (total < 1) return null;
+  const nige = c.nige / total, makuri = c.makuri / total, oi = (c.sashi + c.mark) / total;
+  const weight = clamp(total / 8, 0.25, 1); // 8回以上あれば実績を目いっぱい信じる
+  const style = nige + makuri < 0.4 ? STYLE.OI : nige >= makuri ? STYLE.NIGE : STYLE.RYO;
+  return { counts: c, total, nige, makuri, oi, weight, style };
+}
+
 // ---------- 1人分の変換 ----------
-export function riderToProfile(r) {
-  const score = num(r.score, 105);
-  const style = Object.values(STYLE).includes(r.style) ? r.style : STYLE.RYO;
+export function riderToProfile(r, { girls = false } = {}) {
+  // ガールズの競走得点は50点台が中心 (男子は100点前後) なので、男子と同じ物差しに直す: 50点→100点、58点→120点
+  const rawScore = num(r.score, girls ? 52 : 105);
+  const score = girls || rawScore < 75 ? 100 + (rawScore - 50) * 2.5 : rawScore;
+  const rec = kimariteRecord(r.kimarite);
+  // 脚質が未入力なら、決まり手の実績から決める
+  const style = Object.values(STYLE).includes(r.style) ? r.style : (rec?.style ?? STYLE.RYO);
   const back = clamp(num(r.back, style === STYLE.NIGE ? 8 : style === STYLE.RYO ? 4 : 1), 0, 30);
   const power = clamp(0.70 + (score - 100) * 0.0125, 0.45, 1.0);
   const backBoost = clamp(back / 20, 0, 1) * 0.10;
@@ -122,12 +151,25 @@ export function riderToProfile(r) {
     riskTolerance: style === STYLE.NIGE ? 0.62 : 0.55,
     blockSkill: round2(base.block)
   };
+  if (rec) {
+    // 実績を能力に反映: 捲りで勝つ選手は一瞬のダッシュ、逃げで勝つ選手は長く踏める脚と先行意欲、
+    // 差し・マークで勝つ選手は直線の伸び。styleBias は「先行か捲りか」の判断の傾き (+で先行、-で捲り)
+    const w = rec.weight;
+    profile.acceleration = round2(clamp(profile.acceleration + (rec.makuri * 0.06 + rec.oi * 0.03) * w, 0.4, 1.05));
+    profile.endurance = round2(clamp(profile.endurance + rec.nige * 0.04 * w, 0.4, 1.05));
+    profile.aggression = round2(clamp(profile.aggression + (rec.nige - 0.3) * 0.25 * w, 0.2, 1));
+    profile.styleBias = round2((rec.nige - rec.makuri) * 0.30 * w);
+  }
 
   const why = [
-    `競走得点${score}${r.score === undefined || r.score === '' ? '(未入力のため仮)' : ''} → 地力${profile.power}`,
+    `競走得点${rawScore}${score !== rawScore ? `(ガールズの得点。男子の${Math.round(score)}点相当)` : ''}${r.score === undefined || r.score === '' ? '(未入力のため仮)' : ''} → 地力${profile.power}`,
     `脚質「${style}」${r.style ? '' : '(未入力のため両で仮置き)'}`,
     `B${back}回 → 先行意欲${profile.aggression}`
   ];
+  if (rec) {
+    const c = rec.counts, lean = rec.oi >= 0.6 ? '追い込み型' : rec.makuri > rec.nige ? '捲り型' : '先行型';
+    why.push(`決まり手 逃${c.nige} 捲${c.makuri} 差${c.sashi} マ${c.mark} → ${lean}${rec.weight < 1 ? ' (回数が少ないので弱めに反映)' : ''}`);
+  }
   return { profile, style, back, start: num(r.start, 0), why };
 }
 
@@ -156,14 +198,17 @@ export function toRaceSetup(data) {
   if (errors.length) throw new Error(errors.join('\n'));
 
   const infoByCar = {};
-  for (const r of data.riders) infoByCar[Number(r.car)] = { ...riderToProfile(r), name: r.name ?? '' };
+  for (const r of data.riders) infoByCar[Number(r.car)] = { ...riderToProfile(r, { girls: isGirls(data) }), name: r.name ?? '' };
 
+  const girls = isGirls(data);
   let lines = data.lines.map(l => l.map(Number));
-  if (data.autoFormation) lines = orderLinesAuto(lines, infoByCar);
+  // ガールズ: ラインはなく全員が単騎。並びは周回の前からの順番としてだけ使う
+  if (girls) lines = lines.flat().map(n => [n]);
+  if (data.autoFormation && !girls) lines = orderLinesAuto(lines, infoByCar);
   // 番手を競る単騎は、競る相手のラインのすぐ後ろからスタートする
   for (const [car, t] of Object.entries(data.tactics ?? {})) {
     const seri = /^SERI:([1-9])$/.exec(t ?? '');
-    if (!seri) continue;
+    if (!seri || girls) continue;
     const from = lines.findIndex(g => g.length === 1 && g[0] === Number(car));
     if (from < 0) continue;
     const [solo] = lines.splice(from, 1);
@@ -177,7 +222,7 @@ export function toRaceSetup(data) {
     const tactic = data.tactics?.[car], front = data.frontResponse?.[car];
     if (TACTIC_CODES.includes(tactic)) riders[car].tactic = tactic;
     const seri = /^SERI:([1-9])$/.exec(tactic ?? '');
-    if (seri) riders[car].seriTarget = Number(seri[1]); // 単騎で、この選手のラインの番手を競る
+    if (seri && !girls) riders[car].seriTarget = Number(seri[1]); // 単騎で、この選手のラインの番手を競る
     if (front === 'TSUPPARI' || front === 'YIELD') riders[car].frontResponse = front;
   }
   const setupLines = [];
@@ -192,6 +237,8 @@ export function toRaceSetup(data) {
     trackProfile: `PROFILE_${[333, 500].includes(Number(data.bank ?? bankOfVenue(data.race?.venue))) ? Number(data.bank ?? bankOfVenue(data.race?.venue)) : 400}`,
     lines: setupLines,
     riders,
+    // ガールズはヨコの動き(ブロック・番手の競り)が禁止
+    rules: girls ? { girls: true, noBlock: true } : {},
     formation: lines,
     meta: {
       race: data.race ?? {},

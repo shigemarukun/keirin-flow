@@ -101,7 +101,7 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
 
   // スタートの隊列
   const formation = (setup.formation?.length ? setup.formation : setup.lines.map(l => l.members)).map(g => g.join('')).join(' ');
-  add('周回', `スタートは ${formation} の並び。${prediction?.initialFrontLeaderNumber != null ? `${name(prediction.initialFrontLeaderNumber)}が前受け。` : ''}`);
+  add('周回', `${setup.rules?.girls ? 'ガールズ (ラインなしの個人戦)。' : ''}スタートは ${formation} の並び。${prediction?.initialFrontLeaderNumber != null ? `${name(prediction.initialFrontLeaderNumber)}が前受け。` : ''}`);
 
   // 赤板〜打鐘: 誘導切り
   const cutStart = firstLog(riderLogs, l => /誘導切りへ外を上昇/.test(l.message));
@@ -113,7 +113,7 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
     let t = `赤板で${name(cutStart.riderNumber)}が外から誘導切りへ。`;
     if (tsuppari && cutLost) t += `${name(tsuppari.riderNumber)}が突っ張り、${name(cutLost.riderNumber)}は踏み合いで競り負けて後方へ下げる。`;
     else if (tsuppari && cutWon) t += `${name(tsuppari.riderNumber)}が突っ張るが、${name(cutWon.riderNumber)}が踏み勝って前に出る。`;
-    else if (yielded) t += `${name(yielded.riderNumber)}は無理に張り合わず、${cutStart.riderNumber}番のラインを前に入れる。`;
+    else if (yielded) t += `${name(yielded.riderNumber)}は無理に張り合わず、${cutStart.riderNumber}番${lineOf(cutStart.riderNumber) ? 'のライン' : ''}を前に入れる。`;
     add('赤板', t);
   }
   if (snapshots.bell) add('打鐘', `打鐘の隊列は ${fmtOrder(snapshots.bell.order, lineOf)}。`);

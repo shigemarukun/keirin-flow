@@ -400,3 +400,13 @@ body #app {
 .welcome h2 { margin: 0 0 6px; font-size: 1rem; color: #7dd3fc; }
 .welcome ol { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; font-size: 0.85rem; line-height: 1.5; color: #e2e8f0; }
 .welcome-close { position: absolute; top: 6px; right: 8px; width: 36px; height: 36px; border: 0; background: transparent; color: #cbd5e1; font-size: 1.3rem; cursor: pointer; }
+
+/* 決まり手の回数 */
+.ri-kim { margin: 8px 0; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 8px; padding: 6px 8px; }
+.ri-kim summary { cursor: pointer; color: #e2e8f0; font-size: 0.85rem; }
+.ri-kim summary small { color: var(--muted); margin-left: 4px; }
+.ri-kim-head, .ri-kim-row { display: grid; grid-template-columns: 28px repeat(4, minmax(0, 1fr)); gap: 4px; align-items: center; }
+.ri-kim-head { color: var(--muted); font-size: 0.75rem; margin: 6px 0 2px; text-align: center; }
+.ri-kim-row { margin-bottom: 4px; }
+.ri-kim-row input { width: 100%; box-sizing: border-box; min-width: 0; padding: 7px 4px; font-size: 16px; text-align: center; color: #e2e8f0; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 6px; }
+.ri-girls-label { margin: 6px 0 2px; }

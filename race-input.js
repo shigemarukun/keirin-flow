@@ -1,7 +1,7 @@
 // KEIRIN FLOW — 出走表の手入力画面
 // 入力された出走表を「レースデータ」(race-data.js) にして、シミュレーションへ渡す。
 
-import { STYLE, VENUES, bankOfVenue, SAMPLE_RACE_DATA, parseLines, formatLines, validateRaceData, toRaceSetup } from './race-data.js';
+import { STYLE, VENUES, KIMARITE_LABEL, CLASSES, RACE_GRADES, HISTORY, normalizeClass, parseRaceCardText, kimariteFromPercent, bankOfVenue, SAMPLE_RACE_DATA, parseLines, formatLines, validateRaceData, toRaceSetup } from './race-data.js';
 
 const STORAGE_KEY = 'keirin-flow:race-input:v1';
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -41,6 +41,10 @@ export function mountRaceInput(container, { onApply }) {
     <div class="ri-row" data-car="${car}">
       <span class="ri-car car-${car}">${car}</span>
       <input class="ri-name" type="text" placeholder="選手名" autocomplete="off" aria-label="${car}番 選手名">
+      <select class="ri-class" aria-label="${car}番 級班">
+        <option value="">級班</option>
+        ${Object.keys(CLASSES).map(c => `<option value="${c}">${c}</option>`).join('')}
+      </select>
       <input class="ri-score" type="text" inputmode="decimal" placeholder="得点" aria-label="${car}番 競走得点">
       <select class="ri-style" aria-label="${car}番 脚質">
         <option value="">脚質</option>
@@ -51,6 +55,17 @@ export function mountRaceInput(container, { onApply }) {
     </div>`;
 
   container.innerHTML = `
+    <section class="ri-paste">
+      <h3>出走表を貼り付けて読み取る <small>おすすめ</small></h3>
+      <p class="ri-help">出走表のページ(WINTICKET・KEIRIN.JPなど)の文字をコピーして貼り付けると、選手・級班・得点・脚質・並びを読み取って下の表に入れます。読み取れなかったところだけ直してください。</p>
+      <textarea class="ri-paste-text" rows="4" spellcheck="false" placeholder="ここに出走表の文字を貼り付け"></textarea>
+      <div class="ri-actions">
+        <button type="button" class="primary-btn ri-paste-read">読み取る</button>
+        <button type="button" class="secondary-btn ri-paste-clip">クリップボードから貼り付け</button>
+      </div>
+      <div class="ri-paste-out" role="status"></div>
+    </section>
+    <h3 class="ri-step">出走表を確認・入力</h3>
     <div class="ri-venue">
       <label>競輪場
         <select class="ri-venue-name" aria-label="競輪場">
@@ -60,11 +75,29 @@ export function mountRaceInput(container, { onApply }) {
       </label>
       <label>R <input class="ri-race-no" type="text" inputmode="numeric" placeholder="11" aria-label="レース番号"></label>
     </div>
+    <label class="ri-grade-label">レースのクラス
+      <select class="ri-grade" aria-label="レースのクラス">
+        <option value="">自動 (級班・得点から)</option>
+        ${Object.entries(RACE_GRADES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
+      </select>
+    </label>
+    <p class="ri-help ri-grade-note"></p>
     <p class="ri-help ri-bank-note"></p>
     <p class="ri-help">名前か得点を入れた車番だけが出走します。B=バック回数、S=S回数(分からなければ空欄で大丈夫)。</p>
-    <div class="ri-head"><span>車</span><span>選手名</span><span>得点</span><span>脚質</span><span>B</span><span>S</span></div>
+    <div class="ri-head"><span>車</span><span>選手名</span><span>級班</span><span>得点</span><span>脚質</span><span>B</span><span>S</span></div>
     <div class="ri-rows">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(rowHtml).join('')}</div>
-    <label class="ri-lines-label">並び (周回の前から)
+    <details class="ri-hist">
+      <summary>経歴 (元SS・特別昇級など) <small>得点だけでは測れない選手</small></summary>
+      <p class="ri-help">北井選手のように元S級でA級から走っている選手や、特別昇級・昇級したばかりの選手は、得点が本来の実力とずれています。ここで選ぶと補正します。</p>
+      ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(car => `<div class="ri-hist-row" data-car="${car}"><span class="ri-car car-${car}">${car}</span><select class="ri-history" aria-label="${car}番 経歴"><option value="">なし (得点どおり)</option>${Object.entries(HISTORY).map(([k, h]) => `<option value="${k}">${h.label} — ${h.note}</option>`).join('')}</select></div>`).join('')}
+    </details>
+    <details class="ri-kim">
+      <summary>決まり手 (逃・捲・差・マ) <small>入れると精度が上がります</small></summary>
+      <p class="ri-help">選手の「決まり手」です。回数でも、WINTICKETの「連対時の決まり手」の % (例 19.0) でも大丈夫です。その選手が実際に逃げで勝つのか、捲りで勝つのかを走り方に反映します。脚質より実績を優先します。</p>
+      <div class="ri-kim-head"><span>車</span>${Object.values(KIMARITE_LABEL).map(l => `<span>${l}</span>`).join('')}</div>
+      ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(car => `<div class="ri-kim-row" data-car="${car}"><span class="ri-car car-${car}">${car}</span>${Object.entries(KIMARITE_LABEL).map(([k, l]) => `<input class="ri-k" data-k="${k}" type="text" inputmode="numeric" aria-label="${car}番 決まり手 ${l}">`).join('')}</div>`).join('')}
+    </details>
+    <label class="ri-lines-label"><span class="ri-lines-title">並び (周回の前から)</span>
       <input class="ri-lines" type="text" inputmode="none" autocomplete="off" placeholder="下のボタンで入力 例: 123/456/789">
     </label>
     <div class="ri-keypad" aria-label="並びの入力ボタン">
@@ -73,7 +106,7 @@ export function mountRaceInput(container, { onApply }) {
       <button type="button" class="ri-key ri-key-back" data-key="back">1文字消す</button>
       <button type="button" class="ri-key ri-key-clear" data-key="clear">並びを消す</button>
     </div>
-    <p class="ri-help">ラインの区切りは「区切り /」。単騎の選手は1人だけで区切ります (例: 12/45/7/89)。</p>
+    <p class="ri-help ri-lines-help">ラインの区切りは「区切り /」。単騎の選手は1人だけで区切ります (例: 12/45/7/89)。</p>
     <label class="ri-check"><input class="ri-auto" type="checkbox"> ラインの前後の順番はAIに任せる</label>
     <div class="ri-errors" role="alert"></div>
     <div class="ri-actions">
@@ -81,17 +114,24 @@ export function mountRaceInput(container, { onApply }) {
       <button type="button" class="secondary-btn ri-sample">サンプルを入れる</button>
       <button type="button" class="secondary-btn ri-clear">全部消す</button>
     </div>
-    <details class="ri-json">
-      <summary>データを貼り付けて読み込む</summary>
-      <p class="ri-help">Claudeに出走表のスクショを渡して作ってもらったデータは、ここに貼り付けると読み込めます。</p>
-      <textarea class="ri-json-text" rows="5" spellcheck="false" placeholder='{"riders":[...],"lines":[[1,2,3],...]}'></textarea>
-      <button type="button" class="secondary-btn ri-json-load">貼り付けたデータを読み込む</button>
-    </details>`;
+`;
 
   const $ = sel => container.querySelector(sel);
   let current = null; // 最後に走らせたレースデータ
   const rows = [...container.querySelectorAll('.ri-row')];
   container.querySelector('.ri-venue-name').addEventListener('change', () => bankNote());
+  const kimRow = car => container.querySelector(`.ri-kim-row[data-car="${car}"]`);
+  // ガールズ: ラインがないので、並びは周回の前からの順番だけを入れる
+  const girlsNote = () => {
+    const grade = $('.ri-grade').value, g = grade === 'L';
+    $('.ri-grade-note').textContent = g ? 'ガールズ: ラインなしの個人戦。ブロック・番手の競りはありません' : grade === 'C' ? 'チャレンジ: A級3班の7車立て' : '';
+    $('.ri-auto').closest('label').hidden = g;
+    $('.ri-lines-title').textContent = g ? '周回の並び順 (前から)' : '並び (周回の前から)';
+    $('.ri-lines-help').textContent = g
+      ? 'ガールズはラインがないので、区切りは不要です。周回の並び順を前から入れてください (例: 1234567)。'
+      : 'ラインの区切りは「区切り /」。単騎の選手は1人だけで区切ります (例: 12/45/7/89)。';
+  };
+  container.querySelector('.ri-grade').addEventListener('change', () => girlsNote());
   const errorsBox = $('.ri-errors');
 
   const read = () => {
@@ -101,7 +141,17 @@ export function mountRaceInput(container, { onApply }) {
       const name = row.querySelector('.ri-name').value.trim();
       const score = row.querySelector('.ri-score').value.trim();
       if (!name && !score) continue;
+      const kim = {};
+      // 回数(整数)でも、WINTICKETの % (小数・%付き) でも受け付ける
+      for (const input of kimRow(car).querySelectorAll('.ri-k')) {
+        const v = input.value.trim(); if (v === '') continue;
+        const n = Number(v.replace(/[^\d.]/g, '')) || 0;
+        kim[input.dataset.k] = /[.%]/.test(v) ? kimariteFromPercent(n) : n;
+      }
       riders.push({
+        class: row.querySelector('.ri-class').value || undefined,
+        history: container.querySelector(`.ri-hist-row[data-car="${car}"] .ri-history`).value || undefined,
+        kimarite: Object.keys(kim).length ? kim : undefined,
         car, name, score: score === '' ? undefined : Number(score.replace(/[^\d.]/g, '')),
         style: row.querySelector('.ri-style').value || undefined,
         back: row.querySelector('.ri-back').value.trim() === '' ? undefined : Number(row.querySelector('.ri-back').value),
@@ -110,7 +160,8 @@ export function mountRaceInput(container, { onApply }) {
     }
     // 展開の指定(戦法・前受けの対応)は「展開を選ぶ」で付けたものを引き継ぐ
     const venue = $('.ri-venue-name').value, raceNo = Number($('.ri-race-no').value) || undefined;
-    return { race: { ...(current?.race ?? {}), venue: venue || undefined, raceNo }, bank: bankOfVenue(venue) ?? undefined, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
+    const grade = $('.ri-grade').value || undefined;
+    return { race: { ...(current?.race ?? {}), venue: venue || undefined, raceNo, grade, girls: grade === 'L' || undefined }, bank: bankOfVenue(venue) ?? undefined, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
       tactics: { ...(current?.tactics ?? {}) }, frontResponse: { ...(current?.frontResponse ?? {}) } };
   };
 
@@ -121,7 +172,9 @@ export function mountRaceInput(container, { onApply }) {
   const fill = data => {
     $('.ri-venue-name').value = data?.race?.venue ?? '';
     $('.ri-race-no').value = data?.race?.raceNo ?? '';
-    bankNote();
+    $('.ri-grade').value = (data?.girls ?? data?.race?.girls) ? 'L' : (data?.race?.grade ?? '');
+    bankNote(); girlsNote();
+    let anyKim = false, anyHist = false;
     for (const row of rows) {
       const r = (data?.riders ?? []).find(x => Number(x.car) === Number(row.dataset.car)) ?? {};
       row.querySelector('.ri-name').value = r.name ?? '';
@@ -129,7 +182,14 @@ export function mountRaceInput(container, { onApply }) {
       row.querySelector('.ri-style').value = r.style ?? '';
       row.querySelector('.ri-back').value = r.back ?? '';
       row.querySelector('.ri-start').value = r.start ?? '';
+      row.querySelector('.ri-class').value = normalizeClass(r.class) ?? '';
+      const hs = container.querySelector(`.ri-hist-row[data-car="${row.dataset.car}"] .ri-history`);
+      hs.value = HISTORY[r.history] ? r.history : '';
+      if (hs.value) anyHist = true;
+      for (const input of kimRow(row.dataset.car).querySelectorAll('.ri-k')) { input.value = r.kimarite?.[input.dataset.k] ?? ''; if (input.value !== '') anyKim = true; }
     }
+    if (anyKim) $('.ri-kim').setAttribute('open', '');
+    if (anyHist) $('.ri-hist').setAttribute('open', '');
     $('.ri-lines').value = formatLines(data?.lines);
     $('.ri-auto').checked = !!data?.autoFormation;
   };
@@ -166,14 +226,27 @@ export function mountRaceInput(container, { onApply }) {
   });
   $('.ri-sample').addEventListener('click', () => { fill(SAMPLE_RACE_DATA); showErrors([]); });
   $('.ri-clear').addEventListener('click', () => { fill({ riders: [], lines: [] }); showErrors([]); });
-  $('.ri-json-load').addEventListener('click', () => {
-    try {
-      const data = JSON.parse($('.ri-json-text').value);
-      fill(data);
-      if (apply({ ...data, lines: (data.lines ?? []).map(l => l.map(Number)) })) container.closest('details')?.removeAttribute('open');
-    } catch {
-      showErrors(['貼り付けたデータを読めませんでした。全部コピーできているか確認してください']);
-    }
+  // 出走表の文字を読み取る: 表に入れて、読めたもの・読めなかったものを知らせる (予想はボタンを押してから)
+  const readPaste = () => {
+    const text = $('.ri-paste-text').value;
+    const out = $('.ri-paste-out');
+    if (!text.trim()) { out.innerHTML = '<p class="ri-help">出走表の文字を貼り付けてください。</p>'; return; }
+    const { data, found, warnings } = parseRaceCardText(text);
+    if (!found.riders) { out.innerHTML = `<p class="ri-warn">${esc(warnings[0] ?? '読み取れませんでした')}</p>`; return; }
+    const prev = read();
+    fill({ ...data, race: { ...data.race, venue: data.race?.venue ?? prev.race.venue, raceNo: data.race?.raceNo ?? prev.race.raceNo },
+      lines: data.lines?.length ? data.lines : [] });
+    if (!data.lines?.length) $('.ri-lines').value = '';
+    const list = data.riders.map(r => `<li><span class="ri-car car-${r.car}">${r.car}</span> ${esc(r.name ?? '')} ${esc(r.class ?? '—')} ${r.score ?? '—'} ${esc(r.style ?? '')}</li>`).join('');
+    out.innerHTML = `<p class="ri-ok">${found.riders}人を読み取りました${found.lines ? '・並びも読み取りました' : ''}。下の表を確認して「この出走表で予想する」を押してください。</p>
+      <ul class="ri-paste-list">${list}</ul>${warnings.map(w => `<p class="ri-warn">${esc(w)}</p>`).join('')}`;
+    showErrors([]);
+    $('.ri-step').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  $('.ri-paste-read').addEventListener('click', readPaste);
+  $('.ri-paste-clip').addEventListener('click', async () => {
+    try { $('.ri-paste-text').value = await navigator.clipboard.readText(); readPaste(); }
+    catch { $('.ri-paste-out').innerHTML = '<p class="ri-help">この端末では自動で貼り付けできませんでした。上の枠を長押しして「ペースト」してください。</p>'; }
   });
 
   // 前回入力した出走表があれば、それで始める (なければサンプル)

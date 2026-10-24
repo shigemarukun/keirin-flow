@@ -212,7 +212,9 @@ body #app {
 .race-input-panel[open] .ri-summary-hint { display: none; }
 #race-input-ui { margin-top: 12px; display: grid; gap: 8px; }
 .ri-help { margin: 0; color: var(--muted); font-size: 0.75rem; line-height: 1.5; }
-.ri-head, .ri-row { display: grid; grid-template-columns: 28px minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 0.6fr) minmax(0, 0.6fr); gap: 4px; align-items: center; }
+.ri-head, .ri-row { display: grid; grid-template-columns: 26px minmax(0, 1.35fr) minmax(0, 0.75fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 0.55fr) minmax(0, 0.55fr); gap: 3px; align-items: center; }
+/* 級班は2文字なので矢印を出さず中央に (狭い画面で文字が切れないように) */
+.ri-row select.ri-class { -webkit-appearance: none; appearance: none; text-align: center; text-align-last: center; padding: 7px 0; }
 .ri-head { color: var(--muted); font-size: 0.7rem; padding: 0 2px; }
 .ri-rows { display: grid; gap: 4px; }
 .ri-row input, .ri-row select, .ri-lines {
@@ -400,3 +402,47 @@ body #app {
 .welcome h2 { margin: 0 0 6px; font-size: 1rem; color: #7dd3fc; }
 .welcome ol { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; font-size: 0.85rem; line-height: 1.5; color: #e2e8f0; }
 .welcome-close { position: absolute; top: 6px; right: 8px; width: 36px; height: 36px; border: 0; background: transparent; color: #cbd5e1; font-size: 1.3rem; cursor: pointer; }
+
+/* 決まり手の回数 */
+.ri-kim { margin: 8px 0; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 8px; padding: 6px 8px; }
+.ri-kim summary { cursor: pointer; color: #e2e8f0; font-size: 0.85rem; }
+.ri-kim summary small { color: var(--muted); margin-left: 4px; }
+.ri-kim-head, .ri-kim-row { display: grid; grid-template-columns: 28px repeat(4, minmax(0, 1fr)); gap: 4px; align-items: center; }
+.ri-kim-head { color: var(--muted); font-size: 0.75rem; margin: 6px 0 2px; text-align: center; }
+.ri-kim-row { margin-bottom: 4px; }
+.ri-kim-row input { width: 100%; box-sizing: border-box; min-width: 0; padding: 7px 4px; font-size: 16px; text-align: center; color: #e2e8f0; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 6px; }
+.ri-girls-label { margin: 6px 0 2px; }
+
+/* 貼り付けて読み取る */
+.ri-paste { border: 1px solid rgba(56, 189, 248, 0.45); background: rgba(14, 116, 144, 0.12); border-radius: 10px; padding: 10px; margin-bottom: 12px; }
+.ri-paste h3, .ri-step { margin: 0 0 4px; font-size: 0.95rem; color: #e0f2fe; }
+.ri-paste h3 small { font-size: 0.7rem; color: #0f172a; background: #38bdf8; border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
+.ri-step { margin: 8px 0 6px; }
+.ri-paste-text { width: 100%; box-sizing: border-box; font-size: 16px; color: #e2e8f0; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 8px; padding: 8px; margin: 6px 0; }
+.ri-paste-out .ri-ok { color: #86efac; font-size: 0.85rem; margin: 6px 0 4px; }
+.ri-warn { color: #fcd34d; font-size: 0.8rem; margin: 4px 0; }
+.ri-paste-list { list-style: none; padding: 0; margin: 4px 0; display: grid; gap: 3px; font-size: 0.8rem; color: #cbd5e1; }
+.ri-paste-list .ri-car { display: inline-grid; width: 20px; height: 20px; font-size: 0.7rem; }
+/* 級班・経歴 */
+.ri-grade-label { display: grid; gap: 4px; font-size: 0.8rem; color: #cbd5e1; margin: 6px 0 2px; }
+.ri-grade-label select { font-size: 16px; padding: 7px; color: #e2e8f0; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 6px; }
+.ri-hist { margin: 8px 0; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 8px; padding: 6px 8px; }
+.ri-hist summary { cursor: pointer; color: #e2e8f0; font-size: 0.85rem; }
+.ri-hist summary small { color: var(--muted); margin-left: 4px; }
+.ri-hist-row { display: grid; grid-template-columns: 28px 1fr; gap: 6px; align-items: center; margin: 4px 0; }
+.ri-hist-row select { width: 100%; min-width: 0; font-size: 16px; padding: 6px; color: #e2e8f0; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 6px; }
+
+/* AIの選手の見立て */
+.re-panel { margin-top: 12px; border-top: 1px solid rgba(148, 163, 184, 0.25); padding-top: 8px; }
+.re-panel summary { cursor: pointer; font-weight: 700; color: #e2e8f0; font-size: 0.9rem; }
+.re-panel summary small { color: var(--muted); font-weight: 400; }
+.re-list { list-style: none; margin: 8px 0 4px; padding: 0; display: grid; gap: 8px; }
+.re-row { display: grid; grid-template-columns: 26px 1.1em 1fr; gap: 6px; align-items: start; }
+.re-main { min-width: 0; }
+.re-top { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.re-name { font-weight: 700; color: #f1f5f9; font-size: 0.85rem; margin-right: 2px; }
+.re-tag { font-size: 0.7rem; color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 999px; padding: 0 6px; }
+.re-style { color: #7dd3fc; border-color: rgba(125, 211, 252, 0.5); }
+.re-bar { height: 6px; background: rgba(148, 163, 184, 0.2); border-radius: 3px; margin: 4px 0 2px; overflow: hidden; }
+.re-bar i { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #a78bfa); border-radius: 3px; }
+.re-sub { font-size: 0.72rem; color: #94a3b8; line-height: 1.45; }

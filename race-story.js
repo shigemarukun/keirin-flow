@@ -101,7 +101,7 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
 
   // スタートの隊列
   const formation = (setup.formation?.length ? setup.formation : setup.lines.map(l => l.members)).map(g => g.join('')).join(' ');
-  add('周回', `スタートは ${formation} の並び。${prediction?.initialFrontLeaderNumber != null ? `${name(prediction.initialFrontLeaderNumber)}が前受け。` : ''}`);
+  add('周回', `${setup.rules?.girls ? 'ガールズ (ラインなしの個人戦)。' : ''}スタートは ${formation} の並び。${prediction?.initialFrontLeaderNumber != null ? `${name(prediction.initialFrontLeaderNumber)}が前受け。` : ''}`);
 
   // 赤板〜打鐘: 誘導切り
   const cutStart = firstLog(riderLogs, l => /誘導切りへ外を上昇/.test(l.message));
@@ -113,7 +113,7 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
     let t = `赤板で${name(cutStart.riderNumber)}が外から誘導切りへ。`;
     if (tsuppari && cutLost) t += `${name(tsuppari.riderNumber)}が突っ張り、${name(cutLost.riderNumber)}は踏み合いで競り負けて後方へ下げる。`;
     else if (tsuppari && cutWon) t += `${name(tsuppari.riderNumber)}が突っ張るが、${name(cutWon.riderNumber)}が踏み勝って前に出る。`;
-    else if (yielded) t += `${name(yielded.riderNumber)}は無理に張り合わず、${cutStart.riderNumber}番のラインを前に入れる。`;
+    else if (yielded) t += `${name(yielded.riderNumber)}は無理に張り合わず、${cutStart.riderNumber}番${lineOf(cutStart.riderNumber) ? 'のライン' : ''}を前に入れる。`;
     add('赤板', t);
   }
   if (snapshots.bell) add('打鐘', `打鐘の隊列は ${fmtOrder(snapshots.bell.order, lineOf)}。`);
@@ -145,6 +145,8 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
   const seriStart = firstLog(riderLogs, l => /番手を巡って/.test(l.message));
   const seriEnd = firstLog(riderLogs, l => /秒の競りに勝って/.test(l.message));
   if (seriStart) add('競り', `${name(seriStart.riderNumber)}が${seriStart.message.replace(/\s*\(.*\)/, '')}。${seriEnd ? `${name(seriEnd.riderNumber)}が${seriEnd.message.replace(/^.*?秒の競りに勝って、/, '').replace(/\s*\(.*\)/, '')}。` : ''}`);
+  const chigire = firstLog(riderLogs, l => /千切れる/.test(l.message));
+  if (chigire) add('攻防', `${name(chigire.riderNumber)}は${chigire.message.replace(/\s*\(.*\)/, '')}。`);
   const switched = firstLog(riderLogs, l => /切り替える/.test(l.message));
   if (switched) add('攻防', `${name(switched.riderNumber)}は${switched.message.replace(/\s*\(.*\)/, '')}`);
 
@@ -154,6 +156,8 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
   const top3Cars = ranking.slice(0, 3).map(r => r.number);
   const tired = riderLogs.filter(l => l.category === 'FATIGUE' && R(l) <= 260).slice(0, 2);
   for (const t of tired) add('直線', top3Cars.includes(t.riderNumber) ? `${name(t.riderNumber)}は脚が一杯になりながらも粘る。` : `${name(t.riderNumber)}は脚が一杯でタレる。`);
+  const naka = firstLog(riderLogs, l => /中を割って/.test(l.message));
+  if (naka && ranking.slice(0, 3).some(r => r.number === naka.riderNumber)) add('直線', `${name(naka.riderNumber)}が中を割って伸びる。`);
   const inner = firstLog(riderLogs, l => /内を突く/.test(l.message));
   if (inner && ranking.slice(0, 3).some(r => r.number === inner.riderNumber)) add('直線', `${name(inner.riderNumber)}が内を突いて伸びる。`);
 

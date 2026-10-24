@@ -388,3 +388,9 @@ body #app {
 .fc-mark-bar { width: 1.1em; text-align: center; margin: 0; }
 .fc-cond { margin-top: 6px; color: #fde68a; font-size: 0.8rem; }
 .fc-bar-row { grid-template-columns: 26px 1.1em 1fr 72px; gap: 6px; }
+
+/* 競輪場とレース番号 */
+.ri-venue { display: grid; grid-template-columns: 1fr 88px; gap: 8px; }
+.ri-venue label { display: grid; gap: 4px; font-size: 0.8rem; color: #cbd5e1; }
+.ri-venue select, .ri-venue input { width: 100%; box-sizing: border-box; padding: 7px 6px; font-size: 16px; color: #f8fafc; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 6px; }
+.ri-bank-note { color: #fde68a; }

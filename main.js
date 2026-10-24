@@ -98,7 +98,7 @@ window.addEventListener('DOMContentLoaded',()=>{
  document.getElementById('jump-bar')?.addEventListener('click',async event=>{
   const b=event.target.closest('[data-rem]');if(!b)return;
   await ensureAudioReady();
-  physics.reset();physics.fastForwardTo(Number(b.dataset.rem));physics.start();
+  physics.reset();physics.fastForwardTo(Number(b.dataset.rem)*(physics.lapScale??1));physics.start();
   // 少しゆっくり見せる
   const slow=Math.min(1,physics.timeScale);physics.setSpeedScale(slow);
  });
@@ -115,11 +115,13 @@ window.addEventListener('DOMContentLoaded',()=>{
   const logs=state.decisionLogs??[];
   let pick=null;
   for(let i=logs.length-1;i>=0&&i>=logs.length-12;i--){const l=logs[i];if(now-l.time>3.2)break;if(l.category==='BELL'||(l.riderNumber!=null&&KEY.test(l.message))){pick=l;break;}}
-  const rem=state.raceClock?.remainingDistance??800;
-  if(capPhase){const ph=state.isStarted||rem<800?phaseOf(rem):'';if(capPhase.textContent!==ph)capPhase.textContent=ph;}
+  const total=state.totalDistance??800;
+  const rem=state.raceClock?.remainingDistance??total;
+  const rem400=rem/(state.lapScale??1);
+  if(capPhase){const ph=state.isStarted||rem<total?phaseOf(rem400):'';if(capPhase.textContent!==ph)capPhase.textContent=ph;}
   if(pick&&pick.id!==shownId){shownId=pick.id;capText.textContent=pick.riderNumber!=null?`${pick.riderNumber}番 ${pick.message.replace(/\s*\(.*?\)\s*$/,'').replace(/^残\d+mで?/,'').replace(/^残\d+mから/,'')}`:pick.message;caption.classList.add('is-on');caption.dataset.rider=pick.riderNumber??'';}
   if(!pick&&caption.classList.contains('is-on')){caption.classList.remove('is-on');caption.dataset.rider='';}
-  if(!state.isStarted&&rem>=800){caption.classList.remove('is-on');}
+  if(!state.isStarted&&rem>=total){caption.classList.remove('is-on');}
   return pick?.riderNumber??null;
  };
 
@@ -128,12 +130,13 @@ window.addEventListener('DOMContentLoaded',()=>{
   const dt=(now-lastTime)/1000;lastTime=now;
   physics.update(dt);
   const state=physics.getState();
+  if(state.trackLength&&ui.trackGeometry?.length!==state.trackLength)ui.setTrackLength(state.trackLength);
   ui.drawBank();ui.drawRiders(state);ui.updateUI(state);
   const spot=updateCaption(state);if(spot!=null)ui.drawSpotlight(state,spot);
   if(barStatus){
    const rem=Math.max(0,Math.ceil(state.raceClock?.remainingDistance??0));
    const top=state.ranking?.length?[...state.ranking].sort((a,b)=>a.time-b.time).slice(0,3).map(r=>r.number).join('-'):null;
-   const text=top&&state.ranking.length===state.riders.length?`結果 ${top}`:state.isStarted?`残り${rem}m`:(rem<800?`停止中 残り${rem}m`:'スタート前');
+   const text=top&&state.ranking.length===state.riders.length?`結果 ${top}`:state.isStarted?`残り${rem}m`:(rem<(state.totalDistance??800)?`停止中 残り${rem}m`:'スタート前');
    if(barStatus.textContent!==text)barStatus.textContent=text;
   }
   requestAnimationFrame(frame);

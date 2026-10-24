@@ -22,6 +22,18 @@
 //   S回数 start     → 前受け・位置取りの強さ (隊列をAIに任せたときに使う)
 //   ギヤ倍数・年齢・級班 → v0 では使わない (効くかどうか後で検証する)
 
+// 競輪場とバンクの周長 (333・335m=7場 / 500m=3場 / ほかは400m)。前橋は335mだが333として扱う
+// (千葉の250mバンク・PIST6 は別の競技形式なので対象外)
+export const VENUES = Object.freeze([
+  ['函館', 400], ['青森', 400], ['いわき平', 400], ['弥彦', 400], ['前橋', 333], ['取手', 400], ['宇都宮', 500], ['大宮', 500],
+  ['西武園', 400], ['京王閣', 400], ['立川', 400], ['松戸', 333], ['川崎', 400], ['平塚', 400], ['小田原', 333],
+  ['伊東温泉', 333], ['静岡', 400], ['名古屋', 400], ['岐阜', 400], ['大垣', 400], ['豊橋', 400], ['富山', 333], ['松阪', 400],
+  ['四日市', 400], ['福井', 400], ['奈良', 333], ['向日町', 400], ['和歌山', 400], ['岸和田', 400], ['玉野', 400], ['広島', 400],
+  ['防府', 333], ['高松', 400], ['小松島', 400], ['高知', 500], ['松山', 400], ['小倉', 400], ['久留米', 400], ['武雄', 400],
+  ['佐世保', 400], ['別府', 400], ['熊本', 400]
+].map(([name, bank]) => Object.freeze({ name, bank })));
+export const bankOfVenue = name => VENUES.find(v => v.name === name)?.bank ?? null;
+
 export const STYLE = Object.freeze({ NIGE: '逃', RYO: '両', OI: '追' });
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -176,7 +188,8 @@ export function toRaceSetup(data) {
   });
   // 9人未満のレースでも、出走しない車番は空けておく
   return {
-    trackProfile: 'PROFILE_400',
+    // バンク: data.bank (333/400/500) か、競輪場の名前から
+    trackProfile: `PROFILE_${[333, 500].includes(Number(data.bank ?? bankOfVenue(data.race?.venue))) ? Number(data.bank ?? bankOfVenue(data.race?.venue)) : 400}`,
     lines: setupLines,
     riders,
     formation: lines,

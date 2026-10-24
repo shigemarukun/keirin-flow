@@ -16,19 +16,25 @@ export const STRAIGHT_M = TRACK.LENGTH * straightPx / totalPx;   // 直線1本�
 export const CORNER_M = TRACK.LENGTH * cornerPx / totalPx;       // コーナー1つの長さ (m)
 export const CORNER_RADIUS_M = CORNER_M / Math.PI;               // コーナーの半径 (m)
 
-const wrap = d => ((d % TRACK.LENGTH) + TRACK.LENGTH) % TRACK.LENGTH;
+// 周長 L のバンク (333 / 400 / 500) でも同じ形を、長さだけ比例させて使う
+export const shapeFor = (L = TRACK.LENGTH) => {
+  const k = L / TRACK.LENGTH;
+  return { length: L, straight: STRAIGHT_M * k, corner: CORNER_M * k, radius: CORNER_RADIUS_M * k, phase: TRACK.FINISH_LINE_PHASE * k };
+};
 
 // その地点がコーナーかどうか
-export function isOnBend(distance) {
-  const d = wrap(distance + TRACK.FINISH_LINE_PHASE);
-  const b1 = STRAIGHT_M, b2 = b1 + CORNER_M, b3 = b2 + STRAIGHT_M;
+export function isOnBend(distance, L = TRACK.LENGTH) {
+  const g = shapeFor(L);
+  const d = (((distance + g.phase) % L) + L) % L;
+  const b1 = g.straight, b2 = b1 + g.corner, b3 = b2 + g.straight;
   return (d >= b1 && d < b2) || d >= b3;
 }
 
 // 内側の走路 (laneOffset = innerLane) より外を走ると、コーナーで遠回りになる。
 // 返すのは「進んだ距離のうち、内側の走路に換算して進める割合」(直線では 1)。
-export function pathFactor(distance, laneOffset, innerLane = -18) {
-  if (!isOnBend(distance)) return 1;
+export function pathFactor(distance, laneOffset, innerLane = -18, L = TRACK.LENGTH) {
+  if (!isOnBend(distance, L)) return 1;
   const outside = Math.max(0, laneOffset - innerLane) * (globalThis.KF_TUNE?.lane ?? TRACK.LANE_METERS);
-  return CORNER_RADIUS_M / (CORNER_RADIUS_M + outside);
+  const R = shapeFor(L).radius;
+  return R / (R + outside);
 }

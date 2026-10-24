@@ -84,14 +84,15 @@ export class RaceAI {
   }
 
   pacerCanExit(engine) {
-    if (engine.raceClock.remainingDistance <= PACE.PACER_EXIT_MAX) return true;
+    if (engine.raceClock.remainingDistance / (engine.lapScale ?? 1) <= PACE.PACER_EXIT_MAX) return true;
     return !!this.pacerCut?.outcome;
   }
 
   // ---------- main entry ----------
   plan(rider, engine) {
     this._engine = engine;
-    const rem = engine.raceClock.remainingDistance;
+    // 400バンクに直した残り距離 (333・500バンクでも、周回の何割かで同じように判断する)
+    const rem = engine.raceClock.remainingDistance / (engine.lapScale ?? 1);
     const m = this.mem(rider);
     if (!m.style) {
       // ユーザーが展開を指定していればそれを優先 (先行 / カマシ / 捲り / 追込)、なければ能力から決める
@@ -257,7 +258,7 @@ export class RaceAI {
     if (m.gaveUp && !m.retreatDone) {
       let tail = null;
       for (const o of engine.riders) if (!o.finished && o.lineId !== rider.lineId && (!tail || o.distance < tail.distance)) tail = o;
-      if (tail && rider.distance > tail.distance - 15 && engine.raceClock.remainingDistance > 300) {
+      if (tail && rider.distance > tail.distance - 15 && engine.raceClock.remainingDistance / (engine.lapScale ?? 1) > 300) {
         const front = this._frontRunner(engine);
         return { action: ACTION.RETREAT, speed: Math.max(7, Math.min(tail.speed, front?.speed ?? tail.speed) - 5.5), lane: TRACK_LANE.OUTSIDE, reason: '突っ張られたので外を下げ、後方へ引いて立て直す' };
       }
@@ -515,7 +516,7 @@ export class RaceAI {
       const secs = elapsed.toFixed(1);
       if (winner === 'DEFENDER') {
         const am = this.mem(a); am.gaveUp = true; am.retreatDone = false; am.struck = false; am.noContestUntil = engine.elapsedTime + 3;
-        const late = engine.raceClock.remainingDistance <= 430;
+        const late = engine.raceClock.remainingDistance / (engine.lapScale ?? 1) <= 430;
         engine.emitDecision({ riderNumber: a.number, category: 'CONTEST', action: ACTION.RETREAT, message: `${secs}秒の踏み合いで${d.number}番に競り負け、${late ? '前に出られず' : '後ろへ下げる'} (残脚${pct(a.energy)})` });
         engine.emitDecision({ riderNumber: d.number, category: 'CONTEST', action: ACTION.DEFEND, message: `踏み合いを制して前を守る。ただし脚を使った (残脚${pct(d.energy)})` });
       } else {

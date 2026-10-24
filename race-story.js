@@ -14,11 +14,14 @@ export const CHECKPOINTS = Object.freeze([
   { key: 'straight', remaining: 55, label: '最終直線' }
 ]);
 
+// ログの残り距離を、400バンクに直して使う (333・500バンクでも同じ基準で展開を書く)
+const R = l => l.rem400 ?? l.remaining;
+
 export class RaceRecorder {
   constructor() { this.reset(); }
   reset() { this.snapshots = {}; }
   observe(engine) {
-    const rem = engine.raceClock.remainingDistance;
+    const rem = engine.raceClock.remainingDistance / (engine.lapScale ?? 1); // 400バンクに直した残り距離
     for (const cp of CHECKPOINTS) {
       if (this.snapshots[cp.key] || rem > cp.remaining) continue;
       // 競り負けて下げている選手は、もう前の隊列ではないので後ろに回して記録する
@@ -46,7 +49,7 @@ export function kimarite(snapshots, ranking, frontMateOf, logs = []) {
   const posAtBack = snapshots.back?.order?.indexOf(winner) ?? -1;
   let winnerHow;
   // 先頭のまま押し切っても、捲って先頭に立った選手は「捲り」
-  const madeMakuri = logs.some(l => l.riderNumber === winner && l.remaining <= 600 && /捲りに出る|番手捲り/.test(l.message));
+  const madeMakuri = logs.some(l => l.riderNumber === winner && R(l) <= 600 && /捲りに出る|番手捲り/.test(l.message));
   if (leadAt('straight') === winner && leadAt('back') === winner && (leadAt('home') === winner || !madeMakuri)) winnerHow = '逃げ';
   else if (leadAt('straight') === winner && posAtBack !== 0) winnerHow = '捲り'; // 直線に入るまでに先頭を奪った (番手捲りも含む)
   else winnerHow = '差し';
@@ -86,7 +89,7 @@ const fmtOrderRaw = (order, lineOf) => {
 };
 
 const firstLog = (logs, test) => logs.find(test);
-const between = (log, hi, lo) => log.remaining <= hi && log.remaining > lo;
+const between = (log, hi, lo) => R(log) <= hi && R(log) > lo;
 
 export function buildStory({ setup, prediction, snapshots, logs, ranking, names = {} }) {
   const lineOf = n => setup.lines.find(l => l.members.includes(n))?.id ?? null;
@@ -102,10 +105,10 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
 
   // 赤板〜打鐘: 誘導切り
   const cutStart = firstLog(riderLogs, l => /誘導切りへ外を上昇/.test(l.message));
-  const tsuppari = firstLog(riderLogs, l => /突っ張る/.test(l.message) && l.remaining > 500);
+  const tsuppari = firstLog(riderLogs, l => /突っ張る/.test(l.message) && R(l) > 500);
   const yielded = firstLog(riderLogs, l => /(誘導切りを受け入れる|出させて一旦引く)/.test(l.message));
-  const cutLost = firstLog(riderLogs, l => /踏み合いで.*競り負け/.test(l.message) && l.remaining > 500);
-  const cutWon = firstLog(riderLogs, l => /踏み合いを制して.*叩き切る/.test(l.message) && l.remaining > 500);
+  const cutLost = firstLog(riderLogs, l => /踏み合いで.*競り負け/.test(l.message) && R(l) > 500);
+  const cutWon = firstLog(riderLogs, l => /踏み合いを制して.*叩き切る/.test(l.message) && R(l) > 500);
   if (cutStart) {
     let t = `赤板で${name(cutStart.riderNumber)}が外から誘導切りへ。`;
     if (tsuppari && cutLost) t += `${name(tsuppari.riderNumber)}が突っ張り、${name(cutLost.riderNumber)}は踏み合いで競り負けて後方へ下げる。`;
@@ -116,12 +119,12 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
   if (snapshots.bell) add('打鐘', `打鐘の隊列は ${fmtOrder(snapshots.bell.order, lineOf)}。`);
 
   // 打鐘〜最終ホーム: 主導権
-  const strikes = riderLogs.filter(l => l.remaining <= 600 && l.remaining > 110 && (/主導権を握って先行|叩いて主導権|カマす|捲りに出る|番手捲り/.test(l.message)));
+  const strikes = riderLogs.filter(l => R(l) <= 600 && R(l) > 110 && (/主導権を握って先行|叩いて主導権|カマす|捲りに出る|番手捲り/.test(l.message)));
   const seen = new Set();
   for (const s of strikes) {
     if (seen.has(s.riderNumber)) continue;
     seen.add(s.riderNumber);
-    const where = s.remaining > 400 ? '打鐘過ぎ' : s.remaining > 200 ? '最終ホーム〜2コーナー' : 'バック〜3コーナー';
+    const where = R(s) > 400 ? '打鐘過ぎ' : R(s) > 200 ? '最終ホーム〜2コーナー' : 'バック〜3コーナー';
     let what = '';
     if (/カマす/.test(s.message)) what = '後方から一気にカマす';
     else if (/叩いて主導権/.test(s.message)) what = '前を叩いて主導権を取りにいく';
@@ -131,13 +134,13 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
     add(where, `${name(s.riderNumber)}が${what}。`);
     if (seen.size >= 4) break;
   }
-  const blocks = riderLogs.filter(l => l.action === 'BLOCK' && l.remaining <= 400);
+  const blocks = riderLogs.filter(l => l.action === 'BLOCK' && R(l) <= 400);
   if (blocks.length) {
     const b = blocks[0];
     const target = b.message.match(/(\d)番の/)?.[1];
     add('攻防', `${name(b.riderNumber)}が番手から${target ? `${target}番の` : ''}捲りを外へ張ってブロック。`);
   }
-  const contest = firstLog(riderLogs, l => /秒の踏み合い/.test(l.message) && l.remaining <= 500);
+  const contest = firstLog(riderLogs, l => /秒の踏み合い/.test(l.message) && R(l) <= 500);
   if (contest) add('攻防', contest.message.replace(/\s*\(残脚.*\)/, '').replace(/^/, `${name(contest.riderNumber)}: `));
   const seriStart = firstLog(riderLogs, l => /番手を巡って/.test(l.message));
   const seriEnd = firstLog(riderLogs, l => /秒の競りに勝って/.test(l.message));
@@ -149,7 +152,7 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
   if (snapshots.back) add('バック', `バックでは ${fmtOrder(snapshots.back.order, lineOf)}。`);
   // 脚が一杯になった選手: 着外ならタレた、3着以内なら苦しいながらも粘った
   const top3Cars = ranking.slice(0, 3).map(r => r.number);
-  const tired = riderLogs.filter(l => l.category === 'FATIGUE' && l.remaining <= 260).slice(0, 2);
+  const tired = riderLogs.filter(l => l.category === 'FATIGUE' && R(l) <= 260).slice(0, 2);
   for (const t of tired) add('直線', top3Cars.includes(t.riderNumber) ? `${name(t.riderNumber)}は脚が一杯になりながらも粘る。` : `${name(t.riderNumber)}は脚が一杯でタレる。`);
   const inner = firstLog(riderLogs, l => /内を突く/.test(l.message));
   if (inner && ranking.slice(0, 3).some(r => r.number === inner.riderNumber)) add('直線', `${name(inner.riderNumber)}が内を突いて伸びる。`);

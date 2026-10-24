@@ -14,13 +14,16 @@ const wrapTrackDistance = distance =>
  * 既存の座標系・周回方向・FINISH_LINE_PHASE・laneOffset・角度式は維持する。
  */
 export function getTrackPoint(
-    { cx, cy, halfStraight, radius },
+    { cx, cy, halfStraight, radius, length = TRACK_LENGTH },
     absoluteDistance,
     laneOffset = 0
 ) {
+    // 333・500バンクも同じ形で描き、距離だけ周長に合わせて割り当てる
+    const TRACK_LENGTH_ = length;
+    const wrapLap = distance => ((distance % TRACK_LENGTH_) + TRACK_LENGTH_) % TRACK_LENGTH_;
     // 論理上の0m / 400m地点をホームストレッチ中央へ位相調整
-    const d = wrapTrackDistance(
-        absoluteDistance + FINISH_LINE_PHASE
+    const d = wrapLap(
+        absoluteDistance + FINISH_LINE_PHASE * TRACK_LENGTH_ / TRACK_LENGTH
     );
 
     const r = radius + laneOffset;
@@ -47,12 +50,12 @@ export function getTrackPoint(
         + (2 * cornerPx);
 
     const straightDist =
-        TRACK_LENGTH
+        TRACK_LENGTH_
         * straightPx
         / totalPx;
 
     const cornerDist =
-        TRACK_LENGTH
+        TRACK_LENGTH_
         * cornerPx
         / totalPx;
 
@@ -212,6 +215,10 @@ export class UIRenderer {
         return -38 + (laneOffset + 18) * 1.35;
     }
 
+    setTrackLength(length) {
+        this.trackGeometry = { ...this.trackGeometry, length };
+    }
+
     getBankCoordinates(
         distance,
         laneOffset = 0
@@ -235,7 +242,7 @@ export class UIRenderer {
 
         for (
             let distance = 0;
-            distance <= TRACK_LENGTH;
+            distance <= (this.trackGeometry.length ?? TRACK_LENGTH);
             distance += 1
         ) {
             const point =
@@ -633,7 +640,7 @@ export class UIRenderer {
             state.raceClock
                 ?.currentLap
             ?? (
-                remaining > TRACK_LENGTH
+                remaining > (state.trackLength ?? TRACK_LENGTH)
                     ? 2
                     : 1
             );

@@ -1,7 +1,7 @@
 // KEIRIN FLOW — 出走表の手入力画面
 // 入力された出走表を「レースデータ」(race-data.js) にして、シミュレーションへ渡す。
 
-import { STYLE, SAMPLE_RACE_DATA, parseLines, formatLines, validateRaceData, toRaceSetup } from './race-data.js';
+import { STYLE, VENUES, bankOfVenue, SAMPLE_RACE_DATA, parseLines, formatLines, validateRaceData, toRaceSetup } from './race-data.js';
 
 const STORAGE_KEY = 'keirin-flow:race-input:v1';
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -51,6 +51,16 @@ export function mountRaceInput(container, { onApply }) {
     </div>`;
 
   container.innerHTML = `
+    <div class="ri-venue">
+      <label>競輪場
+        <select class="ri-venue-name" aria-label="競輪場">
+          <option value="">選ばない (400バンク)</option>
+          ${VENUES.map(v => `<option value="${esc(v.name)}">${esc(v.name)} (${v.bank === 333 ? '333' : v.bank})</option>`).join('')}
+        </select>
+      </label>
+      <label>R <input class="ri-race-no" type="text" inputmode="numeric" placeholder="11" aria-label="レース番号"></label>
+    </div>
+    <p class="ri-help ri-bank-note"></p>
     <p class="ri-help">名前か得点を入れた車番だけが出走します。B=バック回数、S=S回数(分からなければ空欄で大丈夫)。</p>
     <div class="ri-head"><span>車</span><span>選手名</span><span>得点</span><span>脚質</span><span>B</span><span>S</span></div>
     <div class="ri-rows">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(rowHtml).join('')}</div>
@@ -81,6 +91,7 @@ export function mountRaceInput(container, { onApply }) {
   const $ = sel => container.querySelector(sel);
   let current = null; // 最後に走らせたレースデータ
   const rows = [...container.querySelectorAll('.ri-row')];
+  container.querySelector('.ri-venue-name').addEventListener('change', () => bankNote());
   const errorsBox = $('.ri-errors');
 
   const read = () => {
@@ -98,11 +109,19 @@ export function mountRaceInput(container, { onApply }) {
       });
     }
     // 展開の指定(戦法・前受けの対応)は「展開を選ぶ」で付けたものを引き継ぐ
-    return { race: current?.race ?? {}, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
+    const venue = $('.ri-venue-name').value, raceNo = Number($('.ri-race-no').value) || undefined;
+    return { race: { ...(current?.race ?? {}), venue: venue || undefined, raceNo }, bank: bankOfVenue(venue) ?? undefined, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
       tactics: { ...(current?.tactics ?? {}) }, frontResponse: { ...(current?.frontResponse ?? {}) } };
   };
 
+  const bankNote = () => {
+    const b = bankOfVenue($('.ri-venue-name').value) ?? 400;
+    $('.ri-bank-note').textContent = b === 333 ? '333バンク: 直線が短く、逃げ・先行が残りやすい' : b === 500 ? '500バンク: 直線が長く、差し・追い込みが届きやすい' : '400バンク';
+  };
   const fill = data => {
+    $('.ri-venue-name').value = data?.race?.venue ?? '';
+    $('.ri-race-no').value = data?.race?.raceNo ?? '';
+    bankNote();
     for (const row of rows) {
       const r = (data?.riders ?? []).find(x => Number(x.car) === Number(row.dataset.car)) ?? {};
       row.querySelector('.ri-name').value = r.name ?? '';

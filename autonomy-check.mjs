@@ -252,5 +252,26 @@ check(er.logs.some(l => l.c === 'FATIGUE' && l.n === 1) && fade1.peak - fade1.la
   check(bs1 / n <= 0.4, '逃げは残りすぎない (バックで先頭の選手の1着率が4割以下。実際の逃げ1着は約25%)', `${Math.round(bs1 / n * 100)}%`);
 }
 
+// 14. 333バンク・500バンク: 全員完走し、333は逃げ、500は差しが多くなる (実データの傾向)
+{
+  const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
+  const kim = bank => {
+    let seed = 11; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    const k = { 逃げ: 0, 捲り: 0, 差し: 0 }; let n = 0, ok = true;
+    for (const L of ['123/456/789', '789/123/456', '456/123/789', '147/258/369', '369/147/258', '12/456/789/3', '123/456/7/8/9', '1234/56789', '12/34/56/789']) for (let i = 0; i < 8; i++) {
+      const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(L); d.bank = bank;
+      for (const r of d.riders) r.score = +(103 + rnd() * 16).toFixed(1);
+      const e = new PhysicsEngine(toRaceSetup(d)); e.start();
+      for (let t = 0; t < 200 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
+      if (e.ranking.length !== 9) ok = false;
+      k[e.getStory().kimarite.how]++; n++;
+    }
+    return { ok, nige: k.逃げ / n, sashi: k.差し / n };
+  };
+  const a = kim(333), b = kim(500);
+  check(a.ok && b.ok && a.nige > b.nige && b.sashi > a.sashi, '333バンクは逃げ、500バンクは差しが多くなる (全員完走)',
+    `333: 逃げ${Math.round(a.nige * 100)}% 差し${Math.round(a.sashi * 100)}% / 500: 逃げ${Math.round(b.nige * 100)}% 差し${Math.round(b.sashi * 100)}%`);
+}
+
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

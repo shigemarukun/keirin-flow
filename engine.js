@@ -19,8 +19,12 @@ const CAR_STYLES=Object.freeze({
 4:{background:'#0068b7',text:'#ffffff'},5:{background:'#ffd400',text:'#111111'},6:{background:'#00a651',text:'#ffffff'},
 7:{background:'#f08300',text:'#111111'},8:{background:'#ff69b4',text:'#111111'},9:{background:'#7f3fbf',text:'#ffffff'}});
 
+// バンクの周長ごとの設定。レースは最後の2周を走らせる (赤板=残り2周の手前 / 打鐘=残り1周半 / 最終周 / バック)
+const bankProfile=L=>Object.freeze({TRACK_LENGTH:L,RACE_DISTANCE:2*L,FORMATION_SPEED:10.5,Bell:1.5*L,FinalLap:L,FinalBack:L/2,Finish:0});
 export const RACE_PROFILES=Object.freeze({
- PROFILE_400:Object.freeze({TRACK_LENGTH:400,RACE_DISTANCE:800,FORMATION_SPEED:10.5,Bell:600,FinalLap:400,FinalBack:200,Finish:0})
+ PROFILE_400:bankProfile(400),
+ PROFILE_333:bankProfile(333),
+ PROFILE_500:bankProfile(500)
 });
 
 class RaceClock{
@@ -60,6 +64,8 @@ export class PhysicsEngine{
   this.spacing=this.mode===RACE_MODE.TEACHER?{min:13.5,follow:17,cutIn:9,start:17}:{min:7,follow:7.8,cutIn:5,start:9};
   this.setup.mode=this.mode;
   this.profile=RACE_PROFILES[this.setup.trackProfile]??RACE_PROFILES.PROFILE_400;
+  // 400バンクを基準にした距離の倍率。AIや展開の文章は「400バンクに直した残り距離」で判断する
+  this.lapScale=this.profile.TRACK_LENGTH/400;
   this.totalDistance=this.profile.RACE_DISTANCE;
   this.lineManager=new LineManager(this.setup);
   this.raceClock=new RaceClock(this.profile);
@@ -110,6 +116,7 @@ export class PhysicsEngine{
    id:this.decisionLogs.length+1,
    time:this.elapsedTime,
    remaining:this.raceClock.remainingDistance,
+   rem400:this.raceClock.remainingDistance/(this.lapScale??1),
    riderNumber:entry.riderNumber??null,
    category:entry.category??'AI_DECISION',
    action:entry.action??null,
@@ -291,7 +298,11 @@ export class PhysicsEngine{
    for(const o of this.riders){if(o===rider||o.finished)continue;const g=o.distance-rider.distance;if(g>0&&g<26&&Math.abs(o.laneOffset-rider.laneOffset)<11){draft=1-(globalThis.KF_TUNE?.draft??.55)*(rider.profile.draftSkill??.75);break;}}
   }
   const load=(.0022+(this.mode===RACE_MODE.TEACHER?.0105:(globalThis.KF_TUNE?.k??.020))*demand*demand)*factor*draft/Math.max(.55,rider.profile.endurance);
-  rider.energy=clamp(rider.energy-load*dt,0,1);
+  // 周長が違っても「残り2周で使える脚」は同じ: 長いバンクほど1mあたりの脚の減りを小さくする
+  // (333バンクはそのまま = 短い直線で逃げが残りやすい。実データでも333は逃げの1着が多い)
+  const scaleK=this.lapScale??1;
+  const bankK=this.mode!==RACE_MODE.TEACHER&&scaleK>1?Math.pow(scaleK,-(globalThis.KF_TUNE?.bankE??1)):1;
+  rider.energy=clamp(rider.energy-load*bankK*dt,0,1);
  }
 
  _updateLaneMotion(rider, targetLane, plan, dt){
@@ -428,7 +439,7 @@ export class PhysicsEngine{
   }else{rider.boxedBy=null;rider.boxedFor=0;}
 
   // コーナーで外を回ると遠回りになる (捲りは脚を使う)
-  const geo=this.mode!==RACE_MODE.TEACHER?pathFactor(rider.distance,rider.laneOffset,TRACK_LANE.INNER):1;
+  const geo=this.mode!==RACE_MODE.TEACHER?pathFactor(rider.distance,rider.laneOffset,TRACK_LANE.INNER,this.profile.TRACK_LENGTH):1;
   let next=rider.distance+rider.speed*dt*geo;
   const target=rider.followTargetNumber?this.rider(rider.followTargetNumber):null;
   if(target&&!target.finished&&target.distance>rider.distance&&plan.action===ACTION.FOLLOW){
@@ -515,5 +526,5 @@ export class PhysicsEngine{
   return buildStory({setup:this.setup,prediction:this.prediction,snapshots:this.recorder.snapshots,logs:this.decisionLogs,ranking,names:this.setup.meta?.names??{}});
  }
 
- getState(){return{snapshots:this.recorder.snapshots,riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,mode:this.mode,scenario:this.mode===RACE_MODE.TEACHER?this.scenarioPhaseManager.state():null,protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
+ getState(){return{trackLength:this.profile.TRACK_LENGTH,lapScale:this.lapScale,snapshots:this.recorder.snapshots,riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,mode:this.mode,scenario:this.mode===RACE_MODE.TEACHER?this.scenarioPhaseManager.state():null,protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
 }

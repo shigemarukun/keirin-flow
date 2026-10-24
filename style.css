@@ -359,6 +359,7 @@ body #app {
 
 /* 見たい場面から再生 */
 #jump-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; padding: 8px 10px; border-top: 1px solid rgba(148, 163, 184, 0.18); }
+#jump-bar .cam-toggle { white-space: nowrap; border-color: rgba(56, 189, 248, 0.5); background: rgba(56, 189, 248, 0.1); color: #bae6fd; }
 #jump-bar .jb-label { color: var(--muted); font-size: 0.75rem; margin-right: 2px; }
 #jump-bar button { min-height: 34px; padding: 4px 12px; border-radius: 999px; border: 1px solid rgba(250, 204, 21, 0.45); background: rgba(250, 204, 21, 0.08); color: #fde68a; font-weight: 700; font-size: 0.82rem; cursor: pointer; }
 #jump-bar button:active { transform: scale(0.96); }

@@ -96,6 +96,12 @@ window.addEventListener('DOMContentLoaded',()=>{
  const barStatus=document.getElementById('mobile-bar-status');
 
  // 見たい場面から再生 (赤板・打鐘・最終周・バック・直線)
+ // カメラ: 選手を追って寄る / バンク全体を見る (選んだほうを覚えておく)
+ const camBtn=document.getElementById('cam-toggle');
+ const setCam=on=>{ui.setCameraFollow(on);if(camBtn){camBtn.textContent=on?'全体':'追う';camBtn.setAttribute('aria-pressed',String(on));}try{localStorage.setItem('keirin-flow:camera',on?'follow':'all');}catch{}};
+ let camOn=true;try{camOn=localStorage.getItem('keirin-flow:camera')!=='all';}catch{}
+ setCam(camOn);
+ camBtn?.addEventListener('click',()=>setCam(!ui.cameraFollow));
  document.getElementById('jump-bar')?.addEventListener('click',async event=>{
   const b=event.target.closest('[data-rem]');if(!b)return;
   await ensureAudioReady();
@@ -147,7 +153,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   physics.update(dt);
   const state=physics.getState();
   if(state.trackLength&&ui.trackGeometry?.length!==state.trackLength)ui.setTrackLength(state.trackLength);
-  ui.drawBank();ui.drawRiders(state);ui.updateUI(state);
+  ui.updateCamera(state,dt);ui.drawBank();ui.drawRiders(state);ui.updateUI(state);
   const spot=updateCaption(state);if(spot!=null)ui.drawSpotlight(state,spot);
   if(barStatus){
    const rem=Math.max(0,Math.ceil(state.raceClock?.remainingDistance??0));

@@ -55,7 +55,7 @@ function riderEvalHtml(setup, forecast, marks) {
     <p class="ri-help">地力は、競走得点に級班(長い目で見た実力)と経歴(元S級・特別昇級など)を加えて決めています。並びは周回の前から。</p></details>`;
 }
 
-const RUNS = 30;
+const RUNS = 60; // 何通りもの未来の回数 (30回で先に見せ、60回まで走らせて精度を上げる)
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pct = v => `${Math.round(v * 100)}%`;
 const CAR_BG = { 1: '#ffffff', 2: '#222222', 3: '#e60012', 4: '#0068b7', 5: '#ffd400', 6: '#00a651', 7: '#f08300', 8: '#ff69b4', 9: '#7f3fbf' };
@@ -114,11 +114,11 @@ export function mountForecastPanel(container, { onWatch } = {}) {
       <div class="ad-box">
         <div class="fc-label">この展開の買い目 <small>3連単 ${adv.points}点・${esc(adv.difficulty)}・この展開の約${Math.round(adv.cover * 100)}%を押さえる</small></div>
         ${adv.thin ? `<p class="ad-thin">この展開は${forecast.n}回中${adv.n}回だけなので、参考程度に</p>` : ''}
-        ${row('本命', adv.honmei, 'ad-honmei')}${row('抑え', adv.osae, 'ad-osae')}${row('穴', adv.ana, 'ad-ana')}
+        ${row('本命', adv.honmei, 'ad-honmei')}${row('抑え', adv.osae, 'ad-osae')}${row('波乱', adv.ana, 'ad-ana')}
         ${adv.notes.length ? `<ul class="ad-notes">${adv.notes.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
         <button type="button" class="secondary-btn ad-copy">買い目をコピー</button>
         <p class="ri-help ad-copied" role="status"></p>
-        <p class="ri-help">オッズは使っていません。穴は「AIの見立てでは確率が低いけど、この展開なら起きうる」組み合わせです。</p>
+        <p class="ri-help">オッズは使っていません。波乱は「AIの見立てでは確率が低いけど、この展開なら起きうる」組み合わせです (配当の高さではありません)。</p>
       </div>`;
     }
 
@@ -129,6 +129,7 @@ export function mountForecastPanel(container, { onWatch } = {}) {
       html += `
         <div class="fc-future">
           <div class="fc-label">何通りもの未来 <small>(調子を変えて${forecast.n}回)</small></div>
+          ${state.refining ? `<p class="ri-help fc-refining">さらに走らせて精度を上げています… ${progress}/${RUNS}</p>` : ''}
           <div class="fc-bars">
             ${cars.map(c => `
               <div class="fc-bar-row">
@@ -139,8 +140,8 @@ export function mountForecastPanel(container, { onWatch } = {}) {
           </div>
           <p class="ri-help">◎○▲=1着になりやすい順、△=3着以内に入りやすい。濃い色=1着になった割合、薄い色=3着以内に入った割合</p>
           <div class="fc-grid">
-            <div><div class="fc-sub">よく出た3連単</div>${forecast.trifecta.map(t => `<div class="fc-combo">${combo(t.key)}<span>${pct(t.rate)}</span></div>`).join('')}</div>
-            <div><div class="fc-sub">よく出た2車単</div>${forecast.exacta.map(t => `<div class="fc-combo">${combo(t.key)}<span>${pct(t.rate)}</span></div>`).join('')}</div>
+            <div><div class="fc-sub">3連単の見立て</div>${forecast.trifecta.map(t => `<div class="fc-combo">${combo(t.key)}<span>${pct(t.rate)}</span></div>`).join('')}</div>
+            <div><div class="fc-sub">2車単の見立て</div>${forecast.exacta.map(t => `<div class="fc-combo">${combo(t.key)}<span>${pct(t.rate)}</span></div>`).join('')}</div>
           </div>
           <div class="fc-sub">展開の分かれ道</div>
           <ul class="fc-branches">
@@ -193,7 +194,8 @@ export function mountForecastPanel(container, { onWatch } = {}) {
         if (msg.id !== jobId) return;
         if (msg.type === 'main') state.main = msg.main;
         if (msg.type === 'progress') state.progress = msg.done;
-        if (msg.type === 'forecast') state.forecast = msg.forecast;
+        if (msg.type === 'partial') { state.forecast = msg.forecast; state.refining = true; }
+        if (msg.type === 'forecast') { state.forecast = msg.forecast; state.refining = false; }
         if (msg.type === 'error') { worker = null; runOnMainThread(plain, id); return; }
         render();
       };

@@ -7,6 +7,7 @@
 // 乱数は種(seed)から作るので、同じ出走表なら何度やっても同じ予想になる。
 
 import { PhysicsEngine } from './engine.js';
+import { buildModel, trifectaTable } from './prob.js';
 
 const STEP = 1 / 120;
 
@@ -76,14 +77,8 @@ export function predictRace(setup) {
   return runRace(setup);
 }
 
-export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {}) {
-  const cars = Object.keys(setup.riders).map(Number);
-  const win = Object.fromEntries(cars.map(c => [c, 0]));
-  const top2 = Object.fromEntries(cars.map(c => [c, 0]));
-  const top3 = Object.fromEntries(cars.map(c => [c, 0]));
-  const exacta = new Map(), trifecta = new Map(), kimarite = new Map(), backLeader = new Map();
-  let tsuppari = 0, cut = 0;
-  const chigire = Object.fromEntries(cars.map(c => [c, 0]));
+// partialAt: その回数まで走ったところで、途中の予想も onPartial で返す (先に見せて、あとから精度を上げる)
+export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress, partialAt = null, onPartial } = {}) {
   const runs = [];
   for (let i = 0; i < n; i++) {
     const runSeed = seed + i * 7919;
@@ -95,20 +90,37 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
     const mainLine = home == null ? null : (setup.lines.find(l => l.members.includes(home))?.leader ?? home);
     const frontCar = setup.formation?.[0]?.[0];
     runs.push({ seed: runSeed, order, kimarite: r.kimarite, story: r.story, condition, mainLine, frontPlan: setup.riders[frontCar]?.frontResponse ?? r.frontPlan ?? null, frontCar, ev: r.events });
+    onProgress?.(i + 1, n);
+    if (partialAt && i + 1 === partialAt && partialAt < n) onPartial?.(summarizeRuns(setup, runs));
+  }
+  return summarizeRuns(setup, runs);
+}
+
+// 走らせた回をまとめて、1着率・3着内率・展開・印・確率の見立てにする
+export function summarizeRuns(setup, runs) {
+  const n = runs.length;
+  const cars = Object.keys(setup.riders).map(Number);
+  const zero = () => Object.fromEntries(cars.map(c => [c, 0]));
+  const win = zero(), top2 = zero(), top3 = zero(), chigire = zero();
+  const kimarite = new Map(), backLeader = new Map();
+  let tsuppari = 0, cut = 0;
+  for (const r of runs) {
+    const order = r.order;
     win[order[0]]++; for (const c of order.slice(0, 2)) top2[c]++; for (const c of order.slice(0, 3)) top3[c]++;
-    const ex = `${order[0]}-${order[1]}`, tri = `${order[0]}-${order[1]}-${order[2]}`;
-    exacta.set(ex, (exacta.get(ex) ?? 0) + 1); trifecta.set(tri, (trifecta.get(tri) ?? 0) + 1);
     const k = r.kimarite?.how ?? '不明';
     kimarite.set(k, (kimarite.get(k) ?? 0) + 1);
-    if (r.events.backLeader != null) backLeader.set(r.events.backLeader, (backLeader.get(r.events.backLeader) ?? 0) + 1);
-    if (r.events.tsuppari) tsuppari++;
-    if (r.events.cutSucceeded) cut++;
-    for (const c of r.events.chigire ?? []) chigire[c] = (chigire[c] ?? 0) + 1;
-    onProgress?.(i + 1, n);
+    if (r.ev.backLeader != null) backLeader.set(r.ev.backLeader, (backLeader.get(r.ev.backLeader) ?? 0) + 1);
+    if (r.ev.tsuppari) tsuppari++;
+    if (r.ev.cutSucceeded) cut++;
+    for (const c of r.ev.chigire ?? []) chigire[c] = (chigire[c] ?? 0) + 1;
   }
   const top = (map, k) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([key, count]) => ({ key, rate: count / n }));
   const rate = obj => Object.fromEntries(Object.entries(obj).map(([c, v]) => [c, v / n]));
   const scenarios = pickScenarios(runs, n);
+  // 2車単・3連単は、出た回数ではなく確率の見立て (1着→2着→3着を数えてならす。prob.js)
+  const model = buildModel(runs.map(r => r.order), cars);
+  const tri = trifectaTable(model, cars);
+  const ex = cars.flatMap(a => cars.filter(b => b !== a).map(b => ({ key: `${a}-${b}`, rate: model.first[a] * model.second[a][b] }))).sort((x, y) => y.rate - x.rate);
   return {
     n,
     scenarios,
@@ -117,7 +129,7 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
     // 買い目のアドバイス用に、1回ごとの着順と展開を軽くして残す
     runs: runs.map(r => ({ order: r.order, mainLine: r.mainLine, how: r.kimarite?.how ?? null, ev: { chigire: r.ev.chigire, kamashi: r.ev.kamashi, makuri: r.ev.makuri, banteMakuriBy: r.ev.banteMakuriBy } })),
     win: rate(win), top2: rate(top2), top3: rate(top3),
-    exacta: top(exacta, 5), trifecta: top(trifecta, 5),
+    exacta: ex.slice(0, 5), trifecta: tri.slice(0, 5).map(x => ({ key: x.key, rate: x.p })),
     kimarite: top(kimarite, 3),
     backLeader: top(backLeader, 3),
     branches: { tsuppari: tsuppari / n, cutSucceeded: cut / n },
@@ -125,7 +137,7 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
   };
 }
 
-// よく起きる展開を「本線 / 対抗 / 穴」としてまとめる。
+// よく起きる展開を「本線 / 対抗 / 波乱」としてまとめる。
 // 1-2着の組み合わせが同じ未来をひとまとめにして、多い順に3つ。
 // それぞれ、その中で一番よく出た3着までの並びになった1回を代表にする (その回をコースで再生できる)。
 const PLAN_LABEL = { TSUPPARI: '突っ張る', HIKU: '引く', CHUDAN: '中団を取る' };
@@ -137,7 +149,7 @@ export function pickScenarios(runs, n) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   }
-  const labels = ['本線', '対抗', '穴'];
+  const labels = ['本線', '対抗', '波乱'];
   return [...groups.entries()]
     .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
     .slice(0, 3)

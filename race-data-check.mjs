@@ -215,11 +215,11 @@ check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い
   check(/後方まで引いて/.test(hiku.text) && bellOrder(hiku).indexOf(1) > bellOrder(hiku).indexOf(4), '「引く」: 前受けが誘導切りを前に入れて、後方まで下げる (打鐘で中団のラインより後ろ)', bellOrder(hiku).join(''));
   check(/中団を取る/.test(chudan.text) && bellOrder(chudan).indexOf(1) < bellOrder(chudan).indexOf(4), '「中団」: 前受けが誘導切りを前に入れて、その後ろを取る (打鐘で中団)', bellOrder(chudan).join(''));
   check(/突っ張/.test(tsu.text), '「突っ張る」: 前受けが誘導切りに来た相手を突っ張る');
-  // EXデータがある選手は、何通りもの未来で 突っ張る / 引く / 中団 を割合で選び、本線・対抗・穴が展開ごとに分かれる
+  // EXデータがある選手は、何通りもの未来で 突っ張る / 引く / 中団 を割合で選び、本線・対抗・波乱が展開ごとに分かれる
   const d = base(); d.riders[0].score = 115; d.riders[0].ex = { tactics: { tsuppari: { s: 5, n: 7 }, kamashi: { s: 3, n: 5 } }, finish: { asLeader: { n: 60, w: { s: 12, n: 60 }, p2: { s: 8, n: 60 }, p3: { s: 6, n: 60 } }, asBante: { n: 3, w: { s: 1, n: 3 }, p2: null, p3: null } } };
   const f = forecastRaces(toRaceSetup(d), 24);
   const themes = f.scenarios.map(x => x.theme);
-  check(themes.length >= 2 && themes.every(t => /番ラインが主導権/.test(t)) && new Set(themes).size === themes.length, '本線・対抗・穴は「どのラインが主導権を取るか」で分かれ、展開の名前が付く', themes.join(' / '));
+  check(themes.length >= 2 && themes.every(t => /番ラインが主導権/.test(t)) && new Set(themes).size === themes.length, '本線・対抗・波乱は「どのラインが主導権を取るか」で分かれ、展開の名前が付く', themes.join(' / '));
 }
 
 // ---------- 展開ごとの買い目アドバイス (3連単) ----------
@@ -233,7 +233,7 @@ check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い
   const wild = mk(Array.from({ length: 30 }, () => [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => rnd() - .5)));
   const aw = buildAdvice({ runs: wild, scenario: { mainLine: 1 }, marks: { 1: '◎', 2: '○', 3: '▲' } });
   check(aw.points > af.points && aw.points <= 24 && aw.difficulty === '荒れそう', '荒れる展開ほど点数が増える (最大24点)', `${aw.points}点`);
-  check(aw.ana.every(x => x.key.split('-').slice(0, 2).some(c => !['1', '2', '3'].includes(c))), '穴は、印の薄い選手が1・2着に絡む組み合わせ');
+  check(aw.ana.every(x => x.key.split('-').slice(0, 2).some(c => !['1', '2', '3'].includes(c))), '波乱は、印の薄い選手が1・2着に絡む組み合わせ');
   check(JSON.stringify(groupedKeys([{ key: '2-4-9' }, { key: '2-4-5' }, { key: '3-4-9' }])) === '["2-4-9,5","3-4-9"]' && /本命: 1-2-3/.test(adviceText(af)),
     '買い目は1・2着が同じものをまとめて書く (例 2-4-9,5)、コピー用の文字も作れる');
   const thin = buildAdvice({ runs: [...firm, ...mk([[3, 4, 5, 1, 2, 6, 7]], 3)], scenario: { mainLine: 3 }, marks: {} });

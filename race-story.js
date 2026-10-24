@@ -147,8 +147,10 @@ export function buildStory({ setup, prediction, snapshots, logs, ranking, names 
 
   // バック・直線
   if (snapshots.back) add('バック', `バックでは ${fmtOrder(snapshots.back.order, lineOf)}。`);
+  // 脚が一杯になった選手: 着外ならタレた、3着以内なら苦しいながらも粘った
+  const top3Cars = ranking.slice(0, 3).map(r => r.number);
   const tired = riderLogs.filter(l => l.category === 'FATIGUE' && l.remaining <= 260).slice(0, 2);
-  for (const t of tired) add('直線', `${name(t.riderNumber)}は脚が一杯でタレる。`);
+  for (const t of tired) add('直線', top3Cars.includes(t.riderNumber) ? `${name(t.riderNumber)}は脚が一杯になりながらも粘る。` : `${name(t.riderNumber)}は脚が一杯でタレる。`);
   const inner = firstLog(riderLogs, l => /内を突く/.test(l.message));
   if (inner && ranking.slice(0, 3).some(r => r.number === inner.riderNumber)) add('直線', `${name(inner.riderNumber)}が内を突いて伸びる。`);
 

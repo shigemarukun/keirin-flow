@@ -4,6 +4,7 @@ import { UIRenderer } from './ui.js';
 import { mountRaceInput } from './race-input.js';
 import { mountTacticsPanel } from './tactics-panel.js';
 import { mountForecastPanel } from './forecast-panel.js';
+import { withCondition } from './forecast.js';
 import { mountResultsPanel } from './results-panel.js';
 import { shareUrl } from './race-input.js';
 
@@ -20,8 +21,16 @@ window.addEventListener('DOMContentLoaded',()=>{
  };
  renderSetup(setup);
  // AIの展開予想: 出走表や展開を変えるたびに計算し直す
- const watchRace=async()=>{await ensureAudioReady();physics.reset();physics.start();document.getElementById('bank-container')?.scrollIntoView({behavior:'smooth',block:'start'});};
- const forecast=mountForecastPanel(document.getElementById('forecast-ui'),{onWatch:()=>watchRace()});
+ // baseSetup: 出走表と展開の指定から作った、そのままのレース設定 (調子のゆらぎなし)
+ let baseSetup=physics.getState().setup;
+ // seed を渡すと、AIが「何通りもの未来」で走らせたうちの、その1回 (その日の調子) をそのまま再生する
+ const watchRace=async(seed=null)=>{
+  await ensureAudioReady();
+  physics.applyRaceSetup(seed==null?baseSetup:withCondition(baseSetup,seed).setup);
+  physics.reset();physics.start();
+  document.getElementById('bank-container')?.scrollIntoView({behavior:'smooth',block:'start'});
+ };
+ const forecast=mountForecastPanel(document.getElementById('forecast-ui'),{onWatch:seed=>watchRace(seed)});
 
  let audioContext=null;
  const ensureAudioReady=async()=>{try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return false;audioContext??=new C();if(audioContext.state==='suspended')await audioContext.resume();return audioContext.state==='running';}catch{return false;}};
@@ -37,6 +46,7 @@ window.addEventListener('DOMContentLoaded',()=>{
  // Future drag/drop or slider UI entry point.
  window.KEIRIN_FLOW_APPLY_SETUP=(newSetup)=>{
   physics.applyRaceSetup(newSetup);
+  baseSetup=physics.getState().setup;
   renderSetup(physics.getState().setup);
   ui.renderDecisionLog?.([]);
   forecast.update(physics.getState().setup);
@@ -48,13 +58,13 @@ window.addEventListener('DOMContentLoaded',()=>{
  const raceInput=mountRaceInput(document.getElementById('race-input-ui'),{onApply:newSetup=>{window.KEIRIN_FLOW_APPLY_SETUP(newSetup);tactics?.render();}});
  tactics=mountTacticsPanel(document.getElementById('tactics-ui'),{
   getData:()=>raceInput?.getData(),apply:data=>raceInput.apply(data),
-  getSetup:()=>physics.getState().setup,getPrediction:()=>physics.getPrediction()
+  getSetup:()=>baseSetup,getPrediction:()=>physics.getPrediction()
  });
  tactics.render();
  document.getElementById('btn-run-tactics')?.addEventListener('click',()=>watchRace());
 
  // 答え合わせ
- results=mountResultsPanel(document.getElementById('results-ui'),{getSetup:()=>physics.getState().setup,getForecast:()=>forecast.getLast()});
+ results=mountResultsPanel(document.getElementById('results-ui'),{getSetup:()=>baseSetup,getForecast:()=>forecast.getLast()});
 
  // この予想 (出走表 + 展開の指定) をリンクにして送る
  document.getElementById('btn-share')?.addEventListener('click',async()=>{

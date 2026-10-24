@@ -36,7 +36,8 @@ export function mountResultsPanel(container, { getSetup, getForecast }) {
     const fc = getForecast();
     const out = container.querySelector('.rs-out');
     if (!fc?.main) { out.innerHTML = '<p class="ri-help">AIの予想の計算が終わるまで少し待ってください。</p>'; return; }
-    const ai = fc.main.ranking.map(r => r.number);
+    // AIの本命 = 何通りもの未来で一番よく起きた展開 (本線)。まだ計算中なら能力どおりの1レース
+    const ai = fc.forecast?.scenarios?.[0]?.order ?? fc.main.ranking.map(r => r.number);
     const [a1, a2, a3] = picked;
     const winHit = ai[0] === a1, exactaHit = ai[0] === a1 && ai[1] === a2, trifectaHit = exactaHit && ai[2] === a3;
     const tri = `${a1}-${a2}-${a3}`;

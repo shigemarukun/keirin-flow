@@ -70,10 +70,13 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
   const top3 = Object.fromEntries(cars.map(c => [c, 0]));
   const exacta = new Map(), trifecta = new Map(), kimarite = new Map(), backLeader = new Map();
   let tsuppari = 0, cut = 0;
+  const runs = [];
   for (let i = 0; i < n; i++) {
-    const { setup: s } = withCondition(setup, seed + i * 7919);
+    const runSeed = seed + i * 7919;
+    const { setup: s, condition } = withCondition(setup, runSeed);
     const r = runRace(s);
     const order = r.ranking.map(x => x.number);
+    runs.push({ seed: runSeed, order, kimarite: r.kimarite, story: r.story, condition });
     win[order[0]]++; for (const c of order.slice(0, 2)) top2[c]++; for (const c of order.slice(0, 3)) top3[c]++;
     const ex = `${order[0]}-${order[1]}`, tri = `${order[0]}-${order[1]}-${order[2]}`;
     exacta.set(ex, (exacta.get(ex) ?? 0) + 1); trifecta.set(tri, (trifecta.get(tri) ?? 0) + 1);
@@ -88,10 +91,50 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
   const rate = obj => Object.fromEntries(Object.entries(obj).map(([c, v]) => [c, v / n]));
   return {
     n,
+    scenarios: pickScenarios(runs, n),
+    marks: marksFrom(rate(win), rate(top3)),
     win: rate(win), top2: rate(top2), top3: rate(top3),
     exacta: top(exacta, 5), trifecta: top(trifecta, 5),
     kimarite: top(kimarite, 3),
     backLeader: top(backLeader, 3),
     branches: { tsuppari: tsuppari / n, cutSucceeded: cut / n }
   };
+}
+
+// よく起きる展開を「本線 / 対抗 / 穴」としてまとめる。
+// 1-2着の組み合わせが同じ未来をひとまとめにして、多い順に3つ。
+// それぞれ、その中で一番よく出た3着までの並びになった1回を代表にする (その回をコースで再生できる)。
+export function pickScenarios(runs, n) {
+  const groups = new Map();
+  for (const r of runs) {
+    const key = `${r.order[0]}-${r.order[1]}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  const labels = ['本線', '対抗', '穴'];
+  return [...groups.entries()]
+    .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+    .slice(0, 3)
+    .map(([key, list], i) => {
+      const tri = new Map();
+      for (const r of list) { const t = r.order.slice(0, 3).join('-'); tri.set(t, (tri.get(t) ?? 0) + 1); }
+      const bestTri = [...tri.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      const rep = list.find(r => r.order.slice(0, 3).join('-') === bestTri);
+      // この展開になったときの、調子の目立つ選手 (平均)
+      const cond = {};
+      for (const r of list) for (const [car, c] of Object.entries(r.condition)) cond[car] = (cond[car] ?? 0) + c / list.length;
+      const notable = Object.entries(cond).filter(([, c]) => Math.abs(c) >= 0.012).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 2)
+        .map(([car, c]) => ({ car: Number(car), condition: c }));
+      return { label: labels[i], exacta: key, count: list.length, rate: list.length / n, seed: rep.seed, order: rep.order, kimarite: rep.kimarite, story: rep.story, notable };
+    });
+}
+
+// 印: 1着になりやすい順に ◎ ○ ▲、残りで3着以内に入りやすい2人に △
+export function marksFrom(win, top3) {
+  const cars = Object.keys(win).map(Number);
+  const byWin = [...cars].sort((a, b) => (win[b] - win[a]) || (top3[b] - top3[a]) || a - b);
+  const marks = {};
+  ['◎', '○', '▲'].forEach((m, i) => { if (byWin[i] != null && (win[byWin[i]] > 0 || top3[byWin[i]] > 0)) marks[byWin[i]] = m; });
+  cars.filter(c => !marks[c]).sort((a, b) => (top3[b] - top3[a]) || a - b).slice(0, 2).forEach(c => { if (top3[c] > 0.15) marks[c] = '△'; });
+  return marks;
 }

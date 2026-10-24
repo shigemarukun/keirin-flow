@@ -22,19 +22,36 @@ export function mountForecastPanel(container, { onWatch } = {}) {
     const { main, forecast, progress, names } = state;
     if (!main) { container.innerHTML = '<p class="empty-result">予想を計算中…</p>'; return; }
     const name = n => names[n] ? `<small>${esc(names[n])}</small>` : '';
-    const top3 = main.ranking.slice(0, 3);
-    const k = main.kimarite;
+    const marks = forecast?.marks ?? {};
+    const mark = n => marks[n] ? `<b class="fc-mark">${marks[n]}</b>` : '';
 
-    let html = `
+    // 表示する展開: 未来の計算が終わったら「本線 / 対抗 / 穴」、それまでは能力どおりの1レース
+    const scenarios = forecast?.scenarios ?? [];
+    const sel = Math.min(state.sel ?? 0, Math.max(0, scenarios.length - 1));
+    const sc = scenarios[sel] ?? null;
+    const shown = sc ?? { order: main.ranking.map(r => r.number), kimarite: main.kimarite, story: main.story, seed: null };
+    const top3 = shown.order.slice(0, 3);
+    const k = shown.kimarite;
+
+    let html = '';
+    if (scenarios.length) {
+      html += `<div class="fc-tabs" role="tablist">${scenarios.map((x, i) => `
+        <button type="button" role="tab" class="fc-tab${i === sel ? ' is-on' : ''}" data-sel="${i}" aria-selected="${i === sel}">
+          <span>${esc(x.label)}</span><strong>${combo(x.exacta)}</strong><small>${forecast.n}回中${x.count}回</small>
+        </button>`).join('')}</div>`;
+    }
+    const cond = (sc?.notable ?? []).map(x => `${x.car}番の調子が${x.condition > 0 ? '良い' : '重い'}`).join('、');
+    html += `
       <div class="fc-main">
-        <div class="fc-label">AIの本命</div>
-        <div class="fc-order">${top3.map((r, i) => `<span class="fc-place"><em>${i + 1}着</em>${carChip(r.number)}${name(r.number)}</span>`).join('')}</div>
-        ${k ? `<div class="fc-kimarite">決まり手: <strong>${esc(k.how)}</strong></div>` : ''}
+        <div class="fc-label">${sc ? `AIの${esc(sc.label)}の展開` : 'AIの予想 <small>(何通りもの未来を計算中…)</small>'}</div>
+        <div class="fc-order">${top3.map((n, i) => `<span class="fc-place"><em>${i + 1}着</em>${carChip(n)}${mark(n)}${name(n)}</span>`).join('')}</div>
+        ${k ? `<div class="fc-kimarite">決まり手: <strong>${esc(k.how)}</strong>${sc ? ` ・ ${forecast.n}回中${sc.count}回 (${pct(sc.rate)})` : ''}</div>` : ''}
+        ${cond ? `<div class="fc-cond">この展開になりやすい日: ${esc(cond)}</div>` : ''}
       </div>
       <ol class="fc-story">
-        ${main.story.map(s => `<li><span class="fc-phase">${esc(s.phase)}</span><span>${esc(s.text)}</span></li>`).join('')}
+        ${shown.story.map(s => `<li><span class="fc-phase">${esc(s.phase)}</span><span>${esc(s.text)}</span></li>`).join('')}
       </ol>
-      <button type="button" class="primary-btn fc-watch">▶ この展開をコースで見る</button>`;
+      <button type="button" class="primary-btn fc-watch" data-seed="${shown.seed ?? ''}">▶ この展開をコースで見る</button>`;
 
     if (!forecast) {
       html += `<div class="fc-future"><div class="fc-label">何通りもの未来</div><p class="ri-help">選手の調子を少しずつ変えて${RUNS}回走らせています… ${progress}/${RUNS}</p></div>`;
@@ -46,12 +63,12 @@ export function mountForecastPanel(container, { onWatch } = {}) {
           <div class="fc-bars">
             ${cars.map(c => `
               <div class="fc-bar-row">
-                ${carChip(c)}
+                ${carChip(c)}<b class="fc-mark fc-mark-bar">${marks[c] ?? ''}</b>
                 <div class="fc-bar"><i class="fc-bar-top3" style="width:${forecast.top3[c] * 100}%"></i><i class="fc-bar-win" style="width:${forecast.win[c] * 100}%"></i></div>
                 <span class="fc-bar-num">1着${pct(forecast.win[c])}<br><small>3着内${pct(forecast.top3[c])}</small></span>
               </div>`).join('')}
           </div>
-          <p class="ri-help">濃い色=1着になった割合、薄い色=3着以内に入った割合</p>
+          <p class="ri-help">◎○▲=1着になりやすい順、△=3着以内に入りやすい。濃い色=1着になった割合、薄い色=3着以内に入った割合</p>
           <div class="fc-grid">
             <div><div class="fc-sub">よく出た3連単</div>${forecast.trifecta.map(t => `<div class="fc-combo">${combo(t.key)}<span>${pct(t.rate)}</span></div>`).join('')}</div>
             <div><div class="fc-sub">よく出た2車単</div>${forecast.exacta.map(t => `<div class="fc-combo">${combo(t.key)}<span>${pct(t.rate)}</span></div>`).join('')}</div>
@@ -68,7 +85,10 @@ export function mountForecastPanel(container, { onWatch } = {}) {
   };
 
   container.addEventListener('click', event => {
-    if (event.target.closest('.fc-watch')) onWatch?.();
+    const tab = event.target.closest('.fc-tab');
+    if (tab) { state.sel = Number(tab.dataset.sel); render(); return; }
+    const w = event.target.closest('.fc-watch');
+    if (w) onWatch?.(w.dataset.seed ? Number(w.dataset.seed) : null);
   });
 
   const runOnMainThread = (setup, id) => {
@@ -86,7 +106,7 @@ export function mountForecastPanel(container, { onWatch } = {}) {
   const update = setup => {
     jobId += 1;
     const id = jobId;
-    state = { main: null, forecast: null, progress: 0, names: setup?.meta?.names ?? {} };
+    state = { main: null, forecast: null, progress: 0, sel: 0, names: setup?.meta?.names ?? {} };
     render();
     if (!setup) return;
     const plain = JSON.parse(JSON.stringify(setup));

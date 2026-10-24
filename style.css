@@ -375,3 +375,16 @@ body #app {
     #race-caption .rc-text { display: inline; white-space: normal; -webkit-line-clamp: unset; }
 }
 @media (max-width: 720px) { #race-caption.is-on { transform: none; } }
+
+/* 本線 / 対抗 / 穴 のタブと印 */
+.fc-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
+.fc-tab { display: grid; gap: 3px; justify-items: center; padding: 8px 4px; border-radius: 10px; cursor: pointer;
+    background: #111827; border: 1px solid rgba(148, 163, 184, 0.3); color: #cbd5e1; font-size: 0.8rem; }
+.fc-tab strong { display: inline-flex; align-items: center; gap: 2px; }
+.fc-tab strong .fc-car { width: 22px; height: 22px; font-size: 0.75rem; }
+.fc-tab small { color: var(--muted); font-size: 0.68rem; }
+.fc-tab.is-on { border-color: #22d3ee; background: rgba(8, 145, 178, 0.18); color: #fff; }
+.fc-mark { color: #facc15; font-size: 0.95rem; margin-left: 2px; }
+.fc-mark-bar { width: 1.1em; text-align: center; margin: 0; }
+.fc-cond { margin-top: 6px; color: #fde68a; font-size: 0.8rem; }
+.fc-bar-row { grid-template-columns: 26px 1.1em 1fr 72px; gap: 6px; }

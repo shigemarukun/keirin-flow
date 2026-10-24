@@ -394,3 +394,9 @@ body #app {
 .ri-venue label { display: grid; gap: 4px; font-size: 0.8rem; color: #cbd5e1; }
 .ri-venue select, .ri-venue input { width: 100%; box-sizing: border-box; padding: 7px 6px; font-size: 16px; color: #f8fafc; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 6px; }
 .ri-bank-note { color: #fde68a; }
+
+/* はじめての方へ */
+.welcome { position: relative; margin: 0 0 14px; padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(56, 189, 248, 0.45); background: rgba(8, 47, 73, 0.55); }
+.welcome h2 { margin: 0 0 6px; font-size: 1rem; color: #7dd3fc; }
+.welcome ol { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; font-size: 0.85rem; line-height: 1.5; color: #e2e8f0; }
+.welcome-close { position: absolute; top: 6px; right: 8px; width: 36px; height: 36px; border: 0; background: transparent; color: #cbd5e1; font-size: 1.3rem; cursor: pointer; }

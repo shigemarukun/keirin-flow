@@ -303,7 +303,7 @@ export class RaceAI {
     const lateAndStillBehind = m.style !== 'OIKOMI' && rem <= 140 && engine.positionRank(rider) >= 4 && rider.energy > .2;
     // the further back we sit, the earlier a makuri has to start
     const behindBy = lead ? lead.distance - rider.distance : 0;
-    const strikeAt = m.style === 'MAKURI' ? m.strikeAt + clamp((behindBy - 35) * 1.5, 0, 80) : m.strikeAt;
+    const strikeAt = m.style === 'MAKURI' ? m.strikeAt + clamp((behindBy - 35) * (globalThis.KF_TUNE?.mkb ?? 1.5), 0, globalThis.KF_TUNE?.mkc ?? 80) : m.strikeAt;
     const strikeNow = (!m.gaveUp && rem <= strikeAt && rider.energy > .25) || (m.gaveUp && rem <= Math.min(m.strikeAt, 260) && rider.energy > .22) || lateAndStillBehind || m.struck;
     if (strikeNow && rider.energy > .08) {
       if (!m.struck) m.struck = true;

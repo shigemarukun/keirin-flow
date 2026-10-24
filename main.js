@@ -108,7 +108,7 @@ window.addEventListener('DOMContentLoaded',()=>{
  const capPhase=caption?.querySelector('.rc-phase'),capText=caption?.querySelector('.rc-text');
  const KEY=/誘導切り|突っ張|出させ|先行|叩|カマ|捲り|番手|ブロック|牽制|切り替え|踏み合い|タレ|内を突|包まれ|飲み込|競り|打鐘/;
  const phaseOf=rem=>rem>770?'周回':rem>600?'赤板':rem>400?'打鐘':rem>200?'最終周':rem>65?'バック〜4角':rem>0?'直線':'ゴール';
- let shownId=null;
+ let shownId=null,finishCaption=null;
  const updateCaption=state=>{
   if(!caption)return;
   const now=state.elapsedTime;
@@ -120,10 +120,25 @@ window.addEventListener('DOMContentLoaded',()=>{
   const rem400=rem/(state.lapScale??1);
   if(capPhase){const ph=state.isStarted||rem<total?phaseOf(rem400):'';if(capPhase.textContent!==ph)capPhase.textContent=ph;}
   if(pick&&pick.id!==shownId){shownId=pick.id;capText.textContent=pick.riderNumber!=null?`${pick.riderNumber}番 ${pick.message.replace(/\s*\(.*?\)\s*$/,'').replace(/^残\d+mで?/,'').replace(/^残\d+mから/,'')}`:pick.message;caption.classList.add('is-on');caption.dataset.rider=pick.riderNumber??'';}
+  // ゴールしたら結果と決まり手を出し続ける
+  if((state.ranking?.length??0)>=Math.min(3,state.riders.length)){
+   const k=finishCaption??=(()=>{try{return physics.getStory()?.kimarite?.how??'';}catch{return '';}})();
+   const top=[...state.ranking].sort((a,b)=>a.time-b.time).slice(0,3).map(r=>r.number).join('-');
+   const text=`ゴール ${top}${k?` (${k})`:''}`;
+   if(capText.textContent!==text){capText.textContent=text;caption.classList.add('is-on');}
+   if(capPhase&&capPhase.textContent!=='結果')capPhase.textContent='結果';
+   return state.ranking[0]?.number??null;
+  }
+  finishCaption=null;
   if(!pick&&caption.classList.contains('is-on')){caption.classList.remove('is-on');caption.dataset.rider='';}
   if(!state.isStarted&&rem>=total){caption.classList.remove('is-on');}
   return pick?.riderNumber??null;
  };
+
+ // はじめての方へ (一度閉じたら出さない)
+ const welcome=document.getElementById('welcome');
+ try{if(welcome&&!localStorage.getItem('keirin-flow:welcome-closed'))welcome.hidden=false;}catch{if(welcome)welcome.hidden=false;}
+ welcome?.querySelector('.welcome-close')?.addEventListener('click',()=>{welcome.hidden=true;try{localStorage.setItem('keirin-flow:welcome-closed','1');}catch{}});
 
  let lastTime=performance.now();
  const frame=now=>{

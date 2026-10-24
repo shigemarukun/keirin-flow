@@ -34,19 +34,12 @@ export function withCondition(setup, seed, spread = 0.03) {
   }
   // 作戦もレースごとに変わる: 前受けになったら 突っ張る / 引く / 中団 を、その選手のくせ(割合)で選ぶ。
   // かましの多い選手は、ときどきカマシに出る (ユーザーが指定していれば、その指定のまま)
-  const plans = {};
   for (const [car, r] of Object.entries(s.riders)) {
-    // (割合で選ぶのは、EXデータから割合が出ている選手だけ。無い選手は、その場で相手と比べて決める)
-    if (!r.frontResponse && r.frontPlanProbs && r.frontPlanFromEx && (globalThis.KF_TUNE?.fp ?? 1)) {
-      let x = rnd(), pick = null;
-      for (const [plan, p] of Object.entries(r.frontPlanProbs)) { x -= p; if (x <= 0) { pick = plan; break; } }
-      r.frontPlan = pick ?? 'HIKU';
-      if (r.mindset) r.mindset = r.frontPlan === 'TSUPPARI' ? 'TSUPPARI' : r.frontPlan === 'CHUDAN' ? 'YIELD_AND_ROLL' : 'CONTAIN';
-      plans[car] = r.frontPlan;
-    }
+    // 前受けの動きは、レースの中で相手を見て選ぶ (race-ai.js)。ここでは、そのレースのゆらぎ (くじ) だけ渡す
+    if (!r.frontResponse && (globalThis.KF_TUNE?.fp ?? 1)) r.frontDraw = rnd();
     if (!r.tactic && r.kamashiFreq != null && rnd() < r.kamashiFreq * 1.5) r.tacticPlan = 'KAMASHI';
   }
-  return { setup: s, condition, plans };
+  return { setup: s, condition };
 }
 
 export function runRace(setup) {
@@ -59,6 +52,7 @@ export function runRace(setup) {
   const logs = e.decisionLogs;
   const has = re => logs.some(l => re.test(l.message));
   return {
+    frontPlan: e.raceAI.pacerCut?.plan ?? null, // 前受けが実際に選んだ動き
     ranking: e.ranking.map(r => ({ number: r.number, time: r.time })),
     story, kimarite,
     snapshots: e.recorder.snapshots,
@@ -93,14 +87,14 @@ export function forecastRaces(setup, n = 40, { seed = 20261024, onProgress } = {
   const runs = [];
   for (let i = 0; i < n; i++) {
     const runSeed = seed + i * 7919;
-    const { setup: s, condition, plans } = withCondition(setup, runSeed);
+    const { setup: s, condition } = withCondition(setup, runSeed);
     const r = runRace(s);
     const order = r.ranking.map(x => x.number);
     // 展開: 最終ホームで先頭を走っていた選手のライン (= 主導権を取ったライン) と、前受けの動き
     const home = r.snapshots.home?.order?.[0] ?? null;
     const mainLine = home == null ? null : (setup.lines.find(l => l.members.includes(home))?.leader ?? home);
     const frontCar = setup.formation?.[0]?.[0];
-    runs.push({ seed: runSeed, order, kimarite: r.kimarite, story: r.story, condition, mainLine, frontPlan: setup.riders[frontCar]?.frontResponse ?? plans?.[frontCar] ?? null, frontCar, ev: r.events });
+    runs.push({ seed: runSeed, order, kimarite: r.kimarite, story: r.story, condition, mainLine, frontPlan: setup.riders[frontCar]?.frontResponse ?? r.frontPlan ?? null, frontCar, ev: r.events });
     win[order[0]]++; for (const c of order.slice(0, 2)) top2[c]++; for (const c of order.slice(0, 3)) top3[c]++;
     const ex = `${order[0]}-${order[1]}`, tri = `${order[0]}-${order[1]}-${order[2]}`;
     exacta.set(ex, (exacta.get(ex) ?? 0) + 1); trifecta.set(tri, (trifecta.get(tri) ?? 0) + 1);

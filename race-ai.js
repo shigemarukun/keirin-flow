@@ -372,24 +372,52 @@ export class RaceAI {
     const cutter = engine.rider(pc.cutterNumber);
     const gap = rider.distance - cutter.distance;
     if (gap > U(engine, 14)) return { action: ACTION.CONTROL_PACE, speed: Math.max(engine.pacer.speed + (engine.pacer.distance - engine.spacing.start - rider.distance) * .3, 0), lane: TRACK_LANE.INNER, reason: '前受けで誘導員の後ろ。外からの上昇を待つ' };
-    const mine = this.strength(rider) + (rider.mindset === MINDSET.TSUPPARI ? .06 : rider.mindset === MINDSET.YIELD_AND_ROLL ? -.20 : 0);
-    const theirs = this.strength(cutter);
-    // 前受けの動き: ユーザーの指定 → なければこのレースでの作戦 (EXデータなどから決めた 突っ張る / 引く / 中団)
-    const forced = rider.profile.frontResponse ?? rider.profile.frontPlan;
-    const label = rider.profile.frontResponse ? '指定どおり、' : '';
-    if (forced === 'HIKU' || forced === 'CHUDAN' || forced === 'YIELD') {
+    // 前受けの動き: ユーザーの指定 → なければ、このレースの条件 (相手との力の差・自分のくせ・ラインの人数) で選ぶ
+    const user = rider.profile.frontResponse;
+    const plan = user ?? (pc.plan ??= this._chooseFrontPlan(rider, cutter, engine, pc));
+    pc.plan = plan;
+    const label = user ? '指定どおり、' : '';
+    const why = user ? '' : ` (${this._planOdds(pc)})`;
+    if (plan === 'HIKU' || plan === 'CHUDAN' || plan === 'YIELD') {
       pc.outcome = 'YIELD';
-      if (forced === 'HIKU') m.hiku = true;
+      if (plan === 'HIKU') m.hiku = true;
       return { action: ACTION.YIELD, speed: engine.pacer.speed - .6, lane: TRACK_LANE.INNER,
-        reason: forced === 'HIKU' ? `${label}${cutter.number}番を出させて後方へ引く (巻き返し狙い)` : `${label}${cutter.number}番を出させて、その後ろの中団を取る` };
+        reason: plan === 'HIKU' ? `${label}${cutter.number}番を出させて後方へ引く (巻き返し狙い)${why}`
+          : plan === 'CHUDAN' ? `${label}${cutter.number}番を出させて、その後ろの中団を取る${why}` : `${label}誘導切りを出させて一旦引く` };
     }
-    if (forced === 'TSUPPARI' || mine > theirs + .02) {
-      pc.outcome = 'CONTEST';
-      this._startContest(cutter, rider, engine, '誘導切りに来た相手を突っ張る');
-      return { action: ACTION.DEFEND, speed: cutter.speed + 1.2, lane: TRACK_LANE.INNER, reason: forced === 'TSUPPARI' ? '指定どおり、外から来た相手を突っ張る' : `外から来た相手を突っ張る (自分${mine.toFixed(2)} > 相手${theirs.toFixed(2)})` };
-    }
-    pc.outcome = 'YIELD';
-    return { action: ACTION.YIELD, speed: engine.pacer.speed - .6, lane: TRACK_LANE.INNER, reason: forced === 'YIELD' ? '指定どおり、誘導切りを出させて一旦引く' : `無理に張り合わず誘導切りを受け入れる (自分${mine.toFixed(2)} ≦ 相手${theirs.toFixed(2)})` };
+    pc.outcome = 'CONTEST';
+    this._startContest(cutter, rider, engine, '誘導切りに来た相手を突っ張る');
+    return { action: ACTION.DEFEND, speed: cutter.speed + 1.2, lane: TRACK_LANE.INNER, reason: `${label}外から来た${cutter.number}番を突っ張る${why}` };
+  }
+
+  // 前受けの選択: 突っ張る / 引く / 中団 を、条件で重み付けして選ぶ (選ぶことと、それが決まるかは別。決まるかは走りで決まる)
+  //   もとの割合 … EXデータの突っ張り回数など (無ければ脚質から)
+  //   相手との力の差 … 自分が上なら突っ張りやすく、下なら前に入れて中団を取りやすい
+  //   ラインの人数 … 3人以上なら引いて巻き返しやすい、単騎なら中団に入りやすい
+  _chooseFrontPlan(rider, cutter, engine, pc) {
+    const T = globalThis.KF_TUNE ?? {};
+    const base = rider.profile.frontPlanProbs ?? { TSUPPARI: .1, HIKU: .45, CHUDAN: .45 };
+    const d = this.strength(rider) - this.strength(cutter) + (rider.mindset === MINDSET.TSUPPARI ? .06 : 0);
+    const size = engine.lineManager?.linesArray?.().find(l => l.members?.includes(rider.number))?.members?.length ?? (rider.role === ROLE.SOLO ? 1 : 2);
+    const u = {
+      TSUPPARI: Math.log(Math.max(.01, base.TSUPPARI ?? .1)) + (T.fkT ?? 10) * d,
+      HIKU: Math.log(Math.max(.01, base.HIKU ?? .45)) + (size >= 3 ? (T.fkL ?? .3) : 0),
+      CHUDAN: Math.log(Math.max(.01, base.CHUDAN ?? .45)) - (T.fkC ?? 5) * d + (size <= 1 ? (T.fkL ?? .3) : 0)
+    };
+    const mx = Math.max(...Object.values(u)), z = Object.values(u).reduce((a, v) => a + Math.exp(v - mx), 0);
+    const probs = Object.fromEntries(Object.entries(u).map(([k, v]) => [k, Math.exp(v - mx) / z]));
+    pc.planProbs = probs;
+    // レースごとのゆらぎ (何通りもの未来) では、この割合どおりに選ぶ。1レースだけ走らせるときは一番ありそうなもの
+    const draw = rider.profile.frontDraw;
+    if (draw == null) return Object.entries(probs).sort((a, b) => b[1] - a[1])[0][0];
+    let x = draw;
+    for (const [k, p] of Object.entries(probs)) { x -= p; if (x <= 0) return k; }
+    return 'HIKU';
+  }
+
+  _planOdds(pc) {
+    const p = pc.planProbs; if (!p) return '';
+    return `見立て: 突っ張り${Math.round(p.TSUPPARI * 100)}%・引き${Math.round(p.HIKU * 100)}%・中団${Math.round(p.CHUDAN * 100)}%`;
   }
 
   _incomingAttack(rider, engine) {

@@ -130,7 +130,9 @@ const hard = src.match(/number\s*===\s*\d|\[\s*\d\s*,\s*\d\s*,\s*\d\s*\]|rider\(
 check(!hard, 'race-ai.js に車番の決め打ちがない', hard ? hard.join(', ') : '');
 
 // 9. keirin-like battles
-const contestSecs = a.logs.filter(l => l.c === 'CONTEST' && /秒の踏み合い/.test(l.m)).map(l => Number(l.m.match(/([\d.]+)秒/)[1]));
+// (前受けが突っ張る展開で確かめる。何も指定しないと、前受けは引くことも多い)
+const tsuRace = (() => { const s = clone(); for (const r of Object.values(s.riders)) r.frontResponse = 'TSUPPARI'; return race(s); })();
+const contestSecs = tsuRace.logs.filter(l => l.c === 'CONTEST' && /秒の踏み合い/.test(l.m)).map(l => Number(l.m.match(/([\d.]+)秒/)[1]));
 check(contestSecs.length > 0 && Math.max(...contestSecs) >= 1.0, '突っ張り・捲りで並走の踏み合いが起き、1秒以上競る', contestSecs.map(x => `${x}秒`).join(', '));
 
 // (外の選手に包まれて仕掛けられないこともあるので、各ラインの先頭で試し、前に出られた選手がタレるかを見る)
@@ -214,7 +216,7 @@ check(fades.length > 0 && fades.every(f => f.ok), '持久力の低い逃げ選�
 // 11b. 番手競り: 単騎が番手を競り、強ければ番手を奪い、負けた番手は3番手に回る
 {
   const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
-  const runSeri = score => { const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines('123/456/78/9'); Object.assign(d.riders[8], { score, style: '追' }); d.riders[1].score = 104; d.tactics = { 9: 'SERI:1' };
+  const runSeri = score => { const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines('123/456/78/9'); Object.assign(d.riders[8], { score, style: '追' }); d.riders[1].score = 104; d.tactics = { 9: 'SERI:1' }; d.frontResponse = { 1: 'CHUDAN' }; // (前受けの1番ラインは中団を取る展開で見る)
     const e = new PhysicsEngine(toRaceSetup(d)); e.start(); let order = null;
     for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) { e.update(1 / 60); if (!order && e.raceClock.remainingDistance < 500) order = [...e.riders].sort((a, b) => b.distance - a.distance).map(r => r.number).join(''); }
     return { e, order }; };
@@ -259,12 +261,11 @@ check(fades.length > 0 && fades.every(f => f.ok), '持久力の低い逃げ選�
 //   400バンクの1着の決まり手: 逃げ 25% / 捲り 30% / 差し 45%
 {
   const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
-  let seed = 11; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  // (出走表は検証台と同じ、実際に近い並び。選手の調子は少しゆらす)
+  const { makeRace } = await import('./tools/bench.mjs?lib');
   const pos = { 先頭: [0, 0], 番手: [0, 0], 三番手: [0, 0] }; const how = { 逃げ: 0, 捲り: 0, 差し: 0 }; let n = 0, bs1 = 0;
-  for (const L of ['123/456/789', '789/123/456', '456/123/789', '147/258/369', '369/147/258', '12/456/789/3', '123/456/7/8/9', '1234/56789', '12/34/56/789']) for (let i = 0; i < 8; i++) {
-    const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(L);
-    for (const r of d.riders) r.score = +(103 + rnd() * 16).toFixed(1);
-    const e = new PhysicsEngine(toRaceSetup(d)); e.start();
+  for (let i = 0; i < 72; i++) {
+    const e = new PhysicsEngine(withCondition(toRaceSetup(makeRace(1000 + i, { venue: '小倉' })), 9000 + i).setup); e.start();
     for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
     n++; const w = e.ranking[0].number; how[e.getStory().kimarite.how] += 1;
     if (e.recorder.snapshots.back?.order?.[0] === w) bs1++;
@@ -364,7 +365,7 @@ check(fades.length > 0 && fades.every(f => f.ok), '持久力の低い逃げ選�
   const third = score => { let top3 = 0; for (let i = 0; i < 8; i++) {
     const d = { race: { venue: '小倉' }, lines: [[1, 2, 3], [4, 5], [6, 7]], riders: [{ car: 1, score: 114 + i % 3, style: '逃', back: 14 }, { car: 2, score: 110, style: '追' }, { car: 3, score: score + (i % 4) * .5, style: '追' },
       { car: 4, score: 112, style: '両' }, { car: 5, score: 108, style: '追' }, { car: 6, score: 111, style: '両' }, { car: 7, score: 107, style: '追' }] };
-    const e = new PhysicsEngine(toRaceSetup(d)); e.start(); for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
+    const e = new PhysicsEngine(withCondition(toRaceSetup(d), 800 + i).setup); e.start(); for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
     if (e.ranking.slice(0, 3).some(r => r.number === 3)) top3++; } return top3; };
   const weak = third(100), strong = third(112);
   check(strong >= weak + 3, '3番手は強さ次第: 強い3番手は3着に絡み、弱い3番手は着外になりやすい', `3着内 強い${strong}/8 弱い${weak}/8`);

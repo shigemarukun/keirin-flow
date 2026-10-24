@@ -48,10 +48,14 @@ export function kimarite(snapshots, ranking, frontMateOf, logs = []) {
   const leadAt = key => snapshots[key]?.order?.[0];
   const posAtBack = snapshots.back?.order?.indexOf(winner) ?? -1;
   let winnerHow;
+  const attackedFromBehind = logs.some(l => l.riderNumber === winner && R(l) <= 400 && R(l) > 110 && /捲りに出る|番手捲り|カマす|叩いて主導権|自力発進/.test(l.message));
   // 先頭のまま押し切っても、捲って先頭に立った選手は「捲り」
   const madeMakuri = logs.some(l => l.riderNumber === winner && R(l) <= 600 && /捲りに出る|番手捲り/.test(l.message));
   if (leadAt('straight') === winner && leadAt('back') === winner && (leadAt('home') === winner || !madeMakuri)) winnerHow = '逃げ';
-  else if (leadAt('straight') === winner && posAtBack !== 0) winnerHow = '捲り'; // 直線に入るまでに先頭を奪った (番手捲りも含む)
+  // 直線に入るまでに先頭を奪った (番手捲りも含む)。
+  // または、バックより後ろから外を一気に仕掛けていき、その勢いのまま直線で前を飲み込んだ (捲り追い込み)。
+  // 直線まで後ろで脚を溜めて、そこから前を抜いたのが「差し」
+  else if (leadAt('straight') === winner || (posAtBack !== 0 && attackedFromBehind)) winnerHow = '捲り';
   else winnerHow = '差し';
   // マーク: ラインで自分のすぐ前を走っていた選手の、すぐ後ろの着順でゴール
   const marks = [];

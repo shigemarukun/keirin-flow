@@ -238,6 +238,7 @@ export function normalizeRaceSetup(input = DEFAULT_RACE_SETUP) {
     lines,
     riders,
     ...(input.formation ? { formation: input.formation.map(group => [...group]) } : {}),
-    ...(input.meta ? { meta: structuredClone(input.meta) } : {})
+    ...(input.meta ? { meta: structuredClone(input.meta) } : {}),
+    ...(input.rules ? { rules: { ...input.rules } } : {}) // ガールズ (ブロック禁止) などのルール
   };
 }

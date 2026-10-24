@@ -30,11 +30,28 @@ export function mountTacticsPanel(container, { getData, apply, getSetup, getPred
       const title = solo ? `単騎 <b>${leader}</b>` : `ライン${index + 1} <b>${group.join('-')}</b>`;
       let html = `
         <div class="tp-group">
-          <div class="tp-title"><strong>${title}</strong><span>${esc(names[leader] ?? '')}${solo ? '' : ' が先頭'}</span></div>
+          <div class="tp-title">
+            <strong>${title}</strong><span>${esc(names[leader] ?? '')}${solo ? '' : ' が先頭'}</span>
+            <span class="tp-move">
+              <button type="button" class="tp-move-btn" data-move="up" data-index="${index}" ${index === 0 ? 'disabled' : ''} aria-label="前へ">▲</button>
+              <button type="button" class="tp-move-btn" data-move="down" data-index="${index}" ${index === groups.length - 1 ? 'disabled' : ''} aria-label="後ろへ">▼</button>
+            </span>
+          </div>
           <div class="tp-chips">
             ${chip(leader, 'tactic', '', `おまかせ(${aiStyle})`, !tactic)}
             ${TACTICS.map(t => chip(leader, 'tactic', t, TACTIC_LABEL[t], tactic === t)).join('')}
           </div>`;
+      if (solo) {
+        // 単騎は「◯番のラインの番手を競る」も選べる
+        const targets = groups.filter(g => g.length > 1).map(g => g[0]);
+        if (targets.length) {
+          html += `
+          <div class="tp-sub">番手を競る (単騎で他のラインの2番手を取りに行く)</div>
+          <div class="tp-chips">
+            ${targets.map(t => chip(leader, 'tactic', `SERI:${t}`, `${t}番の番手を競る`, tactic === `SERI:${t}`)).join('')}
+          </div>`;
+        }
+      }
       if (leader === frontLeader) {
         // AIのおすすめ (指定を外したときの対応): 前受けの性格から
         const aiFront = rider.mindset === 'TSUPPARI' ? '突っ張り' : rider.mindset === 'YIELD_AND_ROLL' ? '出させる' : '相手次第';
@@ -54,7 +71,16 @@ export function mountTacticsPanel(container, { getData, apply, getSetup, getPred
   container.addEventListener('click', event => {
     const data = getData();
     if (!data) return;
-    if (event.target.closest('.tp-reset')) {
+    const move = event.target.closest('.tp-move-btn');
+    if (move) {
+      // 周回の並び順 (どのラインが前か) を入れ替える
+      const setup = getSetup();
+      const groups = (setup.formation?.length ? setup.formation : setup.lines.map(l => l.members)).map(g => [...g]);
+      const i = Number(move.dataset.index), j = move.dataset.move === 'up' ? i - 1 : i + 1;
+      if (j < 0 || j >= groups.length) return;
+      [groups[i], groups[j]] = [groups[j], groups[i]];
+      data.lines = groups; data.autoFormation = false;
+    } else if (event.target.closest('.tp-reset')) {
       data.tactics = {}; data.frontResponse = {};
     } else {
       const b = event.target.closest('.tp-chip');

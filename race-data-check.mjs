@@ -28,5 +28,13 @@ check(nige.aggression > oi.aggression && oi.blockSkill > nige.blockSkill, '逃�
 const auto = toRaceSetup({ ...structuredClone(SAMPLE_RACE_DATA), lines: [[7, 8, 9], [4, 5, 6], [1, 2, 3]], autoFormation: true });
 check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い先頭のラインが前受けになる', JSON.stringify(auto.formation));
 
+{
+  const d = structuredClone(SAMPLE_RACE_DATA);
+  d.race = { venue: '松戸' }; const a = toRaceSetup(d).trackProfile;
+  d.race = { venue: '大宮' }; const b = toRaceSetup(d).trackProfile;
+  d.race = { venue: '小倉' }; const c = toRaceSetup(d).trackProfile;
+  check(a === 'PROFILE_333' && b === 'PROFILE_500' && c === 'PROFILE_400', '競輪場を選ぶとバンクの周長が決まる (松戸333 / 大宮500 / 小倉400)', `${a} ${b} ${c}`);
+}
+
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

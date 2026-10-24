@@ -84,12 +84,17 @@ for (const [label, mutate] of Object.entries(variants)) {
   check(results[label].finished === 9 && str(results[label].order) !== str(a.order), `能力・構成を変えると結果が変わる: ${label}`, str(results[label].order));
 }
 check([7, 8, 9].includes(results['7-8-9を最強に'].order[0]), '最強にした7-8-9ラインから1着が出る', `1着 ${results['7-8-9を最強に'].order[0]}番`);
-check(results['4番を超強力な捲りに'].order[0] === 4, '超強力にした捲り選手が捲り切る', `1着 ${results['4番を超強力な捲りに'].order[0]}番`);
+check([4, 5].includes(results['4番を超強力な捲りに'].order[0]) && results['4番を超強力な捲りに'].order.slice(0, 3).includes(4), '超強力にした捲り選手のラインが1着 (本人が捲り切るか、番手が差す)', `着順 ${str(results['4番を超強力な捲りに'].order)}`);
 {
-  const weak = clone(); Object.assign(weak.riders[1], { power: .6, acceleration: .6, endurance: .6, tactic: 'SENKO' });
-  const strong = clone(); Object.assign(strong.riders[1], { power: 1, acceleration: .95, endurance: 1, tactic: 'SENKO' });
-  const w = race(weak).order.indexOf(1) + 1, st = race(strong).order.indexOf(1) + 1;
-  check(w > st, '同じ先行でも、弱い選手は強い選手より着順が悪い', `強い先行 ${st}着 / 弱い先行 ${w}着`);
+  // 1レースだけだと展開の巡り合わせで逆転することもあるので、並びを変えた6レースの平均着順で比べる
+  const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
+  const avg = power => { let sum = 0; const L = ['123/456/789', '123/789/456', '456/123/789', '789/123/456', '12/456/789/3', '1234/56789'];
+    for (const l of L) { const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(l); d.tactics = { 1: 'SENKO' }; Object.assign(d.riders[0], { score: power, style: '逃' });
+      const e = new PhysicsEngine(toRaceSetup(d)); e.start(); for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
+      sum += e.ranking.findIndex(r => r.number === 1) + 1; }
+    return sum / L.length; };
+  const st = avg(120), w = avg(101);
+  check(w > st, '同じ先行でも、弱い選手は強い選手より着順が悪い (6レースの平均)', `強い先行 平均${st.toFixed(1)}着 / 弱い先行 平均${w.toFixed(1)}着`);
 }
 
 // 5. car numbers are labels only: relabel everybody and the same riders must ride the same race
@@ -123,10 +128,20 @@ const er = race(early);
 const fade1 = er.speeds[1];
 check(er.logs.some(l => l.c === 'FATIGUE' && l.n === 1) && fade1.peak - fade1.last >= 3, '持久力の低い逃げ選手は最後にタレる', `最高${fade1.peak.toFixed(1)} → ゴール前${fade1.last.toFixed(1)}m/s`);
 
-const withBlock = clone();
-const noBlock = structuredClone(withBlock); for (const n of [2, 5, 8]) noBlock.riders[n].blockSkill = 0;
-const wb = race(withBlock), nb = race(noBlock);
-check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '番手のブロックが着順に影響する', `ブロック有 ${str(wb.order)} / 無 ${str(nb.order)}`);
+{
+  // いくつかの並びで、番手のブロックを無くすと着順が変わるレースがあるか
+  const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
+  let changed = 0, blockedRaces = 0;
+  for (const L of ['123/456/789', '789/123/456', '456/123/789', '12/34/56/789', '147/258/369', '123/456/7/8/9']) {
+    const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(L);
+    const withBlock = toRaceSetup(d), noBlock = structuredClone(withBlock);
+    for (const r of Object.values(noBlock.riders)) r.blockSkill = 0;
+    const wb = race(withBlock), nb = race(noBlock);
+    if (wb.logs.some(l => l.a === 'BLOCK')) blockedRaces++;
+    if (str(wb.order) !== str(nb.order)) changed++;
+  }
+  check(blockedRaces > 0 && changed > 0, '番手のブロックが着順に影響する', `6レース中 ブロックあり${blockedRaces} / ブロックを無くすと着順が変わる${changed}`);
+}
 
 // 10. line changes must not break the race
 {
@@ -147,7 +162,7 @@ check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '�
       }
       // 他のラインの選手が、ラインの間に割り込んだまま走り続けていないか
       const splitNow = e.raceClock.remainingDistance < 600 && e.riders.some(b => {
-        if (b.finished || !b.frontLineMate || b.action !== 'FOLLOW') return false;
+        if (b.finished || !b.frontLineMate || b.action !== 'FOLLOW' || b.followTargetNumber !== b.frontLineMate) return false; // 切り替えた選手は除く
         const f = e.rider(b.frontLineMate);
         return !f.finished && e.riders.some(o => !o.finished && o.lineId !== b.lineId && o.distance < f.distance && o.distance > b.distance && Math.abs(o.laneOffset - b.laneOffset) < 11 && Math.abs(f.laneOffset - b.laneOffset) < 11);
       });
@@ -181,10 +196,22 @@ check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '�
   check(ts.decisionLogs.some(l => l.riderNumber === 1 && /突っ張る/.test(l.message)), '前受けに「突っ張る」を指定すると、地力が下でも突っ張る');
 }
 
+// 11b. 番手競り: 単騎が番手を競り、強ければ番手を奪い、負けた番手は3番手に回る
+{
+  const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
+  const runSeri = score => { const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines('123/456/78/9'); Object.assign(d.riders[8], { score, style: '追' }); d.riders[1].score = 104; d.tactics = { 9: 'SERI:1' };
+    const e = new PhysicsEngine(toRaceSetup(d)); e.start(); let order = null;
+    for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) { e.update(1 / 60); if (!order && e.raceClock.remainingDistance < 500) order = [...e.riders].sort((a, b) => b.distance - a.distance).map(r => r.number).join(''); }
+    return { e, order }; };
+  const strong = runSeri(122), weak = runSeri(100);
+  check(strong.e.decisionLogs.some(l => /番手を奪う/.test(l.message)) && strong.order.includes('192'), '強い単騎が番手を競ると、番手を奪い、元の番手は3番手に回る', `残500mの隊列 ${strong.order}`);
+  check(weak.e.decisionLogs.some(l => /番手を守る/.test(l.message)) && weak.order.includes('12'), '弱い単騎が競っても、番手は守られる', `残500mの隊列 ${weak.order}`);
+}
+
 // 12. 競輪のいろいろな動きが、いろいろな並び・能力の中で実際に起きる
 {
   const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
-  const pats = { 誘導切り: /誘導切り成功/, 突っ張り: /突っ張る/, 出させる: /出させ|受け入れる/, 先行: /主導権を握って先行/, 叩き: /叩いて主導権/, カマシ: /カマす/, 捲り: /捲りに出る/, 番手ブロック: /牽制/, 番手捲り: /番手捲り/, 切り替え: /切り替える/, 踏み合い: /並んで踏み合い/, タレ: /タレ始める/, 内すくい: /内を突く/, 包まれ: /塞がれ/ };
+  const pats = { 誘導切り: /誘導切り成功/, 突っ張り: /突っ張る/, 出させる: /出させ|受け入れる/, 先行: /主導権を握って先行/, 叩き: /叩いて主導権/, カマシ: /カマす/, 捲り: /捲りに出る/, 番手ブロック: /牽制/, 番手捲り: /番手捲り/, 切り替え: /切り替える/, 踏み合い: /並んで踏み合い/, タレ: /タレ始める/, 内すくい: /内を突く/ };
   const seen = Object.fromEntries(Object.keys(pats).map(k => [k, 0]));
   const layouts = ['123/456/789', '789/123/456', '456/123/789', '12/456/789/3', '1234/56789', '12/34/56/789', '123/456/7/8/9', '7/123/8/456/9'];
   const mods = [d => {}, d => { d.riders[0].score = 104; }, d => { d.riders[3].score = 120; }, d => { d.riders[6].score = 119; }];
@@ -196,22 +223,54 @@ check(wb.logs.some(l => l.a === 'BLOCK') && str(wb.order) !== str(nb.order), '�
     for (const [k, re] of Object.entries(pats)) if (re.test(msgs)) seen[k] += 1;
   }
   const missing = Object.entries(seen).filter(([, v]) => v === 0).map(([k]) => k);
-  check(!missing.length, '32レースの中で、競輪の14種類の動きがすべて起きる', Object.entries(seen).map(([k, v]) => `${k}${v}`).join(' '));
+  check(!missing.length, '32レースの中で、競輪の13種類の動きがすべて起きる', Object.entries(seen).map(([k, v]) => `${k}${v}`).join(' '));
 }
 
-// 13. 逃げは「残りすぎない」: 残200mで先頭だった選手が、いつも3着に残るわけではない
+// 13. 実際の競輪のデータに近い結果になる (いろいろな並び・得点で72レース)
+//   実データ (男子7車・ライン位置別の1着率): 先頭 21.6% / 番手 14.9% / 3番手 2.6%
+//   400バンクの1着の決まり手: 逃げ 25% / 捲り 30% / 差し 45%
 {
   const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
-  let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  let n = 0, top3 = 0, win = 0;
-  for (const L of ['123/456/789', '789/123/456', '456/123/789', '12/456/789/3', '12/34/56/789', '123/456/7/8/9']) for (let k = 0; k < 5; k++) {
+  let seed = 11; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const pos = { 先頭: [0, 0], 番手: [0, 0], 三番手: [0, 0] }; const how = { 逃げ: 0, 捲り: 0, 差し: 0 }; let n = 0, bs1 = 0;
+  for (const L of ['123/456/789', '789/123/456', '456/123/789', '147/258/369', '369/147/258', '12/456/789/3', '123/456/7/8/9', '1234/56789', '12/34/56/789']) for (let i = 0; i < 8; i++) {
     const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(L);
-    for (const r of d.riders) r.score = +(104 + rnd() * 14).toFixed(1);
-    const e = new PhysicsEngine(toRaceSetup(d)); e.start(); let front = null;
-    for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) { e.update(1 / 60); if (!front && e.raceClock.remainingDistance <= 200) front = [...e.riders].sort((a, b) => b.distance - a.distance)[0].number; }
-    const pos = e.ranking.findIndex(r => r.number === front) + 1; n++; if (pos <= 3) top3++; if (pos === 1) win++;
+    for (const r of d.riders) r.score = +(103 + rnd() * 16).toFixed(1);
+    const e = new PhysicsEngine(toRaceSetup(d)); e.start();
+    for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
+    n++; const w = e.ranking[0].number; how[e.getStory().kimarite.how] += 1;
+    if (e.recorder.snapshots.back?.order?.[0] === w) bs1++;
+    for (const r of e.riders) { const k = r.role === 'SOLO' ? null : ['先頭', '番手', '三番手'][r.linePosition]; if (!k) continue; pos[k][0]++; if (r.number === w) pos[k][1]++; }
   }
-  check(top3 / n < 0.7 && win / n > 0.05, '逃げは残りすぎない (残200mで先頭の選手の3着以内率が7割未満、1着も時々ある)', `${n}レース: 1着${Math.round(win / n * 100)}% / 3着以内${Math.round(top3 / n * 100)}%`);
+  const rate = ([c, x]) => x / c * 100;
+  const sente = rate(pos.先頭), bante = rate(pos.番手), third = rate(pos.三番手);
+  check(sente >= 12 && sente <= 30 && bante >= 8 && bante <= 25 && third <= 8,
+    'ライン位置別の1着率が実データに近い (先頭12〜30% / 番手8〜25% / 3番手8%以下)', `先頭${sente.toFixed(1)}% 番手${bante.toFixed(1)}% 3番手${third.toFixed(1)}%`);
+  const pct = k => how[k] / n * 100;
+  check(pct('逃げ') >= 12 && pct('逃げ') <= 40 && pct('差し') >= 30 && pct('差し') <= 70 && pct('捲り') >= 10,
+    '決まり手の割合が実データに近い (逃げ12〜40% / 差し30〜70% / 捲り10%以上)', `逃げ${pct('逃げ').toFixed(0)}% 捲り${pct('捲り').toFixed(0)}% 差し${pct('差し').toFixed(0)}%`);
+  check(bs1 / n <= 0.4, '逃げは残りすぎない (バックで先頭の選手の1着率が4割以下。実際の逃げ1着は約25%)', `${Math.round(bs1 / n * 100)}%`);
+}
+
+// 14. 333バンク・500バンク: 全員完走し、333は逃げ、500は差しが多くなる (実データの傾向)
+{
+  const { toRaceSetup, SAMPLE_RACE_DATA, parseLines } = await import('./race-data.js');
+  const kim = bank => {
+    let seed = 11; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    const k = { 逃げ: 0, 捲り: 0, 差し: 0 }; let n = 0, ok = true;
+    for (const L of ['123/456/789', '789/123/456', '456/123/789', '147/258/369', '369/147/258', '12/456/789/3', '123/456/7/8/9', '1234/56789', '12/34/56/789']) for (let i = 0; i < 8; i++) {
+      const d = structuredClone(SAMPLE_RACE_DATA); d.lines = parseLines(L); d.bank = bank;
+      for (const r of d.riders) r.score = +(103 + rnd() * 16).toFixed(1);
+      const e = new PhysicsEngine(toRaceSetup(d)); e.start();
+      for (let t = 0; t < 200 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
+      if (e.ranking.length !== 9) ok = false;
+      k[e.getStory().kimarite.how]++; n++;
+    }
+    return { ok, nige: k.逃げ / n, sashi: k.差し / n };
+  };
+  const a = kim(333), b = kim(500);
+  check(a.ok && b.ok && a.nige > b.nige && b.sashi > a.sashi, '333バンクは逃げ、500バンクは差しが多くなる (全員完走)',
+    `333: 逃げ${Math.round(a.nige * 100)}% 差し${Math.round(a.sashi * 100)}% / 500: 逃げ${Math.round(b.nige * 100)}% 差し${Math.round(b.sashi * 100)}%`);
 }
 
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');

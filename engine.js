@@ -4,6 +4,8 @@ import { TenkaiPredictor } from './tenkai-predictor.js';
 import { KeirinProtocolController } from './keirin-protocol-controller.js';
 import { ScenarioPhaseManager } from './scenario-phase-manager.js';
 import { RaceAI } from './race-ai.js';
+import { pathFactor } from './track.js';
+import { RaceRecorder, buildStory } from './race-story.js';
 
 // RACE_MODE.AUTONOMOUS: every rider decides from its own sensors, profile and line role.
 // RACE_MODE.TEACHER: the fixed CR-0013 teaching script (kept for reference only).
@@ -17,8 +19,12 @@ const CAR_STYLES=Object.freeze({
 4:{background:'#0068b7',text:'#ffffff'},5:{background:'#ffd400',text:'#111111'},6:{background:'#00a651',text:'#ffffff'},
 7:{background:'#f08300',text:'#111111'},8:{background:'#ff69b4',text:'#111111'},9:{background:'#7f3fbf',text:'#ffffff'}});
 
+// バンクの周長ごとの設定。レースは最後の2周を走らせる (赤板=残り2周の手前 / 打鐘=残り1周半 / 最終周 / バック)
+const bankProfile=L=>Object.freeze({TRACK_LENGTH:L,RACE_DISTANCE:2*L,FORMATION_SPEED:10.5,Bell:1.5*L,FinalLap:L,FinalBack:L/2,Finish:0});
 export const RACE_PROFILES=Object.freeze({
- PROFILE_400:Object.freeze({TRACK_LENGTH:400,RACE_DISTANCE:800,FORMATION_SPEED:10.5,Bell:600,FinalLap:400,FinalBack:200,Finish:0})
+ PROFILE_400:bankProfile(400),
+ PROFILE_333:bankProfile(333),
+ PROFILE_500:bankProfile(500)
 });
 
 class RaceClock{
@@ -46,6 +52,7 @@ export class PhysicsEngine{
   this.keirinProtocol=new KeirinProtocolController();
   this.scenarioPhaseManager=new ScenarioPhaseManager();
   this.raceAI=new RaceAI();
+  this.recorder=new RaceRecorder();
   this.applyRaceSetup(setup);
  }
 
@@ -57,6 +64,8 @@ export class PhysicsEngine{
   this.spacing=this.mode===RACE_MODE.TEACHER?{min:13.5,follow:17,cutIn:9,start:17}:{min:7,follow:7.8,cutIn:5,start:9};
   this.setup.mode=this.mode;
   this.profile=RACE_PROFILES[this.setup.trackProfile]??RACE_PROFILES.PROFILE_400;
+  // 400バンクを基準にした距離の倍率。AIや展開の文章は「400バンクに直した残り距離」で判断する
+  this.lapScale=this.profile.TRACK_LENGTH/400;
   this.totalDistance=this.profile.RACE_DISTANCE;
   this.lineManager=new LineManager(this.setup);
   this.raceClock=new RaceClock(this.profile);
@@ -90,6 +99,7 @@ export class PhysicsEngine{
   for(const r of this.riders){r.distance=r.initialDistance;r.speed=this.profile.FORMATION_SPEED;r.acceleration=0;r.laneOffset=-18;r.action=ACTION.FORMATION;r.followTargetNumber=null;r.energy=1;r.finished=false;r.finishTime=null;r.coastDistance=0;r.boxedBy=null;r.boxedFor=0;r.history=[];r.raceIntent=null;r.laneMotion=null;r.laneVelocity=0;r.visualAngleOffset=0;r.lastDecisionAction=null;r.lastDecisionLogTime=null;}
   this.keirinProtocol.initialize(this,this.prediction);
   this.raceAI.reset();
+  this.recorder.reset();
   if(this.mode===RACE_MODE.TEACHER)this.scenarioPhaseManager.initialize(this);
   else this.emitDecision({category:'RACE',message:'自律モード: 各選手が能力・脚の残り・ライン内の役割から判断します'});
  }
@@ -106,6 +116,7 @@ export class PhysicsEngine{
    id:this.decisionLogs.length+1,
    time:this.elapsedTime,
    remaining:this.raceClock.remainingDistance,
+   rem400:this.raceClock.remainingDistance/(this.lapScale??1),
    riderNumber:entry.riderNumber??null,
    category:entry.category??'AI_DECISION',
    action:entry.action??null,
@@ -273,14 +284,25 @@ export class PhysicsEngine{
   let factor=1;
   if([ACTION.ATTACK,ACTION.LINE_ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.DEFEND,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))factor=1.55;
   if(plan.action===ACTION.BLOCK)factor=1.30;
+  if(Number.isFinite(plan.effortFactor))factor=plan.effortFactor; // AIが「一定のペースで踏んでいるだけ」と伝えたとき
+  if(this.mode!==RACE_MODE.TEACHER){
+   // 自律モード: 脚の減り方は「何をしているか(行動の名前)」ではなく、実際の速度と加速で決める。
+   // 同じ速度で走れば先頭も番手も同じだけ踏んでいて、差は風よけ(下の draft)だけ。
+   const T=globalThis.KF_TUNE??{};
+   factor=1+(T.acc??.35)*clamp((rider.acceleration??0)/3,0,1.5);
+  }
   if([ACTION.SAVE_ENERGY,ACTION.YIELD,ACTION.RETREAT].includes(plan.action))factor=.55;
   // Slipstream: riding close behind someone in the same corridor saves energy.
   let draft=1;
   if(this.mode!==RACE_MODE.TEACHER){
-   for(const o of this.riders){if(o===rider||o.finished)continue;const g=o.distance-rider.distance;if(g>0&&g<26&&Math.abs(o.laneOffset-rider.laneOffset)<11){draft=1-.45*(rider.profile.draftSkill??.75);break;}}
+   for(const o of this.riders){if(o===rider||o.finished)continue;const g=o.distance-rider.distance;if(g>0&&g<26&&Math.abs(o.laneOffset-rider.laneOffset)<11){draft=1-(globalThis.KF_TUNE?.draft??.55)*(rider.profile.draftSkill??.75);break;}}
   }
-  const load=(.0022+(this.mode===RACE_MODE.TEACHER?.0105:.0150)*demand*demand)*factor*draft/Math.max(.55,rider.profile.endurance);
-  rider.energy=clamp(rider.energy-load*dt,0,1);
+  const load=(.0022+(this.mode===RACE_MODE.TEACHER?.0105:(globalThis.KF_TUNE?.k??.020))*demand*demand)*factor*draft/Math.max(.55,rider.profile.endurance);
+  // 周長が違っても「残り2周で使える脚」は同じ: 長いバンクほど1mあたりの脚の減りを小さくする
+  // (333バンクはそのまま = 短い直線で逃げが残りやすい。実データでも333は逃げの1着が多い)
+  const scaleK=this.lapScale??1;
+  const bankK=this.mode!==RACE_MODE.TEACHER&&scaleK>1?Math.pow(scaleK,-(globalThis.KF_TUNE?.bankE??1)):1;
+  rider.energy=clamp(rider.energy-load*bankK*dt,0,1);
  }
 
  _updateLaneMotion(rider, targetLane, plan, dt){
@@ -363,7 +385,7 @@ export class PhysicsEngine{
     if(longitudinal>22||lateral>26)continue;
     // closer (both along and across the track) = harder check
     const along=1-clamp(longitudinal/22,0,1),across=1-clamp((lateral-11)/15,0,1);
-    resistance=Math.max(resistance,along*across*(blocker.profile?.blockSkill??.75)*3.6);
+    resistance=Math.max(resistance,along*across*(blocker.profile?.blockSkill??.75)*(globalThis.KF_TUNE?.blk??3.6));
    }
    return resistance;
   }
@@ -416,7 +438,9 @@ export class PhysicsEngine{
    rider.boxedBy=blockedBy.number;rider.boxedFor=(rider.boxedFor??0)+dt;
   }else{rider.boxedBy=null;rider.boxedFor=0;}
 
-  let next=rider.distance+rider.speed*dt;
+  // コーナーで外を回ると遠回りになる (捲りは脚を使う)
+  const geo=this.mode!==RACE_MODE.TEACHER?pathFactor(rider.distance,rider.laneOffset,TRACK_LANE.INNER,this.profile.TRACK_LENGTH):1;
+  let next=rider.distance+rider.speed*dt*geo;
   const target=rider.followTargetNumber?this.rider(rider.followTargetNumber):null;
   if(target&&!target.finished&&target.distance>rider.distance&&plan.action===ACTION.FOLLOW){
    next=Math.min(next,target.distance-this.spacing.min);
@@ -426,8 +450,19 @@ export class PhysicsEngine{
   rider.acceleration=(rider.speed-prev)/Math.max(dt,1e-6);
  }
 
- _recordFinish(rider){rider.coastDistance=rider.distance-this.totalDistance;rider.distance=this.totalDistance+rider.coastDistance;rider.finished=true;rider.finishTime=this.elapsedTime;this.ranking.push({rank:0,number:rider.number,lineId:rider.lineId,time:rider.finishTime,margin:''});}
- _finalizeRanking(){this.ranking.sort((a,b)=>a.time-b.time||a.number-b.number);this.ranking.forEach((item,index)=>{item.rank=index+1;item.margin=index===0?'先頭':'';});}
+ _recordFinish(rider){rider.coastDistance=rider.distance-this.totalDistance;rider.distance=this.totalDistance+rider.coastDistance;rider.finished=true;
+  // 写真判定: 同じ計算の刻みでゴールした選手は、線を越えた正確な時刻で着順を決める
+  rider.finishTime=this.elapsedTime-(rider.coastDistance/Math.max(rider.speed,1));this.ranking.push({rank:0,number:rider.number,lineId:rider.lineId,time:rider.finishTime,margin:''});}
+ _finalizeRanking(){
+  this.ranking.sort((a,b)=>a.time-b.time||a.number-b.number);
+  // 着差: 前の選手とのゴールの時間差を、自転車1台分(約1.8m)の長さに直して表す
+  this.ranking.forEach((item,index)=>{
+   item.rank=index+1;
+   if(index===0){item.margin='';return;}
+   const len=(item.time-this.ranking[index-1].time)*18/1.8;
+   item.margin=len<0.08?'同着に近い':len<0.25?'タイヤ差':len<0.5?'1/2車輪':len<0.8?'1/2車身':len<1.3?'1車身':len<1.8?'1車身半':len<2.6?'2車身':len<4?`${Math.round(len)}車身`:'大差';
+  });
+ }
 
  _step(dt){
   this.elapsedTime+=dt;
@@ -446,6 +481,7 @@ export class PhysicsEngine{
    if(before<this.totalDistance&&rider.distance>=this.totalDistance)this._recordFinish(rider);
   }
   const leaderDistance=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),triggered=this.raceClock.update(this.pacer.distance,leaderDistance,this);
+  this.recorder.observe(this);
   if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:teacher?'打鐘。教材シナリオを継続':'打鐘。ここから各選手が自由に判断'});this.onBellCallback?.();}
  }
 
@@ -464,6 +500,14 @@ export class PhysicsEngine{
   if(this.riders.every(r=>r.finished)){this.isStarted=false;this.accumulator=0;this._finalizeRanking();this.onFinishCallback?.(this.ranking.map(x=>({...x})));}
  }
 
+ // 「赤板から見る」などのため、表示せずに指定の残り距離まで一気に進める
+ fastForwardTo(remaining){
+  if(!this.isStarted)this.start();
+  let guard=0;
+  while(this.raceClock.remainingDistance>remaining&&!this.riders.every(r=>r.finished)&&guard<200000){this._step(this.fixedStep);guard++;}
+  this.accumulator=0;
+ }
+
  getDiagnostics(){
   const gaps=[];
   for(const rider of this.riders){
@@ -476,5 +520,11 @@ export class PhysicsEngine{
   return {gaps,minGap:gaps.length?Math.min(...gaps.map(x=>x.gap)):null,maxGap:gaps.length?Math.max(...gaps.map(x=>x.gap)):null};
  }
 
- getState(){return{riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,mode:this.mode,scenario:this.mode===RACE_MODE.TEACHER?this.scenarioPhaseManager.state():null,protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
+ // 展開の文章と決まり手 (レース後、または途中までの内容で)
+ getStory(){
+  const ranking=[...this.ranking].sort((a,b)=>a.time-b.time||a.number-b.number);
+  return buildStory({setup:this.setup,prediction:this.prediction,snapshots:this.recorder.snapshots,logs:this.decisionLogs,ranking,names:this.setup.meta?.names??{}});
+ }
+
+ getState(){return{trackLength:this.profile.TRACK_LENGTH,lapScale:this.lapScale,snapshots:this.recorder.snapshots,riders:this.riders,pacer:this.pacer,ranking:this.ranking,isStarted:this.isStarted,elapsedTime:this.elapsedTime,totalDistance:this.totalDistance,bellRung:this.bellRung,diagnostics:this.getDiagnostics(),raceClock:this.raceClock,raceEvents:this.raceEvents,decisionLogs:this.decisionLogs,prediction:this.prediction,mode:this.mode,scenario:this.mode===RACE_MODE.TEACHER?this.scenarioPhaseManager.state():null,protocol:{state:this.keirinProtocol.state,pacerCutLineId:this.keirinProtocol.pacerCutLineId,frontLineId:this.keirinProtocol.frontLineId,pacerCutLeaderNumber:this.keirinProtocol.pacerCutLeaderNumber,frontLeaderNumber:this.keirinProtocol.frontLeaderNumber,frontResponse:this.keirinProtocol.frontResponse},setup:this.setup,lines:this.lineManager.linesArray()};}
 }

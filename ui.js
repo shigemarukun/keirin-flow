@@ -14,13 +14,16 @@ const wrapTrackDistance = distance =>
  * 既存の座標系・周回方向・FINISH_LINE_PHASE・laneOffset・角度式は維持する。
  */
 export function getTrackPoint(
-    { cx, cy, halfStraight, radius },
+    { cx, cy, halfStraight, radius, length = TRACK_LENGTH },
     absoluteDistance,
     laneOffset = 0
 ) {
+    // 333・500バンクも同じ形で描き、距離だけ周長に合わせて割り当てる
+    const TRACK_LENGTH_ = length;
+    const wrapLap = distance => ((distance % TRACK_LENGTH_) + TRACK_LENGTH_) % TRACK_LENGTH_;
     // 論理上の0m / 400m地点をホームストレッチ中央へ位相調整
-    const d = wrapTrackDistance(
-        absoluteDistance + FINISH_LINE_PHASE
+    const d = wrapLap(
+        absoluteDistance + FINISH_LINE_PHASE * TRACK_LENGTH_ / TRACK_LENGTH
     );
 
     const r = radius + laneOffset;
@@ -47,12 +50,12 @@ export function getTrackPoint(
         + (2 * cornerPx);
 
     const straightDist =
-        TRACK_LENGTH
+        TRACK_LENGTH_
         * straightPx
         / totalPx;
 
     const cornerDist =
-        TRACK_LENGTH
+        TRACK_LENGTH_
         * cornerPx
         / totalPx;
 
@@ -212,6 +215,10 @@ export class UIRenderer {
         return -38 + (laneOffset + 18) * 1.35;
     }
 
+    setTrackLength(length) {
+        this.trackGeometry = { ...this.trackGeometry, length };
+    }
+
     getBankCoordinates(
         distance,
         laneOffset = 0
@@ -235,7 +242,7 @@ export class UIRenderer {
 
         for (
             let distance = 0;
-            distance <= TRACK_LENGTH;
+            distance <= (this.trackGeometry.length ?? TRACK_LENGTH);
             distance += 1
         ) {
             const point =
@@ -574,6 +581,22 @@ export class UIRenderer {
     }
 
 
+    // 実況テロップで話題になっている選手に、光る輪を付ける
+    drawSpotlight(state, number, strength = 1) {
+        const rider = state.riders.find(r => r.number === number);
+        if (!rider) return;
+        const p = this.getBankCoordinates(rider.distance, this.riderLaneToScreen(rider.laneOffset));
+        const c = this.ctx;
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
+        c.save();
+        c.beginPath();
+        c.arc(p.x, p.y, 17 + pulse * 4, 0, Math.PI * 2);
+        c.strokeStyle = `rgba(250, 204, 21, ${0.55 * strength + 0.35 * pulse * strength})`;
+        c.lineWidth = 3;
+        c.stroke();
+        c.restore();
+    }
+
     updateUI(state) {
 
         const lapCounter =
@@ -617,7 +640,7 @@ export class UIRenderer {
             state.raceClock
                 ?.currentLap
             ?? (
-                remaining > TRACK_LENGTH
+                remaining > (state.trackLength ?? TRACK_LENGTH)
                     ? 2
                     : 1
             );
@@ -706,10 +729,13 @@ export class UIRenderer {
 
             resultList.innerHTML =
                 state.ranking.length
-                    ? state.ranking
+                    ? [...state.ranking].sort((a, b) => a.time - b.time)
                         .map(
-                            item =>
-                                `<li><strong>${item.rank}着 ${item.number}番</strong><span>${item.margin}</span></li>`
+                            (item, index) => {
+                                const name = state.setup?.meta?.names?.[item.number];
+                                const safe = name ? String(name).replace(/[&<>"']/g, '') : '';
+                                return `<li><strong>${index + 1}着 ${item.number}番${safe ? ` <small>${safe}</small>` : ''}</strong><span>${item.margin ?? ''}</span></li>`;
+                            }
                         )
                         .join('')
                     : '<li class="empty-result">レース終了後に表示</li>';

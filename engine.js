@@ -4,6 +4,7 @@ import { TenkaiPredictor } from './tenkai-predictor.js';
 import { KeirinProtocolController } from './keirin-protocol-controller.js';
 import { ScenarioPhaseManager } from './scenario-phase-manager.js';
 import { RaceAI } from './race-ai.js';
+import { pathFactor } from './track.js';
 import { RaceRecorder, buildStory } from './race-story.js';
 
 // RACE_MODE.AUTONOMOUS: every rider decides from its own sensors, profile and line role.
@@ -277,13 +278,19 @@ export class PhysicsEngine{
   if([ACTION.ATTACK,ACTION.LINE_ATTACK,ACTION.CONTEST,ACTION.FULL_CONTEST,ACTION.DEFEND,ACTION.SWITCH_TO_SELF_POWER].includes(plan.action))factor=1.55;
   if(plan.action===ACTION.BLOCK)factor=1.30;
   if(Number.isFinite(plan.effortFactor))factor=plan.effortFactor; // AIが「一定のペースで踏んでいるだけ」と伝えたとき
+  if(this.mode!==RACE_MODE.TEACHER){
+   // 自律モード: 脚の減り方は「何をしているか(行動の名前)」ではなく、実際の速度と加速で決める。
+   // 同じ速度で走れば先頭も番手も同じだけ踏んでいて、差は風よけ(下の draft)だけ。
+   const T=globalThis.KF_TUNE??{};
+   factor=1+(T.acc??.35)*clamp((rider.acceleration??0)/3,0,1.5);
+  }
   if([ACTION.SAVE_ENERGY,ACTION.YIELD,ACTION.RETREAT].includes(plan.action))factor=.55;
   // Slipstream: riding close behind someone in the same corridor saves energy.
   let draft=1;
   if(this.mode!==RACE_MODE.TEACHER){
-   for(const o of this.riders){if(o===rider||o.finished)continue;const g=o.distance-rider.distance;if(g>0&&g<26&&Math.abs(o.laneOffset-rider.laneOffset)<11){draft=1-.45*(rider.profile.draftSkill??.75);break;}}
+   for(const o of this.riders){if(o===rider||o.finished)continue;const g=o.distance-rider.distance;if(g>0&&g<26&&Math.abs(o.laneOffset-rider.laneOffset)<11){draft=1-(globalThis.KF_TUNE?.draft??.55)*(rider.profile.draftSkill??.75);break;}}
   }
-  const load=(.0022+(this.mode===RACE_MODE.TEACHER?.0105:.0150)*demand*demand)*factor*draft/Math.max(.55,rider.profile.endurance);
+  const load=(.0022+(this.mode===RACE_MODE.TEACHER?.0105:(globalThis.KF_TUNE?.k??.020))*demand*demand)*factor*draft/Math.max(.55,rider.profile.endurance);
   rider.energy=clamp(rider.energy-load*dt,0,1);
  }
 
@@ -367,7 +374,7 @@ export class PhysicsEngine{
     if(longitudinal>22||lateral>26)continue;
     // closer (both along and across the track) = harder check
     const along=1-clamp(longitudinal/22,0,1),across=1-clamp((lateral-11)/15,0,1);
-    resistance=Math.max(resistance,along*across*(blocker.profile?.blockSkill??.75)*3.6);
+    resistance=Math.max(resistance,along*across*(blocker.profile?.blockSkill??.75)*(globalThis.KF_TUNE?.blk??3.6));
    }
    return resistance;
   }
@@ -420,7 +427,9 @@ export class PhysicsEngine{
    rider.boxedBy=blockedBy.number;rider.boxedFor=(rider.boxedFor??0)+dt;
   }else{rider.boxedBy=null;rider.boxedFor=0;}
 
-  let next=rider.distance+rider.speed*dt;
+  // コーナーで外を回ると遠回りになる (捲りは脚を使う)
+  const geo=this.mode!==RACE_MODE.TEACHER?pathFactor(rider.distance,rider.laneOffset,TRACK_LANE.INNER):1;
+  let next=rider.distance+rider.speed*dt*geo;
   const target=rider.followTargetNumber?this.rider(rider.followTargetNumber):null;
   if(target&&!target.finished&&target.distance>rider.distance&&plan.action===ACTION.FOLLOW){
    next=Math.min(next,target.distance-this.spacing.min);

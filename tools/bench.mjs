@@ -43,6 +43,7 @@ export function makeRace(i, opts = {}) {
 
 // ---------- 1レースを走らせて、数える ----------
 async function runOne(i, opts) {
+  globalThis.KF_TUNE ??= JSON.parse(process.env.KF_TUNE || '{}');
   const { toRaceSetup } = await import(new URL('race-data.js', ROOT));
   const { withCondition } = await import(new URL('forecast.js', ROOT));
   const { PhysicsEngine } = await import(new URL('engine.js', ROOT));
@@ -87,6 +88,8 @@ export function summarize(rs) {
   return {
     n: rs.length, msPerRace: Math.round(rs.reduce((s, r) => s + r.ms, 0) / rs.length),
     seven: { kimarite: kim(seven), positions: pos(seven), mark2: pct(seven.filter(r => r.mark2).length, seven.length),
+      roleBy: Object.fromEntries(['逃げ', '捲り', '差し'].map(h => { const l = seven.filter(r => r.how === h); const c = {}; for (const r of l) c[r.winnerRole] = (c[r.winnerRole] ?? 0) + 1; return [h, Object.fromEntries(Object.entries(c).map(([k, v]) => [k, pct(v, l.length)]))]; })),
+      markBy: Object.fromEntries(['逃げ', '捲り', '差し'].map(h => { const l = seven.filter(r => r.how === h); return [h, pct(l.filter(r => r.mark2).length, l.length)]; })),
       line12: pct(seven.filter(r => r.line12).length, seven.length), line123: pct(seven.filter(r => r.line123).length, seven.length) },
     bank: Object.fromEntries(Object.entries(group(r => r.bank)).map(([k, l]) => [k, kim(l)])),
     family: Object.fromEntries(Object.entries(group(r => r.family)).map(([k, l]) => [k, kim(l)])),
@@ -112,6 +115,8 @@ function printReport(r) {
   console.log(`[7車立て] 決まり手 ${k(r.seven.kimarite)}   実際: ${TARGET.seven}`);
   for (const [role, s] of Object.entries(r.seven.positions)) console.log(`  ${role.padEnd(4, '　')} 1着${s.win}% 3着内${s.top3}%   実際 ${TARGET.pos[role] ?? '-'}  (n=${s.n})`);
   console.log(`  2着がマーク ${r.seven.mark2}% (実際 ${TARGET.mark2}) / 同じラインでワンツー ${r.seven.line12}% / 3着まで独占 ${r.seven.line123}%`);
+  console.log(`    決まり手ごとの1着の位置 ${Object.entries(r.seven.roleBy).map(([a, b]) => `${a}:${JSON.stringify(b)}`).join(' ')}`);
+  console.log(`    決まり手ごとの2着マーク ${Object.entries(r.seven.markBy).map(([a, b]) => `${a}${b}%`).join(' ')}`);
   console.log(`[9車立て] ${k(r.nine)}`);
   for (const [b, x] of Object.entries(r.bank)) console.log(`[${b}バンク] ${k(x)}   実際: ${TARGET.bank[b] ?? '-'}`);
   for (const [f, x] of Object.entries(r.family)) console.log(`[${f}級] ${k(x)}`);
@@ -145,4 +150,4 @@ if (!isMainThread) {
   else printReport(report);
 }
 }
-await main();
+if (!process.env.BENCH_LIB && !import.meta.url.includes("?lib")) await main();

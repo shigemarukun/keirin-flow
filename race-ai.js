@@ -16,6 +16,8 @@
 import { ACTION, ROLE, MINDSET, TRACK_LANE } from './race-plan.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+// 「前後に何台分」という距離は、エンジンの車間(1台分)に合わせて伸び縮みさせる (engine.unit = 車間 / 7.8m)
+const U = (engine, x) => x * (engine?.unit ?? 1);
 export let SENKO_EFFORT = 1.2;
 export const setSenkoEffort = v => { SENKO_EFFORT = v; };
 const pct = v => `${Math.round(v * 100)}%`;
@@ -67,13 +69,19 @@ export class RaceAI {
   }
 
   sprintSpeed(rider) {
-    const p = rider.profile, e = rider.energy;
+    const p = rider.profile, e = rider.energy, T = globalThis.KF_TUNE ?? {};
     const fatigue = e < .4 ? .72 + .7 * e : 1; // an empty rider cannot hold its top speed
-    const T = globalThis.KF_TUNE ?? {};
-    return (p.topSpeed * (.90 + .10 * e) + p.sprintBonus * ((T.sb0 ?? 0) + (T.sb1 ?? 1.4) * e)) * fatigue;
+    // (残脚で上乗せできる速さの幅。広すぎると、脚を溜めただけの選手が直線で楽に突き抜けてしまう)
+    return (p.topSpeed * (.90 + .10 * e) + p.sprintBonus * ((T.sb0 ?? 0) + (T.sb1 ?? .7) * e)) * fatigue;
   }
   // 追走で出せる上限の速さ (自分の今のスプリント + 風よけで楽になる分)
-  followCap(rider) { return this.sprintSpeed(rider) + (globalThis.KF_TUNE?.fa ?? 0.6); }
+  followCap(rider, wheel = null, now = 0) {
+    const T = globalThis.KF_TUNE ?? {};
+    // 前がラインの仲間で、ダッシュで踏み出している最中なら、後ろはその風よけに引っ張られて一緒に上がっていける
+    // (捲りやカマシは、ライン全体で上がっていく)
+    const pull = wheel && wheel.lineId && wheel.lineId === rider.lineId && (wheel._dashUntil ?? -1) > now ? (wheel._dash ?? 0) * (T.fdash ?? .8) : 0;
+    return this.sprintSpeed(rider) + (rider.profile.followAllowance ?? T.fa ?? 0.6) + pull;
+  }
   strength(rider) { const p = rider.profile; return p.power * .45 + p.acceleration * .25 + rider.energy * .30; }
 
   // ---------- pacer-cut (誘導切り) resolution, decided once at the red board ----------
@@ -124,6 +132,7 @@ export class RaceAI {
 
   // ---------- helpers ----------
   _nearestAheadInCorridor(rider, engine, maxGap = 60) {
+    maxGap = U(engine, maxGap); // 「何台分先まで見るか」(7.8m 基準の値を車間に合わせる)
     let best = null;
     for (const o of engine.riders) {
       if (o.finished || o.number === rider.number) continue;
@@ -164,7 +173,7 @@ export class RaceAI {
   // Keep following the same wheel while it is still a sensible wheel (stops target flicker).
   _sticky(rider, candidate, engine) {
     const cur = rider.followTargetNumber ? engine.rider(rider.followTargetNumber) : null;
-    if (cur && !cur.finished && !this._retreating(cur) && cur.distance > rider.distance && cur.distance - rider.distance < 40) return cur;
+    if (cur && !cur.finished && !this._retreating(cur) && cur.distance > rider.distance && cur.distance - rider.distance < U(engine, 40)) return cur;
     return candidate;
   }
 
@@ -199,7 +208,7 @@ export class RaceAI {
       const gap = o.distance - rider.distance;
       // 外を回って越えなければいけないのは「前にいる」選手だけ。横や後ろで外にいる選手のさらに外へ出る必要はない
       // (横の選手の外へ出ようとすると、出られずに包まれた扱いになって減速してしまう)
-      if (gap > 1 && gap < 70) widest = Math.max(widest, o.laneOffset);
+      if (gap > U(engine, 1) && gap < U(engine, 70)) widest = Math.max(widest, o.laneOffset);
     }
     const wanted = clamp(widest + 16, -2, 42);
     // ...but never pick a lane where a slower rider sits right in front of us (we'd be stuck behind him).
@@ -208,7 +217,7 @@ export class RaceAI {
     const blocked = lane => engine.riders.some(o => {
       if (o.finished || o.number === rider.number) return false;
       const gap = o.distance - rider.distance;
-      return gap > 0 && gap < 45 && Math.abs(o.laneOffset - lane) < 11 && (this._retreating(o) || o.speed < mySpeed - 2.5);
+      return gap > 0 && gap < U(engine, 45) && Math.abs(o.laneOffset - lane) < 11 && (this._retreating(o) || o.speed < mySpeed - 2.5);
     });
     const lanes = [-2, 14, 30, 42];
     // 外がすべて塞がっていれば、空いている内側の走路を探す (それも無ければ一番外で待つ)
@@ -222,7 +231,7 @@ export class RaceAI {
   // 安全な追走先: 自分より前にいて、輪になって追いかけ合わない選手
   _safeWheel(candidate, rider, engine) {
     // 付く相手は「自分よりはっきり前にいる」選手だけ (横や後ろの選手に付くと、お互いに減速し合う)
-    const ok = c => c && !c.finished && c.distance > rider.distance + 2 && !this._followsMe(c, rider, engine);
+    const ok = c => c && !c.finished && c.distance > rider.distance + U(engine, 2) && !this._followsMe(c, rider, engine);
     if (ok(candidate)) return candidate;
     const ahead = this._aheadNotRetreating(rider, engine);
     return ok(ahead) ? ahead : null;
@@ -241,7 +250,7 @@ export class RaceAI {
       const cutter = engine.rider(pc.cutterNumber);
       const cutTail = engine.riders.filter(o => !o.finished && o.lineId && o.lineId === cutter?.lineId).sort((a, b) => a.distance - b.distance)[0] ?? cutter;
       m.letInSince ??= engine.elapsedTime;
-      if (!cutter || !cutTail || cutTail.distance >= rider.distance + 14 || engine.elapsedTime - m.letInSince > 8) {
+      if (!cutter || !cutTail || cutTail.distance >= rider.distance + U(engine, 14) || engine.elapsedTime - m.letInSince > 8) {
         m.letInDone = true;
         // 引く: 前に入れたら、そのまま後方まで下げて巻き返しを狙う
         if (m.hiku) { m.gaveUp = true; m.retreatDone = false; m.hikuRetreat = true; }
@@ -261,7 +270,7 @@ export class RaceAI {
     if (cutting) {
       const front = engine.rider(pc.frontNumber);
       const gap = front.distance - rider.distance;
-      if (gap < -4) { pc.outcome = 'CUT'; pc.done = true; return { action: ACTION.CONTROL_PACE, speed: engine.pacer.speed + 1, lane: TRACK_LANE.INNER, reason: '誘導切り成功。前受けラインの前に入って隊列を整える' }; }
+      if (gap < -U(engine, 4)) { pc.outcome = 'CUT'; pc.done = true; return { action: ACTION.CONTROL_PACE, speed: engine.pacer.speed + 1, lane: TRACK_LANE.INNER, reason: '誘導切り成功。前受けラインの前に入って隊列を整える' }; }
       return { action: ACTION.MOVE_UP, speed: Math.min(front.speed + 7, 17.5), lane: this._attackLane(rider, engine), reason: `赤板から誘導切りへ外を上昇 (前受けまで${Math.max(0, gap).toFixed(0)}m)` };
     }
 
@@ -269,7 +278,7 @@ export class RaceAI {
     if (m.gaveUp && !m.retreatDone) {
       let tail = null;
       for (const o of engine.riders) if (!o.finished && o.lineId !== rider.lineId && (!tail || o.distance < tail.distance)) tail = o;
-      if (tail && rider.distance > tail.distance - 15 && engine.raceClock.remainingDistance / (engine.lapScale ?? 1) > 300) {
+      if (tail && rider.distance > tail.distance - U(engine, 15) && engine.raceClock.remainingDistance / (engine.lapScale ?? 1) > 300) {
         const front = this._frontRunner(engine);
         return { action: ACTION.RETREAT, speed: Math.max(7, Math.min(tail.speed, front?.speed ?? tail.speed) - 5.5), lane: TRACK_LANE.OUTSIDE, reason: m.hikuRetreat ? '前受けから後方まで引いて、巻き返しを狙う' : '突っ張られたので外を下げ、後方へ引いて立て直す' };
       }
@@ -314,14 +323,17 @@ export class RaceAI {
     const lateAndStillBehind = m.style !== 'OIKOMI' && rem <= 140 && engine.positionRank(rider) >= 4 && rider.energy > .2;
     // the further back we sit, the earlier a makuri has to start
     const behindBy = lead ? lead.distance - rider.distance : 0;
-    const strikeAt = m.style === 'MAKURI' ? m.strikeAt + clamp((behindBy - 35) * (globalThis.KF_TUNE?.mkb ?? 1.5), 0, globalThis.KF_TUNE?.mkc ?? 80) : m.strikeAt;
+    const strikeAt = m.style === 'MAKURI' ? m.strikeAt + clamp((behindBy / U(engine, 1) - 35) * (globalThis.KF_TUNE?.mkb ?? 1.5), 0, globalThis.KF_TUNE?.mkc ?? 80) : m.strikeAt;
     // (前受けから自分で引いた選手は、競り負けて下げたのとは違い、脚質どおりのタイミングで巻き返す)
     const regroup = m.gaveUp && !m.hikuRetreat;
-    const strikeNow = ((!regroup) && rem <= strikeAt && rider.energy > .25) || (regroup && rem <= Math.min(m.strikeAt, 260) && rider.energy > .22) || lateAndStillBehind || m.struck;
+    // すでに先頭のすぐ後ろ (好位) にいる捲り型は、外へ仕掛けずに直線で差しにいく (ガールズで多い形)
+    const sitRank = engine.setup?.rules?.girls ? (globalThis.KF_TUNE?.sitG ?? 3) : (globalThis.KF_TUNE?.sitM ?? 0);
+    const sitting = m.style === 'MAKURI' && !m.struck && engine.positionRank(rider) <= sitRank && behindBy < engine.spacing.follow * (sitRank + .5) && rider.boxedFor < .3;
+    const strikeNow = ((!regroup) && !sitting && rem <= strikeAt && rider.energy > .25) || (regroup && rem <= Math.min(m.strikeAt, 260) && rider.energy > .22) || lateAndStillBehind || m.struck;
     if (strikeNow && rider.energy > .08) {
       if (!m.struck) m.struck = true;
       const leadGap = lead.distance - rider.distance;
-      const farBack = behindBy > 40 && rem > 420;
+      const farBack = behindBy > U(engine, 40) && rem > 420;
       const why = { SENKO: farBack ? '後方から一気にカマす' : '叩いて主導権を奪いにいく', KAMASHI: '後方から一気にカマす', MAKURI: '中団から捲りに出る', OIKOMI: '追い込みに出る' }[m.style] ?? '仕掛ける';
       const wait = this._boxedWait(rider, engine);
       if (wait) return wait;
@@ -333,7 +345,16 @@ export class RaceAI {
       }
       const blocker = this._blockerOn(rider, engine);
       if (blocker) return { action: ACTION.ATTACK, speed: this.sprintSpeed(rider), lane: this._attackLane(rider, engine), reason: `${blocker.number}番のブロックで外へ持っていかれながら踏む (残脚${pct(rider.energy)})`, tag: 'BLOCKED' };
-      return { action: ACTION.ATTACK, speed: this.sprintSpeed(rider), lane: this._attackLane(rider, engine), reason: `残${rem.toFixed(0)}mで${why} (先頭まで${leadGap.toFixed(0)}m・残脚${pct(rider.energy)})` };
+      // 仕掛けの「ダッシュ」: 脚を溜めていた選手は、仕掛けた直後の数秒だけ巡航の最高速を上回る速さを出せる
+      // (競輪の捲り・カマシは、この速度差で先行の上を越えていく。溜めた脚を一気に使うので、そのぶん脚は減る)
+      if (m.struckAt == null) m.struckAt = engine.elapsedTime;
+      const T = globalThis.KF_TUNE ?? {};
+      const since = engine.elapsedTime - m.struckAt, dashT = T.dashT ?? 6;
+      // (ダッシュは前に追いつくための勢い。先頭に並んだら、あとは自分の最高速で押し切る)
+      const reach = (T.dreach ?? 1) ? clamp(leadGap / U(engine, T.dgapU ?? 6), 0, 1) : 1;
+      const dash = m.style === 'OIKOMI' ? 0 : (T.dash ?? 2.5) * rider.profile.acceleration * clamp(1 - since / dashT, 0, 1) * clamp((rider.energy - .3) / .4, 0, 1) * reach;
+      rider._dash = dash; rider._dashUntil = engine.elapsedTime + .3;
+      return { action: ACTION.ATTACK, speed: this.sprintSpeed(rider) + dash, dash, lane: this._attackLane(rider, engine), reason: `残${rem.toFixed(0)}mで${why} (先頭まで${leadGap.toFixed(0)}m・残脚${pct(rider.energy)})` };
     }
 
     const corridor = this._nearestAheadInCorridor(rider, engine, 80);
@@ -350,7 +371,7 @@ export class RaceAI {
     // Front-line leader reacts when the pacer-cut attacker arrives alongside.
     const cutter = engine.rider(pc.cutterNumber);
     const gap = rider.distance - cutter.distance;
-    if (gap > 14) return { action: ACTION.CONTROL_PACE, speed: Math.max(engine.pacer.speed + (engine.pacer.distance - engine.spacing.start - rider.distance) * .3, 0), lane: TRACK_LANE.INNER, reason: '前受けで誘導員の後ろ。外からの上昇を待つ' };
+    if (gap > U(engine, 14)) return { action: ACTION.CONTROL_PACE, speed: Math.max(engine.pacer.speed + (engine.pacer.distance - engine.spacing.start - rider.distance) * .3, 0), lane: TRACK_LANE.INNER, reason: '前受けで誘導員の後ろ。外からの上昇を待つ' };
     const mine = this.strength(rider) + (rider.mindset === MINDSET.TSUPPARI ? .06 : rider.mindset === MINDSET.YIELD_AND_ROLL ? -.20 : 0);
     const theirs = this.strength(cutter);
     // 前受けの動き: ユーザーの指定 → なければこのレースでの作戦 (EXデータなどから決めた 突っ張る / 引く / 中団)
@@ -377,7 +398,7 @@ export class RaceAI {
       if (o.finished || o.number === rider.number || (o.lineId && o.lineId === rider.lineId)) continue;
       if (![ACTION.ATTACK, ACTION.MOVE_UP, ACTION.SWITCH_TO_SELF_POWER].includes(o.action)) continue;
       const gap = rider.distance - o.distance; // positive: attacker is behind
-      if (gap < -3 || gap > 30) continue;
+      if (gap < -U(engine, 3) || gap > U(engine, 30)) continue;
       if (o.laneOffset < rider.laneOffset + 6) continue;
       if (!best || gap < best.gap) best = { rider: o, gap };
     }
@@ -402,9 +423,9 @@ export class RaceAI {
       return this._followPlan(attacker, `${attacker.number}番に叩かれたため後ろに付けて立て直す`, { lane: TRACK_LANE.INNER });
     }
     if (m.style === 'SENKO' || rider.mindset === MINDSET.TSUPPARI || rem <= m.strikeAt) {
-      if (rider.energy > .18 && mine >= theirs - .05) {
+      if (rider.energy > .18 && mine >= theirs + (globalThis.KF_TUNE?.dth ?? .12)) {
         m.defending = true;
-        if (Math.abs(rider.distance - attacker.distance) < 10) this._startContest(attacker, rider, engine, '主導権を渡さず合わせて踏む');
+        if (Math.abs(rider.distance - attacker.distance) < U(engine, globalThis.KF_TUNE?.dgap ?? 10)) this._startContest(attacker, rider, engine, '主導権を渡さず合わせて踏む');
         // 長く先行してきた選手は、もう目一杯に近い。合わせて踏んでも上げられる速度は少しだけ
         const T = globalThis.KF_TUNE ?? {};
         const room = m.struck ? (T.defRoom ?? 0.6) : 0;
@@ -434,8 +455,8 @@ export class RaceAI {
       // (ブロックで外へ張る・踏み合いで並ぶ・切り替えなど、自分から車間を空けたときは千切れではない)
       const trying = rider.action === ACTION.FOLLOW && rider.followTargetNumber === front.number && !m.switchedTo
         && front.speed >= rider.speed - .1 // 車間を詰められていない (詰めている途中なら、口が空いただけ)
-        && Math.abs(front.laneOffset - rider.laneOffset) < 6 // 真後ろで付いているとき (前が外へ持ち出した直後の、走路の移り遅れは数えない)
-        && this._nearestAheadInCorridor(rider, engine, 40)?.rider === front // 間に他の選手が入っていない (割り込まれたのは千切れではない)
+        && Math.abs(front.laneOffset - rider.laneOffset) < (globalThis.KF_TUNE?.cgl ?? 14) // ほぼ真後ろで付いているとき (前が大きく外へ持ち出した直後の、走路の移り遅れは数えない)
+        && !this._someoneBetween(rider, front, engine) // 間に他の選手が入っていない (割り込まれたのは千切れではない)
         && ![ACTION.BLOCK, ACTION.FULL_CONTEST, ACTION.YIELD].includes(front.action);
       if (trying && gap > engine.spacing.follow + (globalThis.KF_TUNE?.cg ?? 2.5)) m.gapSince ??= engine.elapsedTime; else m.gapSince = null;
       if (!m.chigire && m.gapSince != null && engine.elapsedTime - m.gapSince > 1.0) {
@@ -451,7 +472,7 @@ export class RaceAI {
     // (番手は基本的に前を残して差すのが仕事。前が明らかに力尽き、外から捲りが並びかけたときだけ自分から出る)
     if (rider.role === ROLE.BANTE && rem < 220 && rem > PACE.FINAL_STRAIGHT && leader && !this._retreating(leader) && rider.energy > .45) {
       const threat = this._incomingAttack(rider, engine) ?? this._incomingAttack(leader, engine);
-      if (m.banteMakuri || (threat && threat.gap < 12 && leader.energy < (globalThis.KF_TUNE?.bm ?? .25) && leader.speed < threat.rider.speed - 1 && this.strength(rider) >= this.strength(threat.rider) + .02)) {
+      if (m.banteMakuri || (threat && threat.gap < U(engine, 12) && leader.energy < Math.max(globalThis.KF_TUNE?.bm ?? .25, rider.energy - (globalThis.KF_TUNE?.bmr ?? .22)) && leader.speed < threat.rider.speed - 1 && this.strength(rider) >= this.strength(threat.rider) + .02)) {
         m.banteMakuri = true;
         return { action: ACTION.SWITCH_TO_SELF_POWER, speed: this.sprintSpeed(rider), lane: this._attackLane(rider, engine),
           reason: `番手捲り。前の${leader.number}番が一杯(残脚${pct(leader.energy)})で${threat ? `${threat.rider.number}番が来るため` : ''}自分から踏む` };
@@ -461,7 +482,7 @@ export class RaceAI {
     // 切り替え: 自分のラインの先頭が叩かれたら、叩いた側のラインの後ろへ移る
     // ただし先頭が巻き返して自分より前を走っているなら、ラインの先頭に付いていく (見捨てない)
     // (巻き返し = 先頭が自分より前で、もう一度踏んでいる。一度戻ったら、もう切り替えない)
-    const leaderFightsBack = leader && !leader.finished && !this._retreating(leader) && leader.distance > rider.distance + 2 && leader.energy > .12 && leader.action === ACTION.ATTACK;
+    const leaderFightsBack = leader && !leader.finished && !this._retreating(leader) && leader.distance > rider.distance + U(engine, 2) && leader.energy > .12 && leader.action === ACTION.ATTACK;
     if (m.switchedTo && leaderFightsBack) {
       m.switchedTo = null; m.rejoined = true;
       return this._followPlan(front, `${leader.number}番が巻き返したので、再び${front.number}番の後ろに付く`, { lane: front.laneOffset });
@@ -499,7 +520,7 @@ export class RaceAI {
     }
 
     // Lost the wheel? (front mate faded far away or is way off line)
-    if (!front || front.finished || front.distance - rider.distance > 40) {
+    if (!front || front.finished || front.distance - rider.distance > U(engine, 40)) {
       const ahead = engine.findNearestAhead(rider);
       if (ahead) return this._followPlan(ahead, 'ラインが離れたため前の選手を追う', { lane: ahead.laneOffset });
       return { action: ACTION.CONTROL_PACE, speed: PACE.CRUISE, lane: TRACK_LANE.INNER, reason: '位置を保つ' };
@@ -518,7 +539,7 @@ export class RaceAI {
       if (o.finished || o.number === rider.number || (o.lineId && o.lineId === rider.lineId)) continue;
       if (![ACTION.ATTACK, ACTION.FULL_CONTEST, ACTION.SWITCH_TO_SELF_POWER].includes(o.action)) continue;
       const gap = rider.distance - o.distance;
-      if (gap < -4 || gap > 16) continue;
+      if (gap < -U(engine, 4) || gap > U(engine, 16)) continue;
       if (o.laneOffset <= rider.laneOffset + 4 || o.laneOffset > rider.laneOffset + 30) continue;
       if (o.speed - rider.speed < .3) continue;
       if (!best || gap < best.gap) best = { r: o, gap };
@@ -530,7 +551,7 @@ export class RaceAI {
     for (const b of engine.riders) {
       if (b.finished || b.number === rider.number || b.action !== ACTION.BLOCK) continue;
       if (b.lineId && b.lineId === rider.lineId) continue;
-      if (Math.abs(b.distance - rider.distance) < 22 && Math.abs(b.laneOffset - rider.laneOffset) < 26) return b;
+      if (Math.abs(b.distance - rider.distance) < U(engine, 9) && Math.abs(b.laneOffset - rider.laneOffset) < 26) return b;
     }
     return null;
   }
@@ -555,12 +576,12 @@ export class RaceAI {
       const lead = a.distance - d.distance;
       const T = globalThis.KF_TUNE ?? {};
       // 勢い: 後ろから速度差をつけて来た捲りは、並んだ時点で有利 / 内の選手は距離が短いぶん有利
-      c.momentum ??= clamp((a.speed - d.speed) / 10, 0, .12) * (T.mom ?? 1);
-      const sa = this.strength(a) + c.momentum, sd = this.strength(d) + .03;
+      c.momentum ??= clamp((a.speed - d.speed) / 10, 0, T.momc ?? .12) * (T.mom ?? 1);
+      const sa = this.strength(a) + c.momentum, sd = this.strength(d) + (T.dbonus ?? .03);
       let winner = null;
-      if (lead > 6) winner = 'ATTACKER';
-      else if (lead < -9 && elapsed >= 1.5) winner = 'DEFENDER';
-      else if (elapsed >= 1.2 && Math.abs(lead) < 9) {
+      if (lead > U(engine, 6)) winner = 'ATTACKER';
+      else if (lead < -U(engine, 9) && elapsed >= 1.5) winner = 'DEFENDER';
+      else if (elapsed >= 1.2 && Math.abs(lead) < U(engine, 9)) {
         if (a.energy < .2 || sa < sd - .03) winner = 'DEFENDER';
         else if (d.energy < .15 || sd < sa - .06) winner = 'ATTACKER';
       }
@@ -569,7 +590,7 @@ export class RaceAI {
       this.contests = this.contests.filter(x => x !== c);
       const secs = elapsed.toFixed(1);
       if (winner === 'DEFENDER') {
-        const am = this.mem(a); am.gaveUp = true; am.retreatDone = false; am.struck = false; am.noContestUntil = engine.elapsedTime + 3;
+        const am = this.mem(a); am.gaveUp = true; am.retreatDone = false; am.struck = false; am.struckAt = null; am.noContestUntil = engine.elapsedTime + 3;
         const late = engine.raceClock.remainingDistance / (engine.lapScale ?? 1) <= 430;
         engine.emitDecision({ riderNumber: a.number, category: 'CONTEST', action: ACTION.RETREAT, message: `${secs}秒の踏み合いで${d.number}番に競り負け、${late ? '前に出られず' : '後ろへ下げる'} (残脚${pct(a.energy)})` });
         engine.emitDecision({ riderNumber: d.number, category: 'CONTEST', action: ACTION.DEFEND, message: `踏み合いを制して前を守る。ただし脚を使った (残脚${pct(d.energy)})` });
@@ -594,7 +615,7 @@ export class RaceAI {
   }
 
   _noteFatigue(rider, engine, m, rem) {
-    if (m.tiredLogged || rem < 30 || rider.energy > .22) return;
+    if (m.tiredLogged || rem < 30 || rider.energy > (globalThis.KF_TUNE?.tire ?? .3)) return;
     if (![ACTION.ATTACK, ACTION.DEFEND, ACTION.FULL_CONTEST, ACTION.CONTROL_PACE, ACTION.FINAL_SPRINT].includes(rider.action)) return;
     if (engine.positionRank(rider) > 4 && !m.struck) return; // 前の方の選手か、自分から仕掛けた選手 (飲み込まれてからタレることもある)
     m.tiredLogged = true;
@@ -616,13 +637,13 @@ export class RaceAI {
     const leader = engine.rider(st.leader), holder = engine.rider(st.holder);
     if (!leader || leader.finished) return null;
     if (st.result === 'CHALLENGER') {
-      if (this._retreating(leader) || leader.distance - rider.distance > 40) return null;
+      if (this._retreating(leader) || leader.distance - rider.distance > U(engine, 40)) return null;
       return this._followPlan(leader, `競り勝った${leader.number}番の番手を守る`, { lane: leader.laneOffset });
     }
     if (st.result === 'HOLDER' || st.result === 'NONE' || !holder || holder.finished) return null; // 負けたら普通の単騎として走る
 
     const gap = holder.distance - rider.distance;
-    const alongside = Math.abs(gap) < 3.5;
+    const alongside = Math.abs(gap) < U(engine, 3.5);
     if (alongside && st.start == null) {
       st.start = engine.elapsedTime;
       engine.emitDecision({ riderNumber: rider.number, category: 'SERI', action: ACTION.CONTEST, message: `${leader.number}番の番手を巡って、${holder.number}番の外に並んで競る` });
@@ -669,6 +690,12 @@ export class RaceAI {
   }
 
   // 前に遅い選手、横にも選手がいて、どこにも出られない: 無理に踏まず、前の選手の後ろで待つ
+  // 自分と前の選手の間 (前後・横とも) に、他の選手がいるか
+  _someoneBetween(rider, front, engine) {
+    const lo = Math.min(rider.laneOffset, front.laneOffset) - 11, hi = Math.max(rider.laneOffset, front.laneOffset) + 11;
+    return engine.riders.some(o => o !== rider && o !== front && !o.finished && o.distance > rider.distance + .5 && o.distance < front.distance - .5 && o.laneOffset > lo && o.laneOffset < hi);
+  }
+
   _boxedWait(rider, engine) {
     const wall = this._nearestAheadInCorridor(rider, engine, 16);
     if (!wall || wall.rider.speed >= rider.speed - .5 || !rider.boxedBy) return null;
@@ -696,7 +723,7 @@ export class RaceAI {
     let lane = rider.laneOffset, how = '追い込む';
     if (ahead && ahead.rider.speed < rider.speed + 1.5) {
       // 前が詰まっている: 内が空いていれば内を突く(内すくい)
-      const innerFree = rider.laneOffset <= 0 && !engine.riders.some(o => !o.finished && o !== rider && Math.abs(o.laneOffset - TRACK_LANE.INNER) < 11 && o.distance - rider.distance > -8 && o.distance - rider.distance < 30);
+      const innerFree = rider.laneOffset <= 0 && !engine.riders.some(o => !o.finished && o !== rider && Math.abs(o.laneOffset - TRACK_LANE.INNER) < 11 && o.distance - rider.distance > -U(engine, 8) && o.distance - rider.distance < U(engine, 30));
       if (innerFree) { lane = TRACK_LANE.INNER; how = '内を突く'; }
       else {
         // 空いているコースのうち、今の位置から一番近いところを踏む (外を大きく回ると距離を損する)。
@@ -705,12 +732,27 @@ export class RaceAI {
         const open = lane => !engine.riders.some(o => {
           if (o.finished || o === rider) return false;
           const g = o.distance - rider.distance;
-          return Math.abs(o.laneOffset - lane) < 11 && ((g > -3 && g < 4) || (g >= 4 && g < 24 && o.speed < mine - .5));
+          return Math.abs(o.laneOffset - lane) < 11 && ((g > -U(engine, 3) && g < U(engine, 4)) || (g >= U(engine, 4) && g < U(engine, 24) && o.speed < mine - .5));
         });
+        // 横へ動く途中の走路も空いていないと、そのコースには出られない (途中で前の選手に詰まって包まれる)
+        const transitFree = l => {
+          const lo = Math.min(l, rider.laneOffset), hi = Math.max(l, rider.laneOffset);
+          return !engine.riders.some(o => {
+            if (o.finished || o === rider || o === ahead.rider) return false;
+            const g = o.distance - rider.distance;
+            return o.laneOffset > lo - 9 && o.laneOffset < hi + 9 && g > -U(engine, 2) && g < U(engine, 6) && o.speed < mine + .3;
+          });
+        };
         const lanes = [];
-        for (let l = -18; l <= 42; l += 4) if (open(l)) lanes.push(l);
+        for (let l = -18; l <= 42; l += 4) if (open(l) && transitFree(l)) lanes.push(l);
         const best = lanes.sort((x, y) => Math.abs(x - rider.laneOffset) - Math.abs(y - rider.laneOffset))[0];
         const outside = clamp(ahead.rider.laneOffset + 13, -18, 42);
+        if (best == null && (globalThis.KF_TUNE?.stay ?? 1)) {
+          // 出るコースがない: 無理に外へ振らず、前の車輪に付いたまま踏む (マーク)
+          const t = ahead.rider;
+          return { action: ACTION.FINAL_SPRINT, speed: this.sprintSpeed(rider), lane: rider.laneOffset,
+            reason: `最後の直線。外が塞がっていて出られず、${t.number}番の後ろで踏む (残脚${pct(rider.energy)})` };
+        }
         if ((globalThis.KF_TUNE?.fs ?? 1) && best != null && best < outside - 4 && best > TRACK_LANE.INNER + 2) { lane = best; how = '中を割って伸びる'; }
         else { lane = best ?? outside; how = '外へ持ち出して追い込む'; }
       }
@@ -733,7 +775,7 @@ export class RaceAI {
       // Slipstream following: a follower can match a wheel faster than its own solo pace.
       const t = d.followTarget, gap = t.distance - rider.distance;
       // (追走で極端に減速しない: 前の選手が後ろにいても歩くような速度にはしない)
-      speed = Math.max(Math.min(t.speed, PACE.CRUISE) - 3, t.speed + clamp((gap - engine.spacing.follow) * .35, -2.5, 4) + clamp((t.speed - rider.speed) * .6, -2, 2));
+      speed = Math.max(Math.min(t.speed, PACE.CRUISE) - 3, t.speed + clamp((gap - engine.spacing.follow) * .35 / U(engine, 1), -2.5, 4) + clamp((t.speed - rider.speed) * .6, -2, 2));
       // 踏み出しへの反応: 前が急に加速したら、後ろは一瞬遅れて踏み出す (3番手ほど遅れやすい)。
       // 遅れて口が空くと風よけが弱まり、脚の差があればそのまま千切れる
       const mm = this.mem(rider), T = globalThis.KF_TUNE ?? {};
@@ -744,10 +786,10 @@ export class RaceAI {
       if (mm.jumpAt != null && engine.elapsedTime - mm.jumpAt < react) speed = Math.min(speed, rider.speed + .1);
       // 付いていける速さには限りがある: 今の残脚で出せる速さ + 風よけの分まで。
       // 前の選手との脚の差がそれ以上あれば、口が空いて千切れる (3番手が千切れやすいのはこのため)
-      speed = Math.min(speed, this.followCap(rider));
+      speed = Math.min(speed, this.followCap(rider, t, engine.elapsedTime));
     }
     // Nobody can ride faster than their own sprint ceiling, whatever the tactic asks for.
-    speed = Math.min(speed ?? PACE.CRUISE, rider.profile.topSpeed + rider.profile.sprintBonus);
+    speed = Math.min(speed ?? PACE.CRUISE, rider.profile.topSpeed + rider.profile.sprintBonus + (d.dash ?? 0));
     const lane = Number.isFinite(d.lane) ? d.lane : rider.laneOffset;
     return {
       action: d.action, targetSpeed: Math.max(0, speed ?? PACE.CRUISE), laneTarget: lane,

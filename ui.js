@@ -215,6 +215,30 @@ export class UIRenderer {
         return -38 + (laneOffset + 18) * 1.35;
     }
 
+    // 画面に描く位置 (前後): 計算では自転車1台分(約2.6m)の車間で走っているが、そのまま描くと
+    // 選手の丸が重なって団子に見える。先頭の選手は本当の位置に置き、後ろへ順に、
+    // 「詰まって付いている車間」だけを広げて描く (離れている車間・千切れはそのままの差で見せる)
+    displayDistances(state) {
+        const S = 2.5, tight = 3.4; // 広げる倍率 / 「付いている」とみなす車間 (m)
+        const live = state.riders.filter(r => !r.finished).sort((a, b) => b.distance - a.distance);
+        const out = new Map(state.riders.filter(r => r.finished).map(r => [r.number, r.distance]));
+        let prevTrue = null, prevShown = null;
+        for (const r of live) {
+            if (prevTrue == null) { out.set(r.number, r.distance); }
+            else {
+                const gap = prevTrue - r.distance;
+                out.set(r.number, prevShown - (gap + (S - 1) * Math.min(gap, tight)));
+            }
+            prevTrue = r.distance; prevShown = out.get(r.number);
+        }
+        this._shown = out;
+        return out;
+    }
+
+    shownDistance(rider) {
+        return this._shown?.get(rider.number) ?? rider.distance;
+    }
+
     setTrackLength(length) {
         this.trackGeometry = { ...this.trackGeometry, length };
     }
@@ -537,6 +561,8 @@ export class UIRenderer {
         // 選手
         // =====================================================
 
+        this.displayDistances(state);
+
         const orderedRiders =
             [...state.riders]
                 .sort(
@@ -553,7 +579,7 @@ export class UIRenderer {
 
             const point =
                 this.getBankCoordinates(
-                    rider.distance,
+                    this.shownDistance(rider),
                     this.riderLaneToScreen(rider.laneOffset)
                 );
 
@@ -585,7 +611,7 @@ export class UIRenderer {
     drawSpotlight(state, number, strength = 1) {
         const rider = state.riders.find(r => r.number === number);
         if (!rider) return;
-        const p = this.getBankCoordinates(rider.distance, this.riderLaneToScreen(rider.laneOffset));
+        const p = this.getBankCoordinates(this.shownDistance(rider), this.riderLaneToScreen(rider.laneOffset));
         const c = this.ctx;
         const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
         c.save();

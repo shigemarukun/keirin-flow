@@ -40,11 +40,20 @@
         <main>
             <section id="bank-container" aria-label="競輪シミュレーション">
                 <canvas id="bankCanvas" width="800" height="600"></canvas>
+                <div id="race-caption" aria-live="polite"><span class="rc-phase"></span><span class="rc-text"></span></div>
                 <div id="race-info-overlay">
                     <span id="lap-counter">残り2周 / 残り800m</span>
                     <span id="race-status">PRE-RACE</span>
                     <span id="gap-status">車間: --</span>
                     <span id="protocol-status">AI: 各選手が自律判断</span>
+                </div>
+                <div id="jump-bar" aria-label="見たい場面から再生">
+                    <span class="jb-label">ここから見る</span>
+                    <button type="button" data-rem="770">赤板</button>
+                    <button type="button" data-rem="600">打鐘</button>
+                    <button type="button" data-rem="400">最終周</button>
+                    <button type="button" data-rem="200">バック</button>
+                    <button type="button" data-rem="70">直線</button>
                 </div>
                 <div id="rider-legend" aria-label="選手の縁の色">
                     <span><i style="background:#38bdf8"></i>仕掛け</span>

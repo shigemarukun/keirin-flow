@@ -489,6 +489,14 @@ export class PhysicsEngine{
   if(this.riders.every(r=>r.finished)){this.isStarted=false;this.accumulator=0;this._finalizeRanking();this.onFinishCallback?.(this.ranking.map(x=>({...x})));}
  }
 
+ // 「赤板から見る」などのため、表示せずに指定の残り距離まで一気に進める
+ fastForwardTo(remaining){
+  if(!this.isStarted)this.start();
+  let guard=0;
+  while(this.raceClock.remainingDistance>remaining&&!this.riders.every(r=>r.finished)&&guard<200000){this._step(this.fixedStep);guard++;}
+  this.accumulator=0;
+ }
+
  getDiagnostics(){
   const gaps=[];
   for(const rider of this.riders){

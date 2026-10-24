@@ -84,12 +84,42 @@ window.addEventListener('DOMContentLoaded',()=>{
  });
  const barStatus=document.getElementById('mobile-bar-status');
 
+ // 見たい場面から再生 (赤板・打鐘・最終周・バック・直線)
+ document.getElementById('jump-bar')?.addEventListener('click',async event=>{
+  const b=event.target.closest('[data-rem]');if(!b)return;
+  await ensureAudioReady();
+  physics.reset();physics.fastForwardTo(Number(b.dataset.rem));physics.start();
+  // 少しゆっくり見せる
+  const slow=Math.min(1,physics.timeScale);physics.setSpeedScale(slow);
+ });
+
+ // 実況テロップ: 直近の大事な判断を、コースの上に数秒出す
+ const caption=document.getElementById('race-caption');
+ const capPhase=caption?.querySelector('.rc-phase'),capText=caption?.querySelector('.rc-text');
+ const KEY=/誘導切り|突っ張|出させ|先行|叩|カマ|捲り|番手|ブロック|牽制|切り替え|踏み合い|タレ|内を突|包まれ|飲み込|競り|打鐘/;
+ const phaseOf=rem=>rem>770?'周回':rem>600?'赤板':rem>400?'打鐘':rem>200?'最終周':rem>65?'バック〜4角':rem>0?'直線':'ゴール';
+ let shownId=null;
+ const updateCaption=state=>{
+  if(!caption)return;
+  const now=state.elapsedTime;
+  const logs=state.decisionLogs??[];
+  let pick=null;
+  for(let i=logs.length-1;i>=0&&i>=logs.length-12;i--){const l=logs[i];if(now-l.time>3.2)break;if(l.category==='BELL'||(l.riderNumber!=null&&KEY.test(l.message))){pick=l;break;}}
+  const rem=state.raceClock?.remainingDistance??800;
+  if(capPhase){const ph=state.isStarted||rem<800?phaseOf(rem):'';if(capPhase.textContent!==ph)capPhase.textContent=ph;}
+  if(pick&&pick.id!==shownId){shownId=pick.id;capText.textContent=pick.riderNumber!=null?`${pick.riderNumber}番 ${pick.message.replace(/\s*\(.*?\)\s*$/,'').replace(/^残\d+mで?/,'').replace(/^残\d+mから/,'')}`:pick.message;caption.classList.add('is-on');caption.dataset.rider=pick.riderNumber??'';}
+  if(!pick&&caption.classList.contains('is-on')){caption.classList.remove('is-on');caption.dataset.rider='';}
+  if(!state.isStarted&&rem>=800){caption.classList.remove('is-on');}
+  return pick?.riderNumber??null;
+ };
+
  let lastTime=performance.now();
  const frame=now=>{
   const dt=(now-lastTime)/1000;lastTime=now;
   physics.update(dt);
   const state=physics.getState();
   ui.drawBank();ui.drawRiders(state);ui.updateUI(state);
+  const spot=updateCaption(state);if(spot!=null)ui.drawSpotlight(state,spot);
   if(barStatus){
    const rem=Math.max(0,Math.ceil(state.raceClock?.remainingDistance??0));
    const top=state.ranking?.length?[...state.ranking].sort((a,b)=>a.time-b.time).slice(0,3).map(r=>r.number).join('-'):null;

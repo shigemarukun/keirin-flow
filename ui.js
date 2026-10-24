@@ -574,6 +574,22 @@ export class UIRenderer {
     }
 
 
+    // 実況テロップで話題になっている選手に、光る輪を付ける
+    drawSpotlight(state, number, strength = 1) {
+        const rider = state.riders.find(r => r.number === number);
+        if (!rider) return;
+        const p = this.getBankCoordinates(rider.distance, this.riderLaneToScreen(rider.laneOffset));
+        const c = this.ctx;
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
+        c.save();
+        c.beginPath();
+        c.arc(p.x, p.y, 17 + pulse * 4, 0, Math.PI * 2);
+        c.strokeStyle = `rgba(250, 204, 21, ${0.55 * strength + 0.35 * pulse * strength})`;
+        c.lineWidth = 3;
+        c.stroke();
+        c.restore();
+    }
+
     updateUI(state) {
 
         const lapCounter =

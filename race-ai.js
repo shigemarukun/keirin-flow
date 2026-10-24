@@ -99,7 +99,7 @@ export class RaceAI {
     const m = this.mem(rider);
     if (!m.style) {
       // ユーザーが展開を指定していればそれを優先 (先行 / カマシ / 捲り / 追込)、なければ能力から決める
-      m.style = TACTICS.includes(rider.profile.tactic) ? rider.profile.tactic : this.styleOf(rider);
+      m.style = TACTICS.includes(rider.profile.tactic) ? rider.profile.tactic : (TACTICS.includes(rider.profile.tacticPlan) ? rider.profile.tacticPlan : this.styleOf(rider));
       m.forced = TACTICS.includes(rider.profile.tactic);
       m.strikeAt = this.strikeDistance(rider, m.style);
     }
@@ -241,7 +241,11 @@ export class RaceAI {
       const cutter = engine.rider(pc.cutterNumber);
       const cutTail = engine.riders.filter(o => !o.finished && o.lineId && o.lineId === cutter?.lineId).sort((a, b) => a.distance - b.distance)[0] ?? cutter;
       m.letInSince ??= engine.elapsedTime;
-      if (!cutter || !cutTail || cutTail.distance >= rider.distance + 14 || engine.elapsedTime - m.letInSince > 8) m.letInDone = true;
+      if (!cutter || !cutTail || cutTail.distance >= rider.distance + 14 || engine.elapsedTime - m.letInSince > 8) {
+        m.letInDone = true;
+        // 引く: 前に入れたら、そのまま後方まで下げて巻き返しを狙う
+        if (m.hiku) { m.gaveUp = true; m.retreatDone = false; m.hikuRetreat = true; }
+      }
       else {
         return { action: ACTION.YIELD, speed: Math.max(PACE.CRUISE - 4, (engine.pacer.state === 'EXITED' ? cutter.speed : Math.min(cutter.speed, engine.pacer.speed + 1)) - 2.5), lane: TRACK_LANE.INNER, reason: `${cutter.number}番のラインを前に入れるため、少し下げて待つ` };
       }
@@ -267,7 +271,7 @@ export class RaceAI {
       for (const o of engine.riders) if (!o.finished && o.lineId !== rider.lineId && (!tail || o.distance < tail.distance)) tail = o;
       if (tail && rider.distance > tail.distance - 15 && engine.raceClock.remainingDistance / (engine.lapScale ?? 1) > 300) {
         const front = this._frontRunner(engine);
-        return { action: ACTION.RETREAT, speed: Math.max(7, Math.min(tail.speed, front?.speed ?? tail.speed) - 5.5), lane: TRACK_LANE.OUTSIDE, reason: '突っ張られたので外を下げ、後方へ引いて立て直す' };
+        return { action: ACTION.RETREAT, speed: Math.max(7, Math.min(tail.speed, front?.speed ?? tail.speed) - 5.5), lane: TRACK_LANE.OUTSIDE, reason: m.hikuRetreat ? '前受けから後方まで引いて、巻き返しを狙う' : '突っ張られたので外を下げ、後方へ引いて立て直す' };
       }
       m.retreatDone = true;
     }
@@ -311,7 +315,9 @@ export class RaceAI {
     // the further back we sit, the earlier a makuri has to start
     const behindBy = lead ? lead.distance - rider.distance : 0;
     const strikeAt = m.style === 'MAKURI' ? m.strikeAt + clamp((behindBy - 35) * (globalThis.KF_TUNE?.mkb ?? 1.5), 0, globalThis.KF_TUNE?.mkc ?? 80) : m.strikeAt;
-    const strikeNow = (!m.gaveUp && rem <= strikeAt && rider.energy > .25) || (m.gaveUp && rem <= Math.min(m.strikeAt, 260) && rider.energy > .22) || lateAndStillBehind || m.struck;
+    // (前受けから自分で引いた選手は、競り負けて下げたのとは違い、脚質どおりのタイミングで巻き返す)
+    const regroup = m.gaveUp && !m.hikuRetreat;
+    const strikeNow = ((!regroup) && rem <= strikeAt && rider.energy > .25) || (regroup && rem <= Math.min(m.strikeAt, 260) && rider.energy > .22) || lateAndStillBehind || m.struck;
     if (strikeNow && rider.energy > .08) {
       if (!m.struck) m.struck = true;
       const leadGap = lead.distance - rider.distance;
@@ -347,8 +353,16 @@ export class RaceAI {
     if (gap > 14) return { action: ACTION.CONTROL_PACE, speed: Math.max(engine.pacer.speed + (engine.pacer.distance - engine.spacing.start - rider.distance) * .3, 0), lane: TRACK_LANE.INNER, reason: '前受けで誘導員の後ろ。外からの上昇を待つ' };
     const mine = this.strength(rider) + (rider.mindset === MINDSET.TSUPPARI ? .06 : rider.mindset === MINDSET.YIELD_AND_ROLL ? -.20 : 0);
     const theirs = this.strength(cutter);
-    const forced = rider.profile.frontResponse; // ユーザーが「突っ張る / 出させる」を指定していればそれに従う
-    if (forced === 'TSUPPARI' || (forced !== 'YIELD' && mine > theirs + .02)) {
+    // 前受けの動き: ユーザーの指定 → なければこのレースでの作戦 (EXデータなどから決めた 突っ張る / 引く / 中団)
+    const forced = rider.profile.frontResponse ?? rider.profile.frontPlan;
+    const label = rider.profile.frontResponse ? '指定どおり、' : '';
+    if (forced === 'HIKU' || forced === 'CHUDAN' || forced === 'YIELD') {
+      pc.outcome = 'YIELD';
+      if (forced === 'HIKU') m.hiku = true;
+      return { action: ACTION.YIELD, speed: engine.pacer.speed - .6, lane: TRACK_LANE.INNER,
+        reason: forced === 'HIKU' ? `${label}${cutter.number}番を出させて後方へ引く (巻き返し狙い)` : `${label}${cutter.number}番を出させて、その後ろの中団を取る` };
+    }
+    if (forced === 'TSUPPARI' || mine > theirs + .02) {
       pc.outcome = 'CONTEST';
       this._startContest(cutter, rider, engine, '誘導切りに来た相手を突っ張る');
       return { action: ACTION.DEFEND, speed: cutter.speed + 1.2, lane: TRACK_LANE.INNER, reason: forced === 'TSUPPARI' ? '指定どおり、外から来た相手を突っ張る' : `外から来た相手を突っ張る (自分${mine.toFixed(2)} > 相手${theirs.toFixed(2)})` };

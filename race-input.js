@@ -83,6 +83,7 @@ export function mountRaceInput(container, { onApply }) {
     </label>
     <p class="ri-help ri-grade-note"></p>
     <p class="ri-help ri-bank-note"></p>
+    <p class="ri-help ri-ex-note"></p>
     <p class="ri-help">名前か得点を入れた車番だけが出走します。B=バック回数、S=S回数(分からなければ空欄で大丈夫)。</p>
     <div class="ri-head"><span>車</span><span>選手名</span><span>級班</span><span>得点</span><span>脚質</span><span>B</span><span>S</span></div>
     <div class="ri-rows">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(rowHtml).join('')}</div>
@@ -118,6 +119,8 @@ export function mountRaceInput(container, { onApply }) {
 
   const $ = sel => container.querySelector(sel);
   let current = null; // 最後に走らせたレースデータ
+  // 表に欄がないデータ (EXデータ・府県・レース種別) は、読み取ったものをここに持っておき、予想するときに戻す
+  let extras = { riders: {}, race: {} };
   const rows = [...container.querySelectorAll('.ri-row')];
   container.querySelector('.ri-venue-name').addEventListener('change', () => bankNote());
   const kimRow = car => container.querySelector(`.ri-kim-row[data-car="${car}"]`);
@@ -149,6 +152,7 @@ export function mountRaceInput(container, { onApply }) {
         kim[input.dataset.k] = /[.%]/.test(v) ? kimariteFromPercent(n) : n;
       }
       riders.push({
+        ...(extras.riders[car] ?? {}),
         class: row.querySelector('.ri-class').value || undefined,
         history: container.querySelector(`.ri-hist-row[data-car="${car}"] .ri-history`).value || undefined,
         kimarite: Object.keys(kim).length ? kim : undefined,
@@ -161,7 +165,7 @@ export function mountRaceInput(container, { onApply }) {
     // 展開の指定(戦法・前受けの対応)は「展開を選ぶ」で付けたものを引き継ぐ
     const venue = $('.ri-venue-name').value, raceNo = Number($('.ri-race-no').value) || undefined;
     const grade = $('.ri-grade').value || undefined;
-    return { race: { ...(current?.race ?? {}), venue: venue || undefined, raceNo, grade, girls: grade === 'L' || undefined }, bank: bankOfVenue(venue) ?? undefined, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
+    return { race: { ...(current?.race ?? {}), ...extras.race, venue: venue || undefined, raceNo, grade, girls: grade === 'L' || undefined }, bank: bankOfVenue(venue) ?? undefined, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
       tactics: { ...(current?.tactics ?? {}) }, frontResponse: { ...(current?.frontResponse ?? {}) } };
   };
 
@@ -170,6 +174,12 @@ export function mountRaceInput(container, { onApply }) {
     $('.ri-bank-note').textContent = b === 333 ? '333バンク: 直線が短く、逃げ・先行が残りやすい' : b === 500 ? '500バンク: 直線が長く、差し・追い込みが届きやすい' : '400バンク';
   };
   const fill = data => {
+    extras = {
+      riders: Object.fromEntries((data?.riders ?? []).filter(r => r.ex || r.pref).map(r => [Number(r.car), { ex: r.ex ?? undefined, pref: r.pref ?? undefined }])),
+      race: { kind: data?.race?.kind ?? undefined, name: data?.race?.name ?? undefined }
+    };
+    const exN = Object.values(extras.riders).filter(x => x.ex).length;
+    $('.ri-ex-note').textContent = exN ? `EXデータ: ${exN}人分あり (前受けの動き・千切れやすさ・得意な位置に反映します)` : '';
     $('.ri-venue-name').value = data?.race?.venue ?? '';
     $('.ri-race-no').value = data?.race?.raceNo ?? '';
     $('.ri-grade').value = (data?.girls ?? data?.race?.girls) ? 'L' : (data?.race?.grade ?? '');
@@ -238,7 +248,7 @@ export function mountRaceInput(container, { onApply }) {
       lines: data.lines?.length ? data.lines : [] });
     if (!data.lines?.length) $('.ri-lines').value = '';
     const list = data.riders.map(r => `<li><span class="ri-car car-${r.car}">${r.car}</span> ${esc(r.name ?? '')} ${esc(r.class ?? '—')} ${r.score ?? '—'} ${esc(r.style ?? '')}</li>`).join('');
-    out.innerHTML = `<p class="ri-ok">${found.riders}人を読み取りました${found.lines ? '・並びも読み取りました' : ''}。下の表を確認して「この出走表で予想する」を押してください。</p>
+    out.innerHTML = `<p class="ri-ok">${found.riders}人を読み取りました${found.lines && !found.linesPredicted ? '・並びも読み取りました' : ''}${found.ex ? `・EXデータ${found.ex}人分も読み取りました` : ''}。下の表を確認して「この出走表で予想する」を押してください。</p>
       <ul class="ri-paste-list">${list}</ul>${warnings.map(w => `<p class="ri-warn">${esc(w)}</p>`).join('')}`;
     showErrors([]);
     $('.ri-step').scrollIntoView({ behavior: 'smooth', block: 'start' });

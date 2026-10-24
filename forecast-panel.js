@@ -23,6 +23,15 @@ function riderEvalHtml(setup, forecast, marks) {
     const style = role.label === '先頭' || role.label === '単騎' ? (STYLE_LABEL[p.tactic] ?? STYLE_LABEL[ai.styleOf({ profile: p, mindset: p.mindset })]) : 'マーク';
     const notes = [];
     if (lv.history) notes.push(lv.steps?.find(x => /本来|昇級|特別/.test(x)) ?? '');
+    // EXデータの根拠
+    const exLine = (setup.meta?.conversion?.[n] ?? []).find(x => x.startsWith('EX:'));
+    if (exLine) notes.push(exLine.replace(/ → 脚質.*$/, ''));
+    const aptLine = (setup.meta?.conversion?.[n] ?? []).find(x => x.startsWith('EXの成績'));
+    if (aptLine) notes.push(aptLine);
+    if ((role.label === '先頭' || role.label === '単騎') && p.frontPlanProbs && p.frontPlanFromEx) {
+      const fp = p.frontPlanProbs, P = v => `${Math.round((v ?? 0) * 100)}%`;
+      notes.push(`前受けなら: 引く${P(fp.HIKU)}・中団${P(fp.CHUDAN)}・突っ張る${P(fp.TSUPPARI)}`);
+    }
     // 千切れ: 前の選手との脚の差 (地力の差) が大きい追走選手は、全開の踏み出しに付いていけない
     if (role.front) {
       const gapPow = (setup.riders[role.leader]?.power ?? 0) - p.power;
@@ -79,13 +88,13 @@ export function mountForecastPanel(container, { onWatch } = {}) {
     if (scenarios.length) {
       html += `<div class="fc-tabs" role="tablist">${scenarios.map((x, i) => `
         <button type="button" role="tab" class="fc-tab${i === sel ? ' is-on' : ''}" data-sel="${i}" aria-selected="${i === sel}">
-          <span>${esc(x.label)}</span><strong>${combo(x.exacta)}</strong><small>${forecast.n}回中${x.count}回</small>
+          <span>${esc(x.label)}</span><strong>${combo(x.exacta)}</strong><small>${x.theme ? `${esc(x.theme.replace(/\s*\(.*\)/, ''))}<br>` : ''}${forecast.n}回中${x.count}回</small>
         </button>`).join('')}</div>`;
     }
     const cond = (sc?.notable ?? []).map(x => `${x.car}番の調子が${x.condition > 0 ? '良い' : '重い'}`).join('、');
     html += `
       <div class="fc-main">
-        <div class="fc-label">${sc ? `AIの${esc(sc.label)}の展開` : 'AIの予想 <small>(何通りもの未来を計算中…)</small>'}</div>
+        <div class="fc-label">${sc ? `AIの${esc(sc.label)}の展開${sc.theme ? ` <small>${esc(sc.theme)}</small>` : ''}` : 'AIの予想 <small>(何通りもの未来を計算中…)</small>'}</div>
         <div class="fc-order">${top3.map((n, i) => `<span class="fc-place"><em>${i + 1}着</em>${carChip(n)}${mark(n)}${name(n)}</span>`).join('')}</div>
         ${k ? `<div class="fc-kimarite">決まり手: <strong>${esc(k.how)}</strong>${sc ? ` ・ ${forecast.n}回中${sc.count}回 (${pct(sc.rate)})` : ''}</div>` : ''}
         ${cond ? `<div class="fc-cond">この展開になりやすい日: ${esc(cond)}</div>` : ''}

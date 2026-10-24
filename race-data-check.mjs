@@ -1,5 +1,5 @@
 // KEIRIN FLOW — 出走表(レースデータ)の変換テスト
-import { toRaceSetup, validateRaceData, parseLines, riderToProfile, SAMPLE_RACE_DATA, normalizeClass, raceFamily, riderLevel, parseRaceCardText, kimariteFromPercent } from './race-data.js';
+import { toRaceSetup, validateRaceData, parseLines, riderToProfile, SAMPLE_RACE_DATA, normalizeClass, raceFamily, riderLevel, parseRaceCardText, kimariteFromPercent, parseExData, styleFromEx, predictLines, frontPlanProbs, exTendencies } from './race-data.js';
 import { PhysicsEngine } from './engine.js';
 
 let failures = 0;
@@ -115,6 +115,111 @@ check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い
   check(kim.data.riders[0].kimarite?.makuri > kim.data.riders[0].kimarite?.nige, 'WINTICKETの「連対時の決まり手(%)」も読む', JSON.stringify(kim.data.riders[0].kimarite));
   check(kimariteFromPercent(25) === 5, '決まり手の%は、直近およそ20走として回数に直す');
   check(parseRaceCardText('今日は雨').warnings.length > 0, '出走表でない文字なら、読めなかったと知らせる');
+}
+
+// ---------- WINTICKET EXデータ (熊本12R 2026-10-24 の形式) ----------
+{
+  const KUMAMOTO = `競輪場：熊本
+レース：12R
+レース種別：S級準決勝
+車番	選手名	府県	級班
+1	嘉永泰斗	熊本	SS
+2	菅田壱道	宮城	S1
+3	森田優弥	埼玉	S2
+4	小原佑太	青森	S1
+5	三谷竜生	奈良	S1
+6	西岡利起	奈良	S2
+7	中川誠一郎	熊本	S1
+8	東矢圭吾	熊本	S1
+9	宿口陽一	埼玉	S1
+
+4. WINTICKET EXデータ：戦法別
+車番	かまし成功率	突っ張り成功率	ちぎり率	ちぎられ率	飛びつき成功率
+1	50% (1/2)	100% (1/1)	25% (4/16)	0% (0/4)	—
+2	—	100% (2/2)	0% (0/6)	8% (2/25)	100% (1/1)
+3	100% (5/5)	100% (3/3)	21% (7/33)	—	100% (2/2)
+4	83% (10/12)	85% (6/7)	20% (6/30)	0% (0/1)	—
+5	100% (1/1)	71% (5/7)	10% (2/19)	0% (0/6)	100% (1/1)
+6	60% (3/5)	42% (3/7)	10% (3/30)	—	—
+7	—	—	0% (0/1)	10% (2/20)	—
+8	50% (2/4)	57% (4/7)	19% (4/21)	0% (0/2)	—
+9	—	—	—	3% (1/28)	—
+
+5. WINTICKET EXデータ：ライン先頭時
+車番	1着	2着	3着	着外
+1	27% (15/55)	12% (7/55)	7% (4/55)	52% (29/55)
+2	30% (12/39)	15% (6/39)	15% (6/39)	38% (15/39)
+3	36% (28/77)	15% (12/77)	12% (10/77)	35% (27/77)
+4	13% (11/84)	13% (11/84)	13% (11/84)	60% (51/84)
+5	19% (12/63)	15% (10/63)	4% (3/63)	60% (38/63)
+6	26% (23/86)	20% (18/86)	11% (10/86)	40% (35/86)
+7	18% (2/11)	9% (1/11)	9% (1/11)	63% (7/11)
+8	16% (12/75)	12% (9/75)	17% (13/75)	54% (41/75)
+9	25% (1/4)	0% (0/4)	25% (1/4)	50% (2/4)
+
+6. WINTICKET EXデータ：番手時
+車番	1着	2着	3着	着外
+1	50% (4/8)	25% (2/8)	0% (0/8)	25% (2/8)
+2	36% (15/41)	9% (4/41)	12% (5/41)	41% (17/41)
+3	—	—	—	—
+4	100% (2/2)	0% (0/2)	0% (0/2)	0% (0/2)
+5	30% (6/20)	10% (2/20)	20% (4/20)	40% (8/20)
+6	—	—	—	—
+7	30% (13/42)	14% (6/42)	9% (4/42)	45% (19/42)
+8	33% (1/3)	0% (0/3)	33% (1/3)	33% (1/3)
+9	18% (14/74)	20% (15/74)	10% (8/74)	50% (37/74)
+
+7. WINTICKET EXデータ：400mバンク
+車番	1着	2着	3着	着外
+1	28% (18/63)	14% (9/63)	6% (4/63)	50% (32/63)
+4	18% (13/72)	12% (9/72)	12% (9/72)	56% (41/72)`;
+  const ex = parseExData(KUMAMOTO);
+  check(ex[4]?.tactics.tsuppari?.s === 6 && ex[4].tactics.tsuppari.n === 7 && ex[2].tactics.kamashi === null && ex[9].tactics.tsuppari === null && ex[5].tactics.chigirare?.n === 6,
+    'EXデータ(戦法別)を、割合だけでなく 分子/分母 で読み、「—」はデータなし(0と区別)にする', JSON.stringify(ex[4].tactics.tsuppari));
+  check(ex[4]?.finish.asLeader?.n === 84 && ex[9]?.finish.asBante?.w?.s === 14 && ex[3]?.finish.asBante?.n === 0 && ex[1]?.finish.bank400?.n === 63,
+    'EXデータ(ライン先頭時・番手時・400mバンク)の着順を、表のタイトルで見分けて読む');
+  check(styleFromEx(ex[3]) === '逃' && styleFromEx(ex[2]) === '両' && styleFromEx(ex[9]) === '追', '脚質が分からないときは、先頭と番手で走った回数から自力型か追込型かを見る');
+  const t4 = exTendencies(ex[4]), t3 = exTendencies(ex[3]);
+  check(t3.tsuppariSuccess < 0.9 && t4.tsuppariFreq > exTendencies(ex[1]).tsuppariFreq, '試行回数が少ない100%(3/3)は過大評価しない。突っ張りの回数が多い選手ほど突っ張りやすい',
+    `3番の突っ張り成功 ${t3.tsuppariSuccess.toFixed(2)} / 突っ張り傾向 4番${t4.tsuppariFreq.toFixed(2)} > 1番${exTendencies(ex[1]).tsuppariFreq.toFixed(2)}`);
+  const p4 = frontPlanProbs('逃', ex[4]), p9 = frontPlanProbs('追', ex[9]);
+  check(Math.abs(p4.TSUPPARI + p4.HIKU + p4.CHUDAN - 1) < 0.02 && p4.TSUPPARI > p9.TSUPPARI && p4.HIKU > p4.CHUDAN && p9.CHUDAN > p9.HIKU,
+    '前受けの動きの割合: 突っ張りの多い先行型は突っ張り・引くが多く、追込型は中団を取る', `4番 ${JSON.stringify(p4)} / 9番 ${JSON.stringify(p9)}`);
+  const parsed = parseRaceCardText(KUMAMOTO);
+  const groups = parsed.data.lines.map(l => l.join('')).sort().join(' ');
+  check(parsed.found.ex === 9 && parsed.found.linesPredicted && groups === '39 42 65 817' && parsed.data.race.venue === '熊本' && parsed.data.race.kind === 'semifinal',
+    '並びが無ければ、AIが地区と先行度から並びを予想する (熊本の実際の並び 8-1-7 / 4-2 / 3-9 / 6-5)', groups);
+  const s = toRaceSetup(parsed.data);
+  check(s.riders[4].frontPlan && s.riders[4].frontPlanProbs && s.meta.conversion[4].some(x => x.startsWith('EX:')) && s.riders[2].followAllowance < s.riders[1].followAllowance,
+    'EXデータが能力と作戦に反映される (前受けの動き・ちぎられ率→付いていける速さ)、根拠も残る', `2番 ${s.riders[2].followAllowance} < 1番 ${s.riders[1].followAllowance}`);
+  const legacy = toRaceSetup({ ...SAMPLE_RACE_DATA, frontResponse: { 1: 'YIELD' } });
+  check(legacy.riders[1].frontResponse === 'CHUDAN', '前の版の「出させる」の指定は「中団」として読む');
+  const wt = parseRaceCardText(`枠 車 選手名 AI 競走得点 S H B 脚 逃
+1 1 嘉永泰斗 熊本 SS 28歳 113期 114.33 3 2 5 逃 1
+2 2 菅田壱道 宮城 S1 40歳 91期 115.63 10 0 1 両 0`);
+  check(wt.data.riders[0].score === 114.33 && wt.data.riders[0].start === 3 && wt.data.riders[0].back === 5 && wt.data.riders[1].style === '両' && wt.data.riders[0].pref === '熊本',
+    'WINTICKETの基本情報の書き方(得点のあとに S H B が数字だけ)も読める', JSON.stringify(wt.data.riders[0]));
+}
+
+// ---------- 前受けの動き (突っ張る / 引く / 中団) が、実際のレースでそのとおりに起きる ----------
+{
+  const { forecastRaces } = await import('./forecast.js');
+  const base = () => ({ race: { venue: '小倉' }, lines: [[1, 2, 3], [4, 5], [6, 7]], riders: [
+    { car: 1, score: 110, style: '逃', back: 8 }, { car: 2, score: 108, style: '追' }, { car: 3, score: 104, style: '追' },
+    { car: 4, score: 109, style: '両' }, { car: 5, score: 106, style: '追' }, { car: 6, score: 111, style: '逃', back: 10 }, { car: 7, score: 105, style: '追' }] });
+  const story = front => { const d = base(); d.frontResponse = { 1: front }; const e = new PhysicsEngine(toRaceSetup(d)); e.start();
+    for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
+    return { text: e.getStory().story.map(x => x.text).join(' '), e }; };
+  const hiku = story('HIKU'), chudan = story('CHUDAN'), tsu = story('TSUPPARI');
+  const bellOrder = x => x.e.recorder.snapshots.bell?.order ?? [];
+  check(/後方まで引いて/.test(hiku.text) && bellOrder(hiku).indexOf(1) > bellOrder(hiku).indexOf(4), '「引く」: 前受けが誘導切りを前に入れて、後方まで下げる (打鐘で中団のラインより後ろ)', bellOrder(hiku).join(''));
+  check(/中団を取る/.test(chudan.text) && bellOrder(chudan).indexOf(1) < bellOrder(chudan).indexOf(4), '「中団」: 前受けが誘導切りを前に入れて、その後ろを取る (打鐘で中団)', bellOrder(chudan).join(''));
+  check(/突っ張/.test(tsu.text), '「突っ張る」: 前受けが誘導切りに来た相手を突っ張る');
+  // EXデータがある選手は、何通りもの未来で 突っ張る / 引く / 中団 を割合で選び、本線・対抗・穴が展開ごとに分かれる
+  const d = base(); d.riders[0].score = 115; d.riders[0].ex = { tactics: { tsuppari: { s: 5, n: 7 }, kamashi: { s: 3, n: 5 } }, finish: { asLeader: { n: 60, w: { s: 12, n: 60 }, p2: { s: 8, n: 60 }, p3: { s: 6, n: 60 } }, asBante: { n: 3, w: { s: 1, n: 3 }, p2: null, p3: null } } };
+  const f = forecastRaces(toRaceSetup(d), 24);
+  const themes = f.scenarios.map(x => x.theme);
+  check(themes.length >= 2 && themes.every(t => /番ラインが主導権/.test(t)) && new Set(themes).size === themes.length, '本線・対抗・穴は「どのラインが主導権を取るか」で分かれ、展開の名前が付く', themes.join(' / '));
 }
 
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');

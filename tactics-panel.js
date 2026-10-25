@@ -123,13 +123,13 @@ export function mountTenkaiTextPanel(container, { getData, apply }) {
   let last = null, timer = null;
   container.innerHTML = `
     <div class="tt-box">
-      <div class="tt-head"><strong>自分の展開を文章で書く</strong><small>書いたそばからAIが読み取ります。iPhoneのマイクで話してもOK</small></div>
+      <div class="tt-head"><strong>自分の読みで展開を変える</strong><small>ひな形をタップするか、自分の言葉で書いてください。書いたそばからAIが読み取ります (iPhoneのマイクで話してもOK)</small></div>
       <div class="tt-tpls" aria-label="展開のひな形"></div>
-      <textarea class="tt-text" rows="3" placeholder="例: 佐藤が打鐘でカマして、棚瀬は引いて巻き返し。長尾がバックで番手捲り"></textarea>
+      <textarea class="tt-text" rows="3" placeholder="例: 7番が打鐘でカマして、1番は引いて巻き返し。8番がバックで番手捲り"></textarea>
       <div class="tt-sugs" aria-label="例をタップで足す"></div>
       <div class="tt-out" role="status"></div>
       <div class="tt-actions">
-        <button type="button" class="primary-btn tt-apply" disabled>この展開で予想し直す</button>
+        <button type="button" class="primary-btn tt-apply" disabled>この展開で予想する</button>
         <button type="button" class="secondary-btn tt-clear">消す</button>
       </div>
       <details class="tt-help"><summary>使える言葉</summary>
@@ -161,9 +161,10 @@ export function mountTenkaiTextPanel(container, { getData, apply }) {
     const data = getData(); if (!data) return;
     const used = $('.tt-text').value;
     const list = suggestions(data).filter(t => !used.includes(t));
-    const shown = showAll ? list : list.slice(0, 4);
-    $('.tt-sugs').innerHTML = (shown.length ? '<span class="tt-sugs-label">例をタップ</span>' : '') + shown.map(t => `<button type="button" class="tt-sug">${esc(t)}</button>`).join('')
-      + (!showAll && list.length > 4 ? '<button type="button" class="tt-more">ほかの例</button>' : '');
+    // 例は最初はたたんでおく (ひな形が主役)。開くと、この出走表の選手名で一文ずつの例を出す
+    $('.tt-sugs').innerHTML = !list.length ? '' : showAll
+      ? '<span class="tt-sugs-label">一文ずつ足せる例</span>' + list.map(t => `<button type="button" class="tt-sug">${esc(t)}</button>`).join('')
+      : '<button type="button" class="tt-more">一文ずつ足せる例を見る</button>';
   };
   const read = () => {
     const data = getData(); if (!data) return;

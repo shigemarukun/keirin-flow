@@ -50,10 +50,18 @@ async function fromLink() {
   } catch { return null; }
 }
 
+const RACES_KEY = 'keirin-flow:races:v1';
+const loadRaces = () => { try { return JSON.parse(localStorage.getItem(RACES_KEY) || '[]'); } catch { return []; } };
+const saveRaces = list => { try { localStorage.setItem(RACES_KEY, JSON.stringify(list)); } catch { /* 保存できなくても動く */ } };
+// 同じレース = 競輪場・R・選手の顔ぶれが同じ (展開の指定を変えても同じレースとして上書き)
+const raceId = d => [d?.race?.venue ?? '', d?.race?.raceNo ?? '', (d?.riders ?? []).map(r => `${r.car}${r.name ?? ''}`).join(',')].join('|');
+const isSample = d => (d?.riders ?? []).some(r => /^選手[A-I]$/.test(r.name ?? ''));
+export const raceLabelOf = d => [d?.race?.venue, d?.race?.raceNo ? `${d.race.raceNo}R` : ''].filter(Boolean).join(' ') || `${(d?.riders ?? [])[0]?.name ?? ''}ほか`;
+
 function load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; } }
 function save(data) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* 保存できない環境でも動く */ } }
 
-export function mountRaceInput(container, { onApply, onLinked }) {
+export function mountRaceInput(container, { onApply, onLinked, onPasted, onRacesChange }) {
   if (!container) return;
 
   const rowHtml = car => `
@@ -75,16 +83,16 @@ export function mountRaceInput(container, { onApply, onLinked }) {
 
   container.innerHTML = `
     <section class="ri-paste">
-      <h3>出走表を貼り付けて読み取る <small>おすすめ</small></h3>
-      <p class="ri-help">出走表のページ(WINTICKET・KEIRIN.JPなど)の文字をコピーして貼り付けると、選手・級班・得点・脚質・並びを読み取って下の表に入れます。読み取れなかったところだけ直してください。</p>
+      <p class="ri-help">出走表のページ (WINTICKET・KEIRIN.JP・netkeibaなど) の文字を、まるごとコピーして貼り付けてください。選手・級班・得点・脚質・並びを読み取って、すぐに予想します。</p>
       <textarea class="ri-paste-text" rows="4" spellcheck="false" placeholder="ここに出走表の文字を貼り付け"></textarea>
       <div class="ri-actions">
-        <button type="button" class="primary-btn ri-paste-read">読み取る</button>
-        <button type="button" class="secondary-btn ri-paste-clip">クリップボードから貼り付け</button>
+        <button type="button" class="primary-btn ri-paste-read">読み取って予想</button>
+        <button type="button" class="secondary-btn ri-paste-clip">コピーした文字を貼る</button>
       </div>
       <div class="ri-paste-out" role="status"></div>
     </section>
-    <h3 class="ri-step">出走表を確認・入力</h3>
+    <details class="ri-edit">
+    <summary class="ri-step">出走表を確認・手で入力する <small>読み取りの間違いを直すとき</small></summary>
     <div class="ri-venue">
       <label>競輪場
         <select class="ri-venue-name" aria-label="競輪場">
@@ -134,6 +142,7 @@ export function mountRaceInput(container, { onApply, onLinked }) {
       <button type="button" class="secondary-btn ri-sample">サンプルを入れる</button>
       <button type="button" class="secondary-btn ri-clear">全部消す</button>
     </div>
+    </details>
 `;
 
   const $ = sel => container.querySelector(sel);
@@ -234,6 +243,7 @@ export function mountRaceInput(container, { onApply, onLinked }) {
     if (errors.length) return false;
     save(data);
     current = structuredClone(data);
+    rememberRace(data);
     onApply(toRaceSetup(data), data);
     return true;
   };
@@ -252,7 +262,7 @@ export function mountRaceInput(container, { onApply, onLinked }) {
   });
 
   $('.ri-apply').addEventListener('click', () => {
-    if (apply(read())) container.closest('details')?.removeAttribute('open');
+    if (apply(read())) { $('.ri-edit').removeAttribute('open'); onPasted?.({ text: '出走表を入れ直して予想しました', warnings: [] }); }
   });
   $('.ri-sample').addEventListener('click', () => { fill(SAMPLE_RACE_DATA); showErrors([]); });
   $('.ri-clear').addEventListener('click', () => { fill({ riders: [], lines: [] }); showErrors([]); });
@@ -268,15 +278,27 @@ export function mountRaceInput(container, { onApply, onLinked }) {
       lines: data.lines?.length ? data.lines : [] });
     if (!data.lines?.length) $('.ri-lines').value = '';
     const list = data.riders.map(r => `<li><span class="ri-car car-${r.car}">${r.car}</span> ${esc(r.name ?? '')} ${esc(r.class ?? '—')} ${r.score ?? '—'} ${esc(r.style ?? '')}</li>`).join('');
-    out.innerHTML = `<p class="ri-ok">${found.riders}人を読み取りました${found.lines && !found.linesPredicted ? '・並びも読み取りました' : ''}${found.ex ? `・EXデータ${found.ex}人分も読み取りました` : ''}。下の表を確認して「この出走表で予想する」を押してください。</p>
-      <ul class="ri-paste-list">${list}</ul>${warnings.map(w => `<p class="ri-warn">${esc(w)}</p>`).join('')}`;
+    const summary = `${found.riders}人を読み取りました${found.lines && !found.linesPredicted ? '・並びも読み取りました' : found.linesPredicted ? '・並びは出走表に無かったので、府県と脚質からAIが推定しました' : ''}${found.ex ? `・EXデータ${found.ex}人分` : ''}`;
     showErrors([]);
-    $('.ri-step').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // 読み取れたら、そのまま予想する (足りないところがあれば、表を開いて直してもらう)
+    const next = read();
+    const errors = validateRaceData(next);
+    if (!errors.length && apply(next)) {
+      $('.ri-paste-text').value = '';
+      out.innerHTML = '';
+      onPasted?.({ text: summary, warnings });
+      return;
+    }
+    out.innerHTML = `<p class="ri-ok">${esc(summary)}。足りないところがあるので、下の表を確認してから「この出走表で予想する」を押してください。</p>
+      <ul class="ri-paste-list">${list}</ul>${warnings.map(w => `<p class="ri-warn">${esc(w)}</p>`).join('')}`;
+    $('.ri-edit').setAttribute('open', '');
+    showErrors(errors);
+    $('.ri-edit').scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   $('.ri-paste-read').addEventListener('click', readPaste);
   $('.ri-paste-clip').addEventListener('click', async () => {
     try { $('.ri-paste-text').value = await navigator.clipboard.readText(); readPaste(); }
-    catch { $('.ri-paste-out').innerHTML = '<p class="ri-help">この端末では自動で貼り付けできませんでした。上の枠を長押しして「ペースト」してください。</p>'; }
+    catch { $('.ri-paste-out').innerHTML = '<p class="ri-help">この端末では自動で貼り付けできませんでした。上の枠を長押しして「ペースト」し、「読み取って予想」を押してください。</p>'; $('.ri-paste-text').focus(); }
   });
 
   // 前回入力した出走表があれば、それで始める (なければサンプル)
@@ -295,6 +317,32 @@ export function mountRaceInput(container, { onApply, onLinked }) {
 
   return {
     getData: () => structuredClone(current),
-    apply: data => { fill(data); return apply(data); }
+    apply: data => { fill(data); return apply(data); },
+    races: () => loadRaces(),
+    currentId: () => (current ? raceId(current) : null),
+    isSample: () => isSample(current),
+    select: id => { const r = loadRaces().find(x => x.id === id); if (!r) return false; fill(r.data); return apply(r.data); },
+    remove: id => { saveRaces(loadRaces().filter(x => x.id !== id)); onRacesChange?.(); },
+    openPaste: () => { const d = container.closest('details'); d?.setAttribute('open', ''); d?.scrollIntoView({ behavior: 'smooth', block: 'start' }); setTimeout(() => $('.ri-paste-text').focus({ preventScroll: true }), 350); },
+    pasteFromClipboard: async () => {
+      try { const t = await navigator.clipboard.readText(); if (!t.trim()) throw new Error('empty'); $('.ri-paste-text').value = t; readPaste(); return true; }
+      catch { return false; }
+    }
   };
+
+  // ---------- 今日のレース: 入れたレースを残して、タップで切り替える ----------
+  function rememberRace(data) {
+    if (isSample(data)) return;
+    const id = raceId(data);
+    // 並びは競輪場 → レース番号の順 (選び直しても順番が動かないように)
+    let list = loadRaces();
+    const item = { id, label: raceLabelOf(data), at: new Date().toISOString(), data: structuredClone(data) };
+    const i = list.findIndex(x => x.id === id);
+    if (i >= 0) list[i] = item; else list.push(item);
+    // 多すぎたら古いものから消す
+    if (list.length > 16) list = list.sort((a, b) => a.at.localeCompare(b.at)).slice(-16);
+    list.sort((a, b) => String(a.data?.race?.venue ?? '').localeCompare(String(b.data?.race?.venue ?? ''), 'ja') || (Number(a.data?.race?.raceNo) || 99) - (Number(b.data?.race?.raceNo) || 99));
+    saveRaces(list);
+    onRacesChange?.();
+  }
 }

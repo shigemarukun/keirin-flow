@@ -513,7 +513,7 @@ export class PhysicsEngine{
   }
   const leaderDistance=this.riders.reduce((m,r)=>Math.max(m,r.distance),0),triggered=this.raceClock.update(this.pacer.distance,leaderDistance,this);
   this.recorder.observe(this);
-  if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:teacher?'打鐘。教材シナリオを継続':'打鐘。ここから各選手が自由に判断'});this.onBellCallback?.();}
+  if(triggered.includes('Bell')){this.bellRung=true;this.emitDecision({category:'BELL',message:teacher?'打鐘。教材シナリオを継続':'打鐘！ 鐘が鳴って、ここから一気にペースが上がる'});this.onBellCallback?.();}
  }
 
  update(dt){

@@ -70,7 +70,7 @@ export function mountResultsPanel(container, { getSetup, getForecast, getData = 
     container.innerHTML = `
       <div class="rs-step">
         <div class="fc-label">① レースの前: 予想を確定する</div>
-        <p class="ri-help">いまの予想 (本線・印・買い目・何通りもの未来) を、このスマホに保存します。結果が出たら、この予想で答え合わせします。</p>
+        <p class="ri-help">いまの予想 (本線・印・買い目・何通りもの未来) を、このスマホに保存します (予想カードの「予想を確定」と同じです)。結果が出たら、この予想で答え合わせします。</p>
         <button type="button" class="primary-btn rs-lock">この予想を確定して保存</button>
         ${note ? `<p class="ri-help rs-note" role="status">${esc(note)}</p>` : ''}
         ${mine.length ? `<p class="ri-help">このレースの確定済み: ${mine.map(l => `${timeLabel(l.lockedAt)}${l.result ? ' (採点済み)' : ''}`).join('、')}</p>` : ''}
@@ -131,7 +131,7 @@ export function mountResultsPanel(container, { getSetup, getForecast, getData = 
 
   const lock = () => {
     const fc = getForecast(), setup = getSetup();
-    if (!fc?.forecast || fc.refining) { note = '予想の計算が終わるまで少し待ってから、もう一度押してください。'; render(); return; }
+    if (!fc?.forecast || fc.refining) { note = '予想の計算が終わるまで少し待ってから、もう一度押してください。'; render(); return { ok: false, text: note }; }
     const sc = fc.forecast.scenarios?.[0];
     const advice = sc ? buildAdvice({ runs: fc.forecast.runs, scenario: sc, marks: fc.forecast.marks, names: setup?.meta?.names ?? {} }) : null;
     const l = makeLock({ setup, forecast: fc.forecast, main: fc.main, advice, adviceLabel: sc ? `${sc.label}(${sc.theme ?? ''})` : '' });
@@ -142,6 +142,7 @@ export function mountResultsPanel(container, { getSetup, getForecast, getData = 
     const locks = load(STORAGE_KEY); locks.push(l);
     note = save(locks) ? `${timeLabel(l.lockedAt)} に確定しました。本線 ${l.main.join('-')}${l.advice ? `・買い目${l.advice.points}点` : ''}${ai ? '・あなたの読み入り' : ''}` : 'このブラウザでは保存できませんでした (プライベートモードなど)';
     target = l.id; render();
+    return { ok: /確定しました/.test(note), text: /確定しました/.test(note) ? `${note}。レースが終わったら「答え合わせ」で結果を入れてください` : note };
   };
 
   const check = () => {
@@ -253,5 +254,5 @@ export function mountResultsPanel(container, { getSetup, getForecast, getData = 
   });
 
   render();
-  return { reset() { picked = []; note = ''; lastScore = null; target = null; render(); }, render };
+  return { reset() { picked = []; note = ''; lastScore = null; target = null; render(); }, render, lock };
 }

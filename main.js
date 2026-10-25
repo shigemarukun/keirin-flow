@@ -7,6 +7,8 @@ import { mountForecastPanel } from './forecast-panel.js';
 import { withCondition } from './forecast.js';
 import { mountResultsPanel } from './results-panel.js';
 import { shareUrl } from './race-input.js';
+import { mountGlossary, PHASE_HINT } from './glossary.js';
+import { mountRaceBar } from './race-bar.js';
 
 window.addEventListener('DOMContentLoaded',()=>{
  const aiModel=new AIModel();
@@ -30,7 +32,8 @@ window.addEventListener('DOMContentLoaded',()=>{
   physics.reset();physics.start();
   document.getElementById('bank-container')?.scrollIntoView({behavior:'smooth',block:'start'});
  };
- const forecast=mountForecastPanel(document.getElementById('forecast-ui'),{onWatch:seed=>watchRace(seed)});
+ mountGlossary();
+ const forecast=mountForecastPanel(document.getElementById('forecast-ui'),{onWatch:seed=>watchRace(seed),onLock:()=>results?.lock?.()});
 
  let audioContext=null;
  const ensureAudioReady=async()=>{try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return false;audioContext??=new C();if(audioContext.state==='suspended')await audioContext.resume();return audioContext.state==='running';}catch{return false;}};
@@ -54,8 +57,28 @@ window.addEventListener('DOMContentLoaded',()=>{
  };
 
  // 出走表の手入力 → このレースで予想 / 展開をタップで選ぶ
- let tactics=null,results=null,tenkaiText=null;
- const raceInput=mountRaceInput(document.getElementById('race-input-ui'),{onApply:newSetup=>{window.KEIRIN_FLOW_APPLY_SETUP(newSetup);tactics?.render();tenkaiText?.render();},onLinked:()=>{tactics?.render();tenkaiText?.render();}});
+ let tactics=null,results=null,tenkaiText=null,raceBar=null;
+ const goTo=id=>{const el=document.getElementById(id);if(!el)return;if(el.tagName==='DETAILS')el.open=true;el.scrollIntoView({behavior:'smooth',block:'start'});};
+ const raceInput=mountRaceInput(document.getElementById('race-input-ui'),{
+  onApply:newSetup=>{window.KEIRIN_FLOW_APPLY_SETUP(newSetup);tactics?.render();tenkaiText?.render();raceBar?.render();},
+  onLinked:()=>{tactics?.render();tenkaiText?.render();raceBar?.note('送られてきた予想を開きました (展開の指定もそのまま入っています)');},
+  // 貼り付けて読み取れたら、入力欄を閉じて予想へ
+  onPasted:({text,warnings})=>{document.querySelector('.race-input-panel')?.removeAttribute('open');raceBar?.note([text,...(warnings??[])].join('。'),!!warnings?.length);goTo('sec-forecast');},
+  onRacesChange:()=>raceBar?.render()
+ });
+ raceBar=mountRaceBar(document.getElementById('race-bar-ui'),{input:raceInput,onSelected:()=>goTo('sec-forecast')});
+ // 画面の中の移動 (レース・予想・コース・展開・答え合わせ)
+ const nav=document.getElementById('step-nav');
+ nav?.addEventListener('click',event=>{const b=event.target.closest('[data-go]');if(b)goTo(b.dataset.go);});
+ if(nav&&'IntersectionObserver' in window){
+  const vis=new Map();
+  const io=new IntersectionObserver(entries=>{
+   for(const e of entries)vis.set(e.target.id,e.isIntersecting?e.intersectionRect.height:0);
+   let best=null,h=0;for(const [id,v] of vis)if(v>h){h=v;best=id;}
+   nav.querySelectorAll('[data-go]').forEach(b=>b.classList.toggle('is-on',b.dataset.go===best));
+  },{threshold:[0,0.1,0.3,0.6,1],rootMargin:'-60px 0px -35% 0px'});
+  nav.querySelectorAll('[data-go]').forEach(b=>{const el=document.getElementById(b.dataset.go);if(el)io.observe(el);});
+ }
  tactics=mountTacticsPanel(document.getElementById('tactics-ui'),{
   getData:()=>raceInput?.getData(),apply:data=>raceInput.apply(data),
   getSetup:()=>baseSetup,getPrediction:()=>physics.getPrediction()
@@ -117,7 +140,8 @@ window.addEventListener('DOMContentLoaded',()=>{
  const capPhase=caption?.querySelector('.rc-phase'),capText=caption?.querySelector('.rc-text');
  const KEY=/誘導切り|突っ張|出させ|先行|叩|カマ|捲り|番手|ブロック|牽制|切り替え|踏み合い|タレ|内を突|包まれ|飲み込|競り|打鐘/;
  const phaseOf=rem=>rem>770?'周回':rem>600?'赤板':rem>400?'打鐘':rem>200?'最終周':rem>65?'バック〜4角':rem>0?'直線':'ゴール';
- let shownId=null,finishCaption=null;
+ let shownId=null,finishCaption=null,hintAt=0;
+ const capHint=caption?.querySelector('.rc-hint');
  const updateCaption=state=>{
   if(!caption)return;
   const now=state.elapsedTime;
@@ -127,7 +151,10 @@ window.addEventListener('DOMContentLoaded',()=>{
   const total=state.totalDistance??800;
   const rem=state.raceClock?.remainingDistance??total;
   const rem400=rem/(state.lapScale??1);
-  if(capPhase){const ph=state.isStarted||rem<total?phaseOf(rem400):'';if(capPhase.textContent!==ph)capPhase.textContent=ph;}
+  if(capPhase){const ph=state.isStarted||rem<total?phaseOf(rem400):'';if(capPhase.textContent!==ph){capPhase.textContent=ph;
+   // 場面が変わったら、その場面の意味を数秒だけ添える (初めて見る人向け)
+   if(capHint){if(PHASE_HINT[ph]&&state.isStarted){capHint.textContent=PHASE_HINT[ph];hintAt=performance.now();caption.classList.add('has-hint','is-on');}}}}
+  if(capHint&&hintAt&&performance.now()-hintAt>4500/Math.max(1,physics.timeScale??1)){capHint.textContent='';hintAt=0;caption.classList.remove('has-hint');}
   if(pick&&pick.id!==shownId){shownId=pick.id;capText.textContent=pick.riderNumber!=null?`${pick.riderNumber}番 ${pick.message.replace(/\s*\(.*?\)\s*$/,'').replace(/^残\d+mで?/,'').replace(/^残\d+mから/,'')}`:pick.message;caption.classList.add('is-on');caption.dataset.rider=pick.riderNumber??'';}
   // ゴールしたら結果と決まり手を出し続ける
   if((state.ranking?.length??0)>=Math.min(3,state.riders.length)){
@@ -139,7 +166,7 @@ window.addEventListener('DOMContentLoaded',()=>{
    return state.ranking[0]?.number??null;
   }
   finishCaption=null;
-  if(!pick&&caption.classList.contains('is-on')){caption.classList.remove('is-on');caption.dataset.rider='';}
+  if(!pick&&!hintAt&&caption.classList.contains('is-on')){caption.classList.remove('is-on');caption.dataset.rider='';}
   if(!state.isStarted&&rem>=total){caption.classList.remove('is-on');}
   return pick?.riderNumber??null;
  };

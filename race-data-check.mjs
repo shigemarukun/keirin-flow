@@ -390,5 +390,18 @@ S級特選 9車立て 発走14:16
   check(data.tenkai == null && tobi.changes.tenkai[7]?.tobitsuki === 4, '「久田の番手に飛びつく」は、久田の後ろ (番手の位置) を取りに行く');
 }
 
+// ---------- 用語の説明 ----------
+{
+  const { TERMS, linkTerms, guideHtml } = await import('./glossary.js');
+  const badSee = Object.entries(TERMS).flatMap(([k, t]) => (t.see ?? []).filter(x => !TERMS[x]).map(x => `${k}→${x}`));
+  check(!badSee.length && Object.keys(TERMS).length >= 40, '用語集: 40語以上、関連の言葉もすべて説明がある', badSee.join(' ') || `${Object.keys(TERMS).length}語`);
+  const seen = new Set();
+  const html = linkTerms('赤板で7番が誘導切り。打鐘で番手から差し。<b>', seen);
+  check(/data-term="赤板"/.test(html) && /data-term="誘導切り"/.test(html) && /data-term="差し"/.test(html) && html.includes('&lt;b&gt;') && !/data-term="番手捲り"/.test(html),
+    '文章の中の用語はタップできる形になり、それ以外の文字はそのまま (HTMLとして混ざらない)');
+  check(linkTerms('赤板と赤板', new Set()).split('data-term').length === 2, '同じ用語の説明リンクは最初の1回だけ (下線だらけにしない)');
+  check(guideHtml().includes('レースの流れ') && guideHtml().includes('data-term='), '「競輪の基本」は用語のリンク付きで読める');
+}
+
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

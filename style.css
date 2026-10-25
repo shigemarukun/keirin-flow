@@ -495,3 +495,24 @@ body #app {
 .ad-notes { margin: 8px 0 6px; padding-left: 1.2em; font-size: 0.78rem; color: #cbd5e1; line-height: 1.5; }
 .ad-thin { color: #fcd34d; font-size: 0.78rem; margin: 4px 0; }
 .ad-copy { width: 100%; margin-top: 6px; }
+
+/* 展開のひな形 */
+.tt-tpls { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.tt-tpl { border: 1px solid rgba(250, 204, 21, 0.55); background: rgba(250, 204, 21, 0.1); color: #fef08a; border-radius: 8px; padding: 6px 10px; font-size: 0.76rem; font-weight: 700; cursor: pointer; }
+.tt-tpl:active, .tt-undo:active { transform: scale(0.96); }
+.tt-undo { border: 1px solid rgba(148, 163, 184, 0.45); background: transparent; color: #cbd5e1; border-radius: 8px; padding: 6px 10px; font-size: 0.74rem; cursor: pointer; }
+
+/* 過去のレースでまとめて答え合わせ */
+.bt > summary { cursor: pointer; list-style: none; }
+.bt > summary::before { content: '▸ '; }
+.bt[open] > summary::before { content: '▾ '; }
+.bt-text { width: 100%; box-sizing: border-box; min-height: 120px; padding: 10px; border-radius: 10px; background: #0b1220; color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.35); font-size: 16px; line-height: 1.5; }
+.bt-example { white-space: pre-wrap; font-size: 0.72rem; line-height: 1.5; color: #cbd5e1; background: rgba(15, 23, 42, 0.7); padding: 8px; border-radius: 8px; margin: 6px 0; }
+.bt-rows { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 6px; }
+.bt-row { padding: 8px 10px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.15); font-size: 0.8rem; color: #e2e8f0; line-height: 1.6; }
+.bt-top { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.bt-ai { color: #94a3b8; }
+.bt-row small { color: #94a3b8; }
+.bt-tag { margin-left: 6px; font-size: 0.72rem; }
+.bt-err { color: #fbbf24; }
+.bt-mine { color: #a5f3fc; font-size: 0.76rem; }

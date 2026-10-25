@@ -352,5 +352,43 @@ S級特選 9車立て 発走14:16
   check(s.n === 2 && Math.abs(s.vsRandom - Math.sqrt(hit.vsRandom * miss.vsRandom)) < 1e-9, '通算は採点済みの確定予想だけ・当てずっぽうとの比は掛け算の平均', `${s.n}レース ${s.vsRandom.toFixed(2)}倍`);
 }
 
+// ---------- 過去のレースでまとめて答え合わせ・展開のひな形 ----------
+{
+  const { splitBatchText, prepareRace, scoreForecast, summarizeBatch, stripUserReads } = await import('./batch.js');
+  const { forecastRaces } = await import('./forecast.js');
+  const { templates } = await import('./tactics-panel.js');
+  const { parseTenkaiText } = await import('./tenkai-text.js');
+  const card = `小倉競輪 9R
+1 棚瀬義大 S1 岐阜 101.20 逃
+2 佐藤一伸 S2 福島 98.50 両
+3 中村浩士 S1 千葉 99.10 追
+4 久田裕也 S1 徳島 104.30 逃
+5 小倉竜二 S2 徳島 97.80 追
+6 長尾拳太 S2 岐阜 98.20 追
+7 和田健太郎 S1 千葉 100.40 追
+並び 16/23/45/7`;
+  const text = `${card}\n展開: 久田が打鐘でカマす\n結果: 4-5-1\n${card.replace('9R', '10R')}\n３連単 ７－４－５\n${card.replace('9R', '11R')}\n結果 4-8-1\nメモ`;
+  const blocks = splitBatchText(text);
+  check(blocks.length === 3 && blocks[0].actual.join('') === '451' && blocks[0].tenkaiText && blocks[1].actual.join('') === '745' && !blocks[1].tenkaiText,
+    'まとめて貼った出走表を、結果の行でレースごとに分け、展開の文章と結果を取り出す', blocks.map(b => b.actual?.join('-')).join(' / '));
+  const sep = splitBatchText(`結果 1-2-3\n${card}\n---\n${card}\n結果: 4-5-1`);
+  check(sep.length === 2 && sep[0].actual.join('') === '123', '「---」で区切れば、結果の行がレースの頭にあっても読める');
+  const [r1, r2, r3] = blocks.map(prepareRace);
+  check(r1.ok && r1.mineSetup && r2.ok && !r2.mineSetup && !r3.ok && /合いません/.test(r3.error),
+    '展開を書いたレースは「読み入り」も作り、車番に無い結果は理由を出してはじく', r3.error);
+  const ai = scoreForecast(r1.aiSetup, forecastRaces(r1.aiSetup, 8), r1.actual);
+  const mine = scoreForecast(r1.mineSetup, forecastRaces(r1.mineSetup, 8), r1.actual);
+  const sum = summarizeBatch([{ ai, mine }, { ai }, { label: 'x', error: 'e' }]);
+  check(sum.n === 2 && sum.mine?.n === 1 && ai.p > 0 && Math.abs(sum.vsRandom - ai.vsRandom) < 1e-9, 'まとめの数字は採点できたレースだけで、読み入りは別に比べる', `${(ai.p * 100).toFixed(1)}% → 読み入り ${(mine.p * 100).toFixed(1)}%`);
+  check(stripUserReads({ ...SAMPLE_RACE_DATA, tactics: {}, frontResponse: {}, tenkai: {} }) === null && stripUserReads({ ...SAMPLE_RACE_DATA, tactics: { 1: 'KAMASHI' } })?.tactics?.[1] == null,
+    '読みを入れていない予想は比べず、入れた予想からは読みを抜いたAIだけの出走表を作る');
+  const data = r1.aiData;
+  const tps = templates(data);
+  const bad = tps.filter(t => { const r = parseTenkaiText(t.text, data); return !r.readings.length || r.unknown.length; });
+  check(tps.length >= 6 && !bad.length, '展開のひな形はこのレースの選手名で作られ、どれもそのまま読み取れる', `${tps.map(t => t.label).join('・')}${bad.length ? ` / 読めない: ${bad.map(t => t.text).join(' ')}` : ''}`);
+  const tobi = parseTenkaiText('和田は久田の番手に飛びつき', data);
+  check(data.tenkai == null && tobi.changes.tenkai[7]?.tobitsuki === 4, '「久田の番手に飛びつく」は、久田の後ろ (番手の位置) を取りに行く');
+}
+
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

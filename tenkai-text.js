@@ -133,7 +133,7 @@ function riderFinder(data) {
     for (const m of s.matchAll(lineRe)) {
       const g = lineOf(Number(m[1]));
       const car = m[2] ? linePos(g, m[2]) : g[0];
-      if (car) add(m.index, m[0].length, car, { line: g });
+      if (car) add(m.index, m[0].length, car, { line: g, posWord: m[2] });
     }
     // 「4-3-8」「19」のように並びで書いたライン
     for (const m of s.matchAll(/(?<![\d.])([1-9])(?:\s*[-ー－・]\s*[1-9]){1,4}(?![\d.])/g)) {
@@ -146,7 +146,7 @@ function riderFinder(data) {
       for (const m of s.matchAll(re)) {
         const g = lineOf(car);
         const target = m[2] ? linePos(g, m[2]) : car;
-        if (target) add(m.index, m[0].length, target, m[1] === 'ライン' || m[1] === 'ラインの' || m[2] ? { line: g } : {});
+        if (target) add(m.index, m[0].length, target, m[1] === 'ライン' || m[1] === 'ラインの' || m[2] ? { line: g, posWord: m[2] } : {});
       }
     }
     for (const [re, region] of REGION_WORDS) {
@@ -158,7 +158,7 @@ function riderFinder(data) {
         if (!g) continue;
         const word = m[m.length - 1];
         const car = word ? linePos(g, word) : g[0];
-        if (car) add(m.index, m[0].length, car, { line: g });
+        if (car) add(m.index, m[0].length, car, { line: g, posWord: word });
       }
     }
     // 車番: 「5番」「5号車」「5番車」「5の」「5が」(数字だけのときは、助詞が続くときに限る)
@@ -244,7 +244,7 @@ export function parseTenkaiText(text, data) {
         const pair = before.length >= 2 && /^\s*と\s*$/.test(clause.slice(before[0].at + before[0].len, before[1].at)) ? before[1] : null;
         if (act.kind === 'skip') continue;
         // 相手 (切り替え先・競る相手・飛びつく相手): 主語以外で、いちばん近くに出てくる選手
-        const other = [...before.slice(1), ...after].find(h => h.car !== subj?.car) ?? null;
+        let other = [...before.slice(1), ...after].find(h => h.car !== subj?.car) ?? null;
         if (!subj) { unknown.push(`${clause} (誰のことか分かりませんでした)`); continue; }
         subject = subj;
         const car = subj.car, who = `${car}番`;
@@ -324,6 +324,11 @@ export function parseTenkaiText(text, data) {
             break;
           }
           case 'tobi': {
+            // 「久田の番手に飛びつく」: 番手の"位置"を取りに行く = 久田の後ろへ (番手の選手の後ろではない)
+            let to = other?.car ?? null;
+            const pi = other?.posWord ? ({ 番手: 1, '2番手': 1, 後ろ: 1, '3番手': 2, 三番手: 2, '4番手': 3, 四番手: 3 })[other.posWord] : null;
+            if (pi && other.line) to = other.line[pi - 1] ?? to;
+            if (to != null && other) other = { ...other, car: to };
             opt(car).tobitsuki = other?.car ?? true;
             note(car, `${who}: 外を上がってくる${other ? `${other.car}番` : '選手'}の後ろに飛びつく`);
             break;

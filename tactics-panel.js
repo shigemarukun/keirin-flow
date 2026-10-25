@@ -36,8 +36,10 @@ function suggestions(data) {
   const full = car => String(data.riders.find(x => Number(x.car) === car)?.name ?? '').replace(/\s/g, '');
   const name = car => {
     const n = full(car); if (!n) return `${car}番`;
-    const short = n.slice(0, Math.min(3, Math.max(2, n.length - 2)));
-    return data.riders.some(x => Number(x.car) !== car && full(Number(x.car)).startsWith(short)) ? `${car}番` : short;
+    // 姓は2文字が多いので、まず2文字。ほかの選手と重なれば3文字、それでも重なれば車番
+    const clash = k => data.riders.some(x => Number(x.car) !== car && full(Number(x.car)).startsWith(k));
+    for (const k of [n.slice(0, 2), n.slice(0, 3)]) if (k.length >= 2 && !clash(k) && k !== n.slice(0, 1)) return k;
+    return `${car}番`;
   };
   const leaders = lines.map(g => g[0]);
   const withBante = lines.filter(g => g.length >= 2);
@@ -50,6 +52,58 @@ function suggestions(data) {
   if (withBante[0]) out.push(`${name(withBante[0][1])}がバックで番手捲り`);
   if (leaders[3] ?? leaders[1]) out.push(`${name(leaders[3] ?? leaders[1])}はロング捲り`);
   if (leaders[1]) out.push(`${name(leaders[1])}ラインが前受け`);
+  return out;
+}
+
+// 展開のひな形: よくある競輪の展開を、このレースの選手名で文章にする (タップで入れて、書き足して使う)
+export function templates(data) {
+  const lines = (data?.lines ?? []).filter(g => g.length);
+  if (!lines.length) return [];
+  const rider = car => data.riders.find(x => Number(x.car) === car) ?? {};
+  const full = car => String(rider(car).name ?? '').replace(/\s/g, '');
+  const N = car => {
+    const n = full(car); if (!n) return `${car}番`;
+    // 姓は2文字が多いので、まず2文字。ほかの選手と重なれば3文字、それでも重なれば車番
+    const clash = k => data.riders.some(x => Number(x.car) !== car && full(Number(x.car)).startsWith(k));
+    for (const k of [n.slice(0, 2), n.slice(0, 3)]) if (k.length >= 2 && !clash(k) && k !== n.slice(0, 1)) return k;
+    return `${car}番`;
+  };
+  const score = car => Number(rider(car).score) || 0;
+  const girls = lines.every(g => g.length === 1);
+  const out = [];
+  if (girls) {
+    // ガールズ: ラインが無いので、強い順・脚質で
+    const cars = lines.map(g => g[0]);
+    const byScore = [...cars].sort((a, b) => score(b) - score(a));
+    const nige = cars.filter(c => /逃/.test(rider(c).style ?? '')).sort((a, b) => score(b) - score(a));
+    const a = nige[0] ?? byScore[0], b = byScore.find(c => c !== a), c = byScore.find(x => x !== a && x !== b);
+    out.push({ label: '先行逃げ', text: `${N(a)}が打鐘から先行。${N(b)}は番手に飛びつき` });
+    if (b) out.push({ label: '捲り一発', text: `${N(a)}が先行。${N(b)}は最終バックから捲り` });
+    if (c) out.push({ label: 'カマシ', text: `${N(c)}が打鐘前からカマす。${N(a)}は中団から捲り` });
+    return out;
+  }
+  const multi = lines.filter(g => g.length >= 2);
+  const leaders = lines.map(g => g[0]);
+  const strong = [...multi].sort((x, y) => score(y[0]) - score(x[0]));
+  const top = strong[0] ?? lines[0];
+  const others = strong.filter(g => g !== top);
+  const front = lines[0], back = lines[lines.length - 1];
+  const solo = lines.find(g => g.length === 1);
+  out.push({ label: '本命ラインが主導権', text: `${N(top[0])}が打鐘から先行。${top[1] ? `${N(top[1])}は番手で仕事。` : ''}${others[0] ? `${N(others[0][0])}は最終バックから捲り` : ''}`.replace(/。$/, '') });
+  if (front.length >= 2 || leaders.length >= 2) {
+    const foe = lines.find(g => g !== front && g.length >= 2) ?? lines[1];
+    out.push({ label: '前受けが突っ張る', text: `${N(front[0])}が突っ張り先行${foe ? `。${N(foe[0])}は打鐘から叩きに行く` : ''}` });
+  }
+  if (back !== front) out.push({ label: '後ろからカマシ', text: `${N(back[0])}が打鐘でカマす。${N(front[0])}は引いて巻き返し` });
+  if (leaders.length >= 3) {
+    const [a, b, c] = [front[0], (lines[1] ?? [])[0], back[0]];
+    if (a && b && c && new Set([a, b, c]).size === 3) out.push({ label: '捲り合戦', text: `${N(b)}が赤板で誘導切り。${N(c)}が打鐘でカマす。${N(a)}は最終バックから捲り` });
+  }
+  // 番手捲り: 番手のほうが得点の高いラインを優先
+  const bm = [...multi].sort((x, y) => (score(y[1]) - score(y[0])) - (score(x[1]) - score(x[0])))[0];
+  if (bm) out.push({ label: '番手捲り', text: `${N(bm[0])}が先行。${N(bm[1])}がバックで番手捲り` });
+  if (top[1]) out.push({ label: '番手の差し', text: `${N(top[0])}が先行。${N(top[1])}は番手から差し` });
+  if (solo && top.length >= 2 && solo !== top) out.push({ label: '単騎の飛びつき', text: `${N(solo[0])}は${N(top[0])}の番手に飛びつき` });
   return out;
 }
 
@@ -70,6 +124,7 @@ export function mountTenkaiTextPanel(container, { getData, apply }) {
   container.innerHTML = `
     <div class="tt-box">
       <div class="tt-head"><strong>自分の展開を文章で書く</strong><small>書いたそばからAIが読み取ります。iPhoneのマイクで話してもOK</small></div>
+      <div class="tt-tpls" aria-label="展開のひな形"></div>
       <textarea class="tt-text" rows="3" placeholder="例: 佐藤が打鐘でカマして、棚瀬は引いて巻き返し。長尾がバックで番手捲り"></textarea>
       <div class="tt-sugs" aria-label="例をタップで足す"></div>
       <div class="tt-out" role="status"></div>
@@ -87,7 +142,21 @@ export function mountTenkaiTextPanel(container, { getData, apply }) {
       </details>
     </div>`;
   const $ = sel => container.querySelector(sel);
-  let showAll = false;
+  let showAll = false, undo = null;
+  const renderTpls = () => {
+    const data = getData(); if (!data) return;
+    const list = templates(data);
+    $('.tt-tpls').innerHTML = list.length ? `<span class="tt-sugs-label">展開のひな形</span>${list.map((t, i) => `<button type="button" class="tt-tpl" data-i="${i}" title="${esc(t.text)}">${esc(t.label)}</button>`).join('')}${undo != null ? '<button type="button" class="tt-undo">元に戻す</button>' : ''}` : '';
+  };
+  $('.tt-tpls').addEventListener('click', e => {
+    const t = $('.tt-text');
+    if (e.target.closest('.tt-undo')) { t.value = undo ?? ''; undo = null; read(); renderSugs(); renderTpls(); return; }
+    const b = e.target.closest('.tt-tpl'); if (!b) return;
+    const tpl = templates(getData())[Number(b.dataset.i)]; if (!tpl) return;
+    if (t.value.trim() && t.value !== tpl.text) undo = t.value;
+    t.value = tpl.text; read(); renderSugs(); renderTpls();
+    t.focus();
+  });
   const renderSugs = () => {
     const data = getData(); if (!data) return;
     const used = $('.tt-text').value;
@@ -115,7 +184,7 @@ export function mountTenkaiTextPanel(container, { getData, apply }) {
     const t = $('.tt-text'); t.value = (t.value.trim() ? `${t.value.trim().replace(/[。、]$/, '')}。` : '') + b.textContent;
     read(); renderSugs();
   });
-  $('.tt-clear').addEventListener('click', () => { $('.tt-text').value = ''; read(); renderSugs(); });
+  $('.tt-clear').addEventListener('click', () => { const t = $('.tt-text'); if (t.value.trim()) undo = t.value; t.value = ''; read(); renderSugs(); renderTpls(); });
   $('.tt-apply').addEventListener('click', () => {
     read();
     const data = getData(); if (!data || !last) return;
@@ -130,7 +199,7 @@ export function mountTenkaiTextPanel(container, { getData, apply }) {
     render() {
       const d = getData();
       if (d?.tenkaiText != null && !$('.tt-text').value) $('.tt-text').value = d.tenkaiText;
-      renderSugs(); if ($('.tt-text').value) read();
+      renderTpls(); renderSugs(); if ($('.tt-text').value) read();
     }
   };
 }

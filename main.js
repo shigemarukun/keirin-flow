@@ -66,7 +66,7 @@ window.addEventListener('DOMContentLoaded',()=>{
  document.getElementById('btn-run-tactics')?.addEventListener('click',()=>watchRace());
 
  // 答え合わせ
- results=mountResultsPanel(document.getElementById('results-ui'),{getSetup:()=>baseSetup,getForecast:()=>forecast.getLast()});
+ results=mountResultsPanel(document.getElementById('results-ui'),{getSetup:()=>baseSetup,getForecast:()=>forecast.getLast(),getData:()=>raceInput?.getData()});
  document.querySelector('.results-panel')?.addEventListener('toggle',()=>results?.render?.());
 
  // この予想 (出走表 + 展開の指定) をリンクにして送る

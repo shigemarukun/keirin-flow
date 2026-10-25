@@ -112,6 +112,8 @@ export class RaceAI {
       m.style = TACTICS.includes(rider.profile.tactic) ? rider.profile.tactic : (TACTICS.includes(rider.profile.tacticPlan) ? rider.profile.tacticPlan : this.styleOf(rider));
       m.forced = TACTICS.includes(rider.profile.tactic);
       m.strikeAt = this.strikeDistance(rider, m.style);
+      // 仕掛けどころの指定 (「打鐘から」「バックから」など)
+      if (Number.isFinite(rider.profile.strikeRem)) m.strikeAt = rider.profile.strikeRem;
     }
     if (rem <= PACE.RED_BOARD) this._resolvePacerCut(engine);
 
@@ -122,10 +124,12 @@ export class RaceAI {
     if (!d && rem <= (globalThis.KF_TUNE?.fsr ?? PACE.FINAL_STRAIGHT)) d = this.finalStraight(rider, engine, m);
     if (!d) {
       const role = rider.role;
-      if (role === ROLE.LEADER) d = this.leader(rider, engine, m, rem);
+      // 「飛びつき」と指定された選手は、外を上がってくる選手の後ろに飛びつく (先頭・単騎・番手のどれでも)
+      if (rider.profile.tobitsuki && (d = this._tobitsuki(rider, engine, m, rem))) { /* 飛びつき */ }
+      else if (role === ROLE.LEADER) d = this.leader(rider, engine, m, rem);
       // 自力型の単騎 (逃・両) は「1人のライン」として先頭の判断をする。追込型の単騎は他のラインに付ける
       // ガールズ: すぐ外を捲っていく選手がいたら、その後ろに飛びついて一緒に上がる (そこから直線で差す)
-      else if (role === ROLE.SOLO && engine.setup?.rules?.girls && (globalThis.KF_TUNE?.gtobi ?? 1) && (d = this._tobitsuki(rider, engine, m, rem))) { /* 飛びつき */ }
+      else if (role === ROLE.SOLO && engine.setup?.rules?.girls && (globalThis.KF_TUNE?.gtobi ?? 1) && (d = this._tobitsuki(rider, engine, m, rem))) { /* ガールズの飛びつき */ }
       else if (role === ROLE.SOLO && rider.profile.aggression >= 0.62) d = this.leader(rider, engine, m, rem);
       else if (role === ROLE.SOLO) d = this.solo(rider, engine, m, rem);
       else d = this.follower(rider, engine, m, rem);
@@ -524,9 +528,11 @@ export class RaceAI {
 
     // 番手捲り: 前の選手が脚を使い切りそうで、後ろから捲りが来るなら、自分から踏んで出る
     // (番手は基本的に前を残して差すのが仕事。前が明らかに力尽き、外から捲りが並びかけたときだけ自分から出る)
-    if (rider.role === ROLE.BANTE && rem < 220 && rem > PACE.FINAL_STRAIGHT && leader && !this._retreating(leader) && rider.energy > .45) {
+    // (「番手捲り」と指定された選手は、指定の場所から自分で仕掛ける。3番手でも前の選手を交わしにいく)
+    const forcedBM = rider.profile.banteMakuriAt;
+    if ((rider.role === ROLE.BANTE || (forcedBM != null && rider.role !== ROLE.LEADER && rider.role !== ROLE.SOLO)) && rem < Math.max(220, forcedBM ?? 0) && rem > PACE.FINAL_STRAIGHT && leader && !this._retreating(leader) && rider.energy > (forcedBM != null ? .25 : .45)) {
       const threat = this._incomingAttack(rider, engine) ?? this._incomingAttack(leader, engine);
-      if (m.banteMakuri || (threat && threat.gap < U(engine, 12) && leader.energy < Math.max(globalThis.KF_TUNE?.bm ?? .25, rider.energy - (globalThis.KF_TUNE?.bmr ?? .22)) && leader.speed < threat.rider.speed - 1 && this.strength(rider) >= this.strength(threat.rider) + .02)) {
+      if (m.banteMakuri || (forcedBM != null && rem <= forcedBM) || (threat && threat.gap < U(engine, 12) && leader.energy < Math.max(globalThis.KF_TUNE?.bm ?? .25, rider.energy - (globalThis.KF_TUNE?.bmr ?? .22)) && leader.speed < threat.rider.speed - 1 && this.strength(rider) >= this.strength(threat.rider) + .02)) {
         m.banteMakuri = true;
         return { action: ACTION.SWITCH_TO_SELF_POWER, speed: this.sprintSpeed(rider), lane: this._attackLane(rider, engine),
           reason: `番手捲り。前の${leader.number}番が一杯(残脚${pct(leader.energy)})で${threat ? `${threat.rider.number}番が来るため` : ''}自分から踏む` };
@@ -541,13 +547,15 @@ export class RaceAI {
       m.switchedTo = null; m.rejoined = true;
       return this._followPlan(front, `${leader.number}番が巻き返したので、再び${front.number}番の後ろに付く`, { lane: front.laneOffset });
     }
-    if (rider.role === ROLE.BANTE && leader && !m.rejoined && !leaderFightsBack && this.memory.get(leader.number)?.beaten && rem < 600 && rem > PACE.FINAL_STRAIGHT && rider.profile.tacticalIQ >= .8) {
+    if (rider.role === ROLE.BANTE && leader && !m.rejoined && !leaderFightsBack && this.memory.get(leader.number)?.beaten && rem < 600 && rem > PACE.FINAL_STRAIGHT && (rider.profile.tacticalIQ >= .8 || rider.profile.switchTo)) {
       // 一度決めた切り替え先は、その選手が走れている限り変えない (毎回選び直すと2人の間を行き来してしまう)
       const cur = m.switchedTo ? engine.rider(m.switchedTo) : null;
       if (cur && !cur.finished && !this._retreating(cur) && cur.distance > rider.distance) {
         return this._followPlan(cur, `${leader.number}番が叩かれたので、${cur.number}番の後ろに切り替える`, { lane: cur.laneOffset });
       }
-      const target = this._aheadNotRetreating(rider, engine);
+      // 切り替え先の指定があれば、その選手 (のラインの後ろ) へ
+      const want = rider.profile.switchTo ? engine.rider(rider.profile.switchTo) : null;
+      const target = want && !want.finished && !this._retreating(want) && want.distance > rider.distance - U(engine, 10) ? want : this._aheadNotRetreating(rider, engine);
       if (target && target.lineId !== rider.lineId) {
         const tail = this._lineTailAhead(target, rider, engine);
         const t = tail.distance > rider.distance ? tail : target;
@@ -559,7 +567,7 @@ export class RaceAI {
     // Bante block (番手の牽制) against an attacker of another line.
     // (a line that is dropping back after a lost contest has no position to defend)
     // (ガールズなどブロック禁止のレースでは張らない)
-    if (rider.role === ROLE.BANTE && !engine.setup?.rules?.noBlock && rem < 520 && rider.energy > .25 && !(leader && this._retreating(leader))) {
+    if (rider.role === ROLE.BANTE && !engine.setup?.rules?.noBlock && !rider.profile.noBlock && rem < 520 && rider.energy > .25 && !(leader && this._retreating(leader))) {
       const now = engine.elapsedTime;
       if (now < m.blockUntil) return { action: ACTION.BLOCK, speed: Math.min(rider.speed, (front?.speed ?? rider.speed) + .3), lane: m.blockLane, reason: m.blockReason };
       if (now >= m.blockCooldownUntil) {
@@ -763,8 +771,9 @@ export class RaceAI {
     if (rem >= 420 || rem <= PACE.FINAL_STRAIGHT || rider.energy <= .3 || m.struck) return null;
     const cur = m.tobiTo ? engine.rider(m.tobiTo) : null;
     const go = cur && !cur.finished && cur.action === ACTION.ATTACK && cur.distance > rider.distance ? cur
-      : engine.riders.find(o => !o.finished && o !== rider && o.action === ACTION.ATTACK
-        && o.distance > rider.distance + .5 && o.distance < rider.distance + U(engine, 8) && o.laneOffset > rider.laneOffset + 4 && o.laneOffset < rider.laneOffset + 34);
+      : engine.riders.find(o => !o.finished && o !== rider && o.action === ACTION.ATTACK && (!o.lineId || o.lineId !== rider.lineId)
+        && (typeof rider.profile.tobitsuki !== 'number' || o.number === rider.profile.tobitsuki || engine.rider(rider.profile.tobitsuki)?.lineId === o.lineId)
+        && o.distance > rider.distance - U(engine, 2) && o.distance < rider.distance + U(engine, 12) && o.laneOffset > rider.laneOffset + 4 && o.laneOffset < rider.laneOffset + 50);
     if (!go) { m.tobiTo = null; rider._tobiTo = null; return null; }
     const first = m.tobiTo !== go.number;
     m.tobiTo = go.number; rider._tobiTo = go.number;
@@ -883,7 +892,7 @@ export class RaceAI {
     const family = [ACTION.ATTACK, ACTION.DEFEND].includes(d.action) ? 'PUSH' : d.action;
     if (family === 'PUSH' && m.lastPushLog != null && engine.elapsedTime - m.lastPushLog < 4) return;
     if (family === 'PUSH') m.lastPushLog = engine.elapsedTime;
-    if (d.action === ACTION.FOLLOW && !/引いて|叩かれ|離れた|単騎|千切れ|巻き返した/.test(d.reason)) return; // ordinary following is noise
+    if (d.action === ACTION.FOLLOW && !/引いて|叩かれ|離れた|単騎|千切れ|巻き返した|飛びつ|切り替え/.test(d.reason)) return; // ordinary following is noise
     engine.emitDecision({ riderNumber: rider.number, category: 'AI_DECISION', action: d.action, message: d.reason });
   }
 }

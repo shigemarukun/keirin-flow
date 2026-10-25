@@ -15,7 +15,10 @@ export class TenkaiPredictor {
     const initialFront = lines[0];
     const candidates = lines.slice(1).map((line, index) => ({
       line,
-      score: this.scorePacerCutCandidate(line, setup, index, lines.length - 1)
+      // 「誘導切りに行く」と指定されたラインは、必ず誘導切りに来る
+      score: this.scorePacerCutCandidate(line, setup, index, lines.length - 1) + (setup.riders[line.leader]?.cutPacer ? 100 : 0)
+        // カマシ・追込と指定されたラインは、後ろで待つので誘導切りには来ない
+        - (['KAMASHI', 'OIKOMI'].includes(setup.riders[line.leader]?.tactic) && !setup.riders[line.leader]?.cutPacer ? 50 : 0)
     })).sort((a, b) => b.score - a.score || a.line.id.localeCompare(b.line.id));
 
     const pacerCut = candidates[0] ?? { line: initialFront, score: 0 };

@@ -2,7 +2,7 @@ import { AIModel } from './ai.js';
 import { PhysicsEngine } from './engine.js';
 import { UIRenderer } from './ui.js';
 import { mountRaceInput } from './race-input.js';
-import { mountTacticsPanel } from './tactics-panel.js';
+import { mountTacticsPanel, mountTenkaiTextPanel } from './tactics-panel.js';
 import { mountForecastPanel } from './forecast-panel.js';
 import { withCondition } from './forecast.js';
 import { mountResultsPanel } from './results-panel.js';
@@ -54,13 +54,15 @@ window.addEventListener('DOMContentLoaded',()=>{
  };
 
  // 出走表の手入力 → このレースで予想 / 展開をタップで選ぶ
- let tactics=null,results=null;
- const raceInput=mountRaceInput(document.getElementById('race-input-ui'),{onApply:newSetup=>{window.KEIRIN_FLOW_APPLY_SETUP(newSetup);tactics?.render();},onLinked:()=>tactics?.render()});
+ let tactics=null,results=null,tenkaiText=null;
+ const raceInput=mountRaceInput(document.getElementById('race-input-ui'),{onApply:newSetup=>{window.KEIRIN_FLOW_APPLY_SETUP(newSetup);tactics?.render();tenkaiText?.render();},onLinked:()=>{tactics?.render();tenkaiText?.render();}});
  tactics=mountTacticsPanel(document.getElementById('tactics-ui'),{
   getData:()=>raceInput?.getData(),apply:data=>raceInput.apply(data),
   getSetup:()=>baseSetup,getPrediction:()=>physics.getPrediction()
  });
  tactics.render();
+ tenkaiText=mountTenkaiTextPanel(document.getElementById('tenkai-text-ui'),{getData:()=>raceInput?.getData(),apply:data=>{const ok=raceInput.apply(data);tactics?.render();return ok;}});
+ tenkaiText.render();
  document.getElementById('btn-run-tactics')?.addEventListener('click',()=>watchRace());
 
  // 答え合わせ

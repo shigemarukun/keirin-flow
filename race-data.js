@@ -133,6 +133,11 @@ export function validateRaceData(data) {
     if (!TACTIC_CODES.includes(t)) errors.push(`${car}番の戦法「${t}」は指定できません`);
   }
   for (const [car, f] of Object.entries(data?.frontResponse ?? {})) if (f && !['TSUPPARI', 'HIKU', 'CHUDAN', 'YIELD'].includes(f)) errors.push(`${car}番の前受けの対応「${f}」は指定できません`);
+  for (const [car, o] of Object.entries(data?.tenkai ?? {})) {
+    if (!o || typeof o !== 'object') continue;
+    for (const k of Object.keys(o)) if (!['strike', 'banteMakuri', 'switchTo', 'tobitsuki', 'noBlock', 'cutPacer'].includes(k)) errors.push(`${car}番の展開の指定「${k}」は分かりません`);
+    if (o.switchTo != null && !(Number(o.switchTo) >= 1 && Number(o.switchTo) <= 9 && Number(o.switchTo) !== Number(car))) errors.push(`${car}番の切り替え先が正しくありません`);
+  }
   return errors;
 }
 
@@ -331,6 +336,16 @@ export function toRaceSetup(data) {
     const seri = /^SERI:([1-9])$/.exec(tactic ?? '');
     if (seri && !girls) riders[car].seriTarget = Number(seri[1]); // 単騎で、この選手のラインの番手を競る
     if (['TSUPPARI', 'HIKU', 'CHUDAN', 'YIELD'].includes(front)) riders[car].frontResponse = front === 'YIELD' ? 'CHUDAN' : front;
+    // 文章などで指定した細かい展開 (仕掛けどころ・番手捲り・切り替え・飛びつき・ブロックしない・誘導切り)
+    const tk = data.tenkai?.[car];
+    if (tk) {
+      if (Number.isFinite(Number(tk.strike)) && tk.strike !== null) riders[car].strikeRem = clamp(Number(tk.strike), 0, 1200);
+      if (tk.banteMakuri != null && tk.banteMakuri !== false) riders[car].banteMakuriAt = clamp(Number(tk.banteMakuri) || 260, 70, 800);
+      if (Number(tk.switchTo) >= 1) riders[car].switchTo = Number(tk.switchTo);
+      if (tk.tobitsuki) riders[car].tobitsuki = tk.tobitsuki === true ? true : Number(tk.tobitsuki);
+      if (tk.noBlock) riders[car].noBlock = true;
+      if (tk.cutPacer) riders[car].cutPacer = true;
+    }
   }
   const setupLines = [];
   lines.forEach((group, index) => {

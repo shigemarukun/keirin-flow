@@ -71,8 +71,10 @@ export function kimarite(snapshots, ranking, frontMateOf, logs = []) {
   if (second != null) {
     const attacked = logs.some(l => l.riderNumber === second && R(l) <= 400 && R(l) > 110 && /捲りに出る|番手捲り|カマす|叩いて主導権|自力発進/.test(l.message));
     const atBack = snapshots.back?.order?.indexOf(second) ?? -1;
+    // (1着と同じ考え方: 捲って先頭に立った選手は、バックで先頭でも「捲り」。最終ホームから先頭なら「逃げ」)
+    const madeMakuri2 = logs.some(l => l.riderNumber === second && R(l) <= 600 && /捲りに出る|番手捲り/.test(l.message));
     if (marks.includes(second)) secondHow = 'マーク';
-    else if (attacked && atBack !== 0) secondHow = '捲り'; // 後ろから捲って (いったん先頭に立っても) 2着
+    else if ((attacked && atBack !== 0) || (madeMakuri2 && leadAt('home') !== second)) secondHow = '捲り'; // 後ろから捲って (いったん先頭に立っても) 2着
     else if (atBack === 0 || leadAt('straight') === second) secondHow = '逃げ';
     else secondHow = '差し';
   }

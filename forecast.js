@@ -156,12 +156,14 @@ export function pickScenarios(runs, n) {
     .map(([key, list], i) => {
       // その展開の中で一番多かった1-2着、さらにその中で一番多かった3着までの並びを代表にする
       const count = (arr, f) => { const m = new Map(); for (const r of arr) m.set(f(r), (m.get(f(r)) ?? 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
-      const [bestEx, exCount] = count(list, r => `${r.order[0]}-${r.order[1]}`)[0];
-      const inEx = list.filter(r => `${r.order[0]}-${r.order[1]}` === bestEx);
-      const bestTri = count(inEx, r => r.order.slice(0, 3).join('-'))[0][0];
-      const rep = inEx.find(r => r.order.slice(0, 3).join('-') === bestTri);
       // 展開の名前: 「8番ラインが主導権」+ 前受けの動き (いちばん多かったもの)
       const plan = count(list.filter(r => r.frontPlan), r => r.frontPlan)[0]?.[0];
+      // 代表の1回は、展開の名前 (前受けの動き) と同じ回から選ぶ (名前と、再生する展開の話が食い違わないように)
+      const pool = plan ? list.filter(r => r.frontPlan === plan) : list;
+      const [bestEx, exCount] = count(pool, r => `${r.order[0]}-${r.order[1]}`)[0];
+      const inEx = pool.filter(r => `${r.order[0]}-${r.order[1]}` === bestEx);
+      const bestTri = count(inEx, r => r.order.slice(0, 3).join('-'))[0][0];
+      const rep = inEx.find(r => r.order.slice(0, 3).join('-') === bestTri);
       const theme = key.startsWith('L') ? `${key.slice(1)}番ラインが主導権${plan && rep.frontCar != null ? ` (前受け${rep.frontCar}番は${PLAN_LABEL[plan] ?? plan})` : ''}` : null;
       // この展開になったときの、調子の目立つ選手 (平均)
       const cond = {};

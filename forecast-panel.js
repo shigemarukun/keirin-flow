@@ -29,6 +29,8 @@ function riderEvalHtml(setup, forecast, marks) {
     if (exLine) notes.push(exLine.replace(/ → 脚質.*$/, ''));
     const aptLine = (setup.meta?.conversion?.[n] ?? []).find(x => x.startsWith('EXの成績'));
     if (aptLine) notes.push(aptLine);
+    const meetLine = (setup.meta?.conversion?.[n] ?? []).find(x => x.startsWith('今開催'));
+    if (meetLine) notes.push(meetLine);
     if ((role.label === '先頭' || role.label === '単騎') && p.frontPlanProbs && p.frontPlanFromEx) {
       const fp = p.frontPlanProbs, P = v => `${Math.round((v ?? 0) * 100)}%`;
       notes.push(`前受けなら: 引く${P(fp.HIKU)}・中団${P(fp.CHUDAN)}・突っ張る${P(fp.TSUPPARI)}`);

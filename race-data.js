@@ -361,6 +361,16 @@ export function toRaceSetup(data) {
       info.why.push(`EXの成績(${{ asLeader: '先頭時', asBante: '番手時', asThird: '3番手時', asSolo: '単騎時' }[roleKey]}・${bankKey.replace('bank', '')}バンク${kindKey ? `・${{ semifinal: '準決勝', final: '決勝', heat: '予選', special: '特選', general: '一般' }[kindKey]}` : ''})が本人の平均より${adj > 0 ? '良い' : '悪い'} → 地力${adj > 0 ? '+' : ''}${adj.toFixed(2)}`);
     }
   }
+  // 今開催の成績 (この開催で走った着順): 調子の目安として、地力を少しだけ (±0.01まで) 動かす
+  for (const [car, info] of Object.entries(infoByCar)) {
+    const meet = data.riders.find(r => Number(r.car) === Number(car))?.meet;
+    const pos = (meet ?? []).map(x => Number(x.pos)).filter(n => n >= 1 && n <= 9);
+    if (!pos.length) continue;
+    const avg = pos.reduce((a, b) => a + b, 0) / pos.length;
+    const adj = round2(clamp((5 - avg) / 4, -1, 1) * 0.01 * Math.min(1, pos.length / 3));
+    if (Math.abs(adj) >= 0.005) riders[car].power = round2(clamp(riders[car].power + adj, 0.4, 1.05));
+    info.why.push(`今開催 ${pos.join('-')}着${Math.abs(adj) >= 0.005 ? ` → 調子${adj > 0 ? '良い' : '重い'} 地力${adj > 0 ? '+' : ''}${adj.toFixed(2)}` : ' (調子はふつう)'}`);
+  }
   // 9人未満のレースでも、出走しない車番は空けておく
   return {
     // バンク: data.bank (333/400/500) か、競輪場の名前から
@@ -531,7 +541,9 @@ export function predictLines(riders) {
 
 export function parseRaceCardText(text) {
   // 「S級2班」「S級S班」は先に「S2」「SS」にまとめておく (数字の前後で区切ると級班が切れてしまうため)
-  const src = half(text).replace(/\r/g, '').replace(/([SAL])\s*級\s*([S123])\s*班/g, (_, a, b) => b === 'S' ? 'SS' : `${a}${b}`);
+  const src = half(text).replace(/\r/g, '').replace(/([SAL])\s*級\s*([S123])\s*班/g, (_, a, b) => b === 'S' ? 'SS' : `${a}${b}`)
+    // 「1番車 棚瀬義大」「1号車」「1番 棚瀬」は、車番だけにする
+    .replace(/(^|\n)[ \t]*([1-9])[ \t]*(?:番車|号車|番|号)(?=[ \t]|[぀-ヿ㐀-鿿])/g, '$1$2 ');
   const warnings = [];
   // JSON をそのまま貼った場合
   try { const j = JSON.parse(src); if (j && Array.isArray(j.riders)) return { data: j, found: { riders: j.riders.length, lines: !!j.lines?.length }, warnings }; } catch { /* 文字として読む */ }
@@ -540,7 +552,18 @@ export function parseRaceCardText(text) {
   let lines = [];
   const lineText = src.match(/(?:並び|ライン|周回)[^\n\d]{0,10}([1-9][1-9 \t\/\-・|｜←→]{2,40})/)?.[1]
     ?? src.match(/(?:^|[ \t])([1-9]{1,4}(?:[ \t]*[\/／|][ \t]*[1-9]{1,4}){1,6})(?=[ \t]|$)/m)?.[1];
-  if (lineText) lines = parseLines(lineText.replace(/[←→]/g, ' '));
+  // 見出し (【周回予想ライン】【並び】など) の下に、1ラインずつ「1-9（棚瀬-長尾）」「5」のように書かれた形
+  const sec = src.match(/(?:並び|ライン|周回)[^\n\d]*\n((?:[ \t]*[1-9](?:[ \t]*[-ー－・=][ \t]*[1-9])*[ \t]*(?:[（(][^)）\n]*[)）])?[ \t]*(?:\n|$)){2,9})/);
+  if (sec) {
+    const groups = [];
+    for (const row of sec[1].split('\n')) {
+      const m = row.match(/^[ \t]*([1-9](?:[ \t]*[-ー－・=][ \t]*[1-9])*)[ \t]*(?:[（(][^)）]*[)）])?[ \t]*$/);
+      if (!m) break;
+      groups.push(m[1].split(/[^1-9]+/).filter(Boolean).map(Number));
+    }
+    if (groups.length >= 2 && new Set(groups.flat()).size === groups.flat().length) lines = groups;
+  }
+  if (!lines.length && lineText) lines = parseLines(lineText.replace(/[←→]/g, ' '));
 
   // レース情報
   // 競輪場: 「小倉競輪」の形か、先頭の行から (高知・静岡など府県名と同じ競輪場があるので、選手の府県と間違えないように)
@@ -552,10 +575,19 @@ export function parseRaceCardText(text) {
   // 選手: 「車番(1〜9) + 名前」を目印に区切る (EXデータの表より前の部分だけを見る)
   const exStart = src.search(/EXデータ\s*[:：]|かまし成功率|ライン先頭時|^.*番手時/m);
   const cardSrc = exStart > 0 ? src.slice(0, exStart) : src;
-  const tokens = cardSrc.replace(/([぀-ヿ㐀-鿿々])([0-9])/g, '$1 $2').replace(/([0-9])([㐀-鿿])/g, '$1 $2').split(/[\s,，、|｜\t]+/).filter(Boolean);
+  const tokens = [], lineOf = [];
+  cardSrc.split('\n').forEach((row, li) => {
+    for (const t of row.replace(/([぀-ヿ㐀-鿿々])([0-9])/g, '$1 $2').replace(/([0-9])([㐀-鿿])/g, '$1 $2').split(/[\s,，、|｜\t]+/).filter(Boolean)) { tokens.push(t); lineOf.push(li); }
+  });
+  const firstOfLine = i => i === 0 || lineOf[i - 1] !== lineOf[i];
+  // 1行に1人ずつ (車番 名前 府県 … 得点) 書かれた出走表なら、行の先頭の車番だけを目印にする
+  // (「9車立て」「5周」などを選手と間違えないように)
+  const scoreRe = /^(?:1[0-2]\d|[4-9]\d)\.\d{2}$/;
+  const perLine = cardSrc.split('\n').filter(row => /^\s*[1-9]\s+\S/.test(row) && /(?:^|[^\d.])(?:1[0-2]\d|[4-9]\d)\.\d{2}(?![\d])/.test(row)).length >= 5;
   const anchors = [];
   for (let i = 0; i < tokens.length - 1; i++) {
     if (!/^[1-9]$/.test(tokens[i])) continue;
+    if (perLine && !(firstOfLine(i) && tokens.some((t, k) => lineOf[k] === lineOf[i] && scoreRe.test(t.replace(/^[^\d]*/, ''))))) continue;
     const car = Number(tokens[i]);
     if (anchors.some(a => a.car === car)) continue;
     // 名前は車番のすぐ後ろ (枠番が間にある書き方にも対応して2つ先まで見る)
@@ -564,7 +596,8 @@ export function parseRaceCardText(text) {
     anchors.push({ car, at: i, nameAt: j });
   }
   const riders = anchors.map((a, k) => {
-    const block = tokens.slice(a.nameAt, k + 1 < anchors.length ? anchors[k + 1].at : tokens.length);
+    let block = tokens.slice(a.nameAt, k + 1 < anchors.length ? anchors[k + 1].at : tokens.length);
+    if (perLine) block = block.filter((_, x) => lineOf[a.nameAt + x] === lineOf[a.at]); // その選手の行だけ
     // 姓と名が空白で分かれていればつなげる
     let name = block[0];
     if (isNameToken(block[1]) && name.length + block[1].length <= 7 && !/[逃両追]/.test(block[1])) name += ' ' + block[1];
@@ -583,7 +616,9 @@ export function parseRaceCardText(text) {
     // S回数: 「S:4」「S 4」「S4」。ただし「S1」「S2」は級班なのでS回数とは読まない
     const sm = [...rest.matchAll(/(?:^|\s)S(?:回数)?(\s*[:=]?\s*)(\d{1,2})(?=\s|$)/g)]
       .find(x => !(x[1] === '' && ['1', '2'].includes(x[2]))); // 「S1」「S2」(すき間なし) は級班
-    const start = sm ? sm[2] : null;
+    // 「S1 B7」のように S のすぐ後ろに B が続くなら、それは級班ではなく S回数 (級班は別に書いてある)
+    const sb = rest.match(/(?:^|\s)S\s*:?\s*(\d{1,2})\s+B\s*:?\s*\d{1,2}(?=\s|$)/);
+    const start = sb ? sb[1] : sm ? sm[2] : null;
     if (start != null) r.start = Number(start);
     // 「S H B」の列がある表 (例 WINTICKETの基本情報: 得点 114.33 のあとに S 3  H 2  B 5 が数字だけで並ぶ)
     if (score && back == null && start == null && /S\s+H\s+B/.test(src)) {
@@ -602,6 +637,14 @@ export function parseRaceCardText(text) {
     return r;
   });
   // EXデータ (あれば) を選手に付ける
+  // 今開催の成績: 「【今開催成績】」などの見出しの下に「1 棚瀬：一次予選2着 二次予選4着 準決勝7着」
+  const meetSec = src.match(/(?:今開催|今節|開催成績|節成績)[^\n]*\n((?:[ \t]*[1-9][^\n]*\n?){1,9})/);
+  if (meetSec) for (const row of meetSec[1].split('\n')) {
+    const m = row.match(/^[ \t]*([1-9])[ \t]/); if (!m) continue;
+    const res = [...row.matchAll(/([぀-ヿ㐀-鿿A-Za-z]{0,8}?)[ \t]*([1-9])着/g)].map(x => ({ stage: x[1], pos: Number(x[2]) }));
+    const r = riders.find(x => x.car === Number(m[1]));
+    if (r && res.length) r.meet = res;
+  }
   const ex = parseExData(src);
   for (const r of riders) if (ex[r.car]) r.ex = ex[r.car];
   const exCount = Object.keys(ex).length;

@@ -243,6 +243,38 @@ check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い
   check(f.marks[f.scenarios[0].order[0]] === '◎' && f.marks[f.scenarios[0].order[1]] === '○' && f.runs.length === 12, '印は本線に合わせる (◎=本線の1着、○=2着)', JSON.stringify(f.marks));
 }
 
+// ---------- 「1番車 名前 府県 … 競走得点…」の出走表 + 【周回予想ライン】 + 【今開催成績】 ----------
+{
+  const r = parseRaceCardText(`2026年10月25日 熊本競輪 8R
+S級特選 9車立て 発走14:16
+距離2025m 5周 熊本400mバンク
+【出走表】
+1番車 山田一郎 岐阜 26歳 123期 S2 逃 競走得点107.00 勝率27.59% 直近29走8-8-2-11 決まり手逃14捲0差1マ1 S7 B16 コメント:自力。
+2番車 田中二郎 大分 30歳 117期 S1 逃 競走得点108.32 決まり手逃1捲4差2マ1 S9 B6 コメント:佐藤君。
+3番車 鈴木三郎 群馬 36歳 100期 S1 追 競走得点108.07 決まり手逃0捲1差5マ2 S7 B0
+4番車 佐藤四郎 新潟 23歳 125期 S2 逃 競走得点101.35 決まり手逃2捲0差2マ0 S1 B7
+5番車 高橋五郎 徳島 27歳 117期 S2 逃 競走得点104.93 決まり手逃4捲9差1マ1 S2 B7
+6番車 伊藤六郎 山口 37歳 96期 S2 追 競走得点96.74 決まり手逃0捲0差1マ3 S2 B0
+7番車 渡辺七郎 熊本 23歳 123期 S2 逃 競走得点103.48 決まり手逃5捲5差1マ0 S0 B13
+8番車 中村八郎 東京 45歳 90期 S2 追 競走得点98.64 決まり手逃0捲0差3マ3 S2 B0
+9番車 小林九郎 岐阜 33歳 103期 S2 両 競走得点106.57 決まり手逃0捲3差4マ3 S6 B0
+【周回予想ライン】
+1-9（山田-小林）
+7-2（渡辺-田中）
+4-3-8（佐藤-鈴木-中村）
+5-6（高橋-伊藤）
+【今開催成績】
+1 山田：一次予選2着 二次予選4着 準決勝7着
+9 小林：一次予選1着 二次予選5着 特選6着`);
+  const d = r.data, byCar = Object.fromEntries(d.riders.map(x => [x.car, x]));
+  check(d.riders.length === 9 && byCar[1].name === '山田一郎' && byCar[2].score === 108.32 && byCar[2].class === 'S1' && byCar[4].start === 1 && byCar[4].back === 7 && byCar[9].style === '両' && byCar[1].kimarite?.nige === 14,
+    '「1番車 名前 … 競走得点107.00 … S7 B16」の書き方を読む (「9車立て」「5周」を選手と間違えない・「S1 B7」はS回数)', d.riders.map(x => `${x.car}${x.name}`).join(' '));
+  check(JSON.stringify(d.lines) === '[[1,9],[7,2],[4,3,8],[5,6]]' && d.race.venue === '熊本' && d.race.raceNo === 8 && !r.found.linesPredicted,
+    '【周回予想ライン】の「1-9（山田-小林）」を1行1ラインで読む', JSON.stringify(d.lines));
+  check(byCar[1].meet?.map(x => x.pos).join('') === '247' && byCar[9].meet?.length === 3 && /今開催 2-4-7着/.test(toRaceSetup(d).meta.conversion[1].join(' ')),
+    '【今開催成績】の着順を読み、選手の見立てに出す', JSON.stringify(byCar[1].meet));
+}
+
 // ---------- 答え合わせの採点 (確定した予想 → 結果) ----------
 {
   const { makeLock, scoreLock, summarize, fingerprint } = await import('./scoring.js');

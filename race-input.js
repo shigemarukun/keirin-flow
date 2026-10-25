@@ -175,7 +175,7 @@ export function mountRaceInput(container, { onApply }) {
   };
   const fill = data => {
     extras = {
-      riders: Object.fromEntries((data?.riders ?? []).filter(r => r.ex || r.pref).map(r => [Number(r.car), { ex: r.ex ?? undefined, pref: r.pref ?? undefined }])),
+      riders: Object.fromEntries((data?.riders ?? []).filter(r => r.ex || r.pref || r.meet).map(r => [Number(r.car), { ex: r.ex ?? undefined, pref: r.pref ?? undefined, meet: r.meet ?? undefined }])),
       race: { kind: data?.race?.kind ?? undefined, name: data?.race?.name ?? undefined }
     };
     const exN = Object.values(extras.riders).filter(x => x.ex).length;

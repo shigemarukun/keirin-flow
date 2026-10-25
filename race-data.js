@@ -327,7 +327,7 @@ export function toRaceSetup(data) {
     // ガールズ: ラインがない個人戦なので、前で風を受けて先行するより、後ろから一気に仕掛ける(捲る)選手が多い
     // (実データの1着の決まり手: 捲り49% / 逃げ21%)。決まり手の実績が無い選手は、判断を捲り寄りに傾ける
     if (girls && !infoByCar[car].rec) riders[car].styleBias = round2((riders[car].styleBias ?? 0) - (globalThis.KF_TUNE?.gb ?? 0.08));
-    if (girls) riders[car].strikeLater = globalThis.KF_TUNE?.gs ?? 110; // ガールズは最後の仕掛けがゴールに近い (捲り49%・差し30%に合わせた値)
+    if (girls) riders[car].strikeLater = globalThis.KF_TUNE?.gs ?? 200; // ガールズは最後の仕掛けがゴールに近い (検証: 逃げ22/捲り56/差し23)
     const seri = /^SERI:([1-9])$/.exec(tactic ?? '');
     if (seri && !girls) riders[car].seriTarget = Number(seri[1]); // 単騎で、この選手のラインの番手を競る
     if (['TSUPPARI', 'HIKU', 'CHUDAN', 'YIELD'].includes(front)) riders[car].frontResponse = front === 'YIELD' ? 'CHUDAN' : front;

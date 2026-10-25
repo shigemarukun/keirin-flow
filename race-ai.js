@@ -80,7 +80,8 @@ export class RaceAI {
     const T = globalThis.KF_TUNE ?? {};
     // 前がラインの仲間で、ダッシュで踏み出している最中なら、後ろはその風よけに引っ張られて一緒に上がっていける
     // (捲りやカマシは、ライン全体で上がっていく)
-    const pull = wheel && wheel.lineId && wheel.lineId === rider.lineId && (wheel._dashUntil ?? -1) > now ? (wheel._dash ?? 0) * (T.fdash ?? .8) : 0;
+    const riding = wheel && ((wheel.lineId && wheel.lineId === rider.lineId) || rider._tobiTo === wheel.number); // ラインの仲間か、飛びついた相手
+    const pull = riding && (wheel._dashUntil ?? -1) > now ? (wheel._dash ?? 0) * (T.fdash ?? .8) : 0;
     return this.sprintSpeed(rider) + (rider.profile.followAllowance ?? T.fa ?? 0.6) + pull;
   }
   strength(rider) { const p = rider.profile; return p.power * .45 + p.acceleration * .25 + rider.energy * .30; }
@@ -123,6 +124,8 @@ export class RaceAI {
       const role = rider.role;
       if (role === ROLE.LEADER) d = this.leader(rider, engine, m, rem);
       // 自力型の単騎 (逃・両) は「1人のライン」として先頭の判断をする。追込型の単騎は他のラインに付ける
+      // ガールズ: すぐ外を捲っていく選手がいたら、その後ろに飛びついて一緒に上がる (そこから直線で差す)
+      else if (role === ROLE.SOLO && engine.setup?.rules?.girls && (globalThis.KF_TUNE?.gtobi ?? 1) && (d = this._tobitsuki(rider, engine, m, rem))) { /* 飛びつき */ }
       else if (role === ROLE.SOLO && rider.profile.aggression >= 0.62) d = this.leader(rider, engine, m, rem);
       else if (role === ROLE.SOLO) d = this.solo(rider, engine, m, rem);
       else d = this.follower(rider, engine, m, rem);
@@ -328,7 +331,7 @@ export class RaceAI {
     // (前受けから自分で引いた選手は、競り負けて下げたのとは違い、脚質どおりのタイミングで巻き返す)
     const regroup = m.gaveUp && !m.hikuRetreat;
     // すでに先頭のすぐ後ろ (好位) にいる捲り型は、外へ仕掛けずに直線で差しにいく (ガールズで多い形)
-    const sitRank = engine.setup?.rules?.girls ? (globalThis.KF_TUNE?.sitG ?? 3) : (globalThis.KF_TUNE?.sitM ?? 0);
+    const sitRank = engine.setup?.rules?.girls ? (globalThis.KF_TUNE?.sitG ?? 5) : (globalThis.KF_TUNE?.sitM ?? 0);
     const sitting = m.style === 'MAKURI' && !m.struck && engine.positionRank(rider) <= sitRank && behindBy < engine.spacing.follow * (sitRank + .5) && rider.boxedFor < .3;
     const strikeNow = ((!regroup) && !sitting && rem <= strikeAt && rider.energy > .25) || (regroup && rem <= Math.min(m.strikeAt, 260) && rider.energy > .22) || lateAndStillBehind || m.struck;
     if (strikeNow && rider.energy > .08) {
@@ -734,6 +737,18 @@ export class RaceAI {
   }
 
   // ---------- SOLO ----------
+  _tobitsuki(rider, engine, m, rem) {
+    if (rem >= 420 || rem <= PACE.FINAL_STRAIGHT || rider.energy <= .3 || m.struck) return null;
+    const cur = m.tobiTo ? engine.rider(m.tobiTo) : null;
+    const go = cur && !cur.finished && cur.action === ACTION.ATTACK && cur.distance > rider.distance ? cur
+      : engine.riders.find(o => !o.finished && o !== rider && o.action === ACTION.ATTACK
+        && o.distance > rider.distance + .5 && o.distance < rider.distance + U(engine, 8) && o.laneOffset > rider.laneOffset + 4 && o.laneOffset < rider.laneOffset + 34);
+    if (!go) { m.tobiTo = null; rider._tobiTo = null; return null; }
+    const first = m.tobiTo !== go.number;
+    m.tobiTo = go.number; rider._tobiTo = go.number;
+    return this._followPlan(go, first ? `${go.number}番の捲りに飛びつき、後ろに付いて一緒に上がる` : `${go.number}番の後ろに付いて捲り上がる`, { lane: go.laneOffset });
+  }
+
   solo(rider, engine, m, rem) {
     const ahead = this._nearestAheadInCorridor(rider, engine, 80) ?? (engine.findNearestAhead(rider) ? { rider: engine.findNearestAhead(rider) } : null);
     if (rem <= m.strikeAt * .6 && rider.energy > .3 && engine.positionRank(rider) >= 4) {

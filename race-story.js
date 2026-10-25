@@ -63,7 +63,20 @@ export function kimarite(snapshots, ranking, frontMateOf, logs = []) {
     const n = ranking[i].number, prev = ranking[i - 1].number;
     if (frontMateOf(n) === prev) marks.push(n);
   }
-  return { winner, how: winnerHow, marks };
+  // 2着の決まり手 (実データの「2着の決まり手」と比べるため)
+  //   マーク: 同じラインで前を走っていた選手 (=1着) のすぐ後ろ / 逃げ: 先頭で逃げて残った
+  //   捲り: 後ろから仕掛けて2着まで来た / 差し: 直線で前を抜いて2着
+  const second = ranking[1]?.number;
+  let secondHow = null;
+  if (second != null) {
+    const attacked = logs.some(l => l.riderNumber === second && R(l) <= 400 && R(l) > 110 && /捲りに出る|番手捲り|カマす|叩いて主導権|自力発進/.test(l.message));
+    const atBack = snapshots.back?.order?.indexOf(second) ?? -1;
+    if (marks.includes(second)) secondHow = 'マーク';
+    else if (attacked && atBack !== 0) secondHow = '捲り'; // 後ろから捲って (いったん先頭に立っても) 2着
+    else if (atBack === 0 || leadAt('straight') === second) secondHow = '逃げ';
+    else secondHow = '差し';
+  }
+  return { winner, how: winnerHow, marks, secondHow };
 }
 
 // ---------- 展開の文章 ----------

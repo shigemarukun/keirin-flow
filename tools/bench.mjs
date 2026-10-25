@@ -64,7 +64,7 @@ async function runOne(i, opts) {
   const makuri = by(/捲りに出る/), kamashi = by(/カマす/), chigire = by(/千切れ/), banteMakuri = by(/番手捲り/), inner = by(/内を突く/), naka = by(/中を割って/);
   return {
     i, cars: data._cars, family: data._family, bank: setup.trackProfile.replace('PROFILE_', ''), ms,
-    how: story.kimarite?.how ?? '不明', mark2: !!story.kimarite?.marks?.includes(order[1]),
+    how: story.kimarite?.how ?? '不明', how2: story.kimarite?.secondHow ?? null, mark2: !!story.kimarite?.marks?.includes(order[1]),
     roles: e.riders.map(r => ({ role: roleOf(r.number), fin: order.indexOf(r.number) + 1, power: r.profile.power })),
     winnerRole: roleOf(order[0]),
     line12: lineOf(order[0]) === lineOf(order[1]), line123: lineOf(order[0]) === lineOf(order[1]) && lineOf(order[1]) === lineOf(order[2]),
@@ -89,6 +89,7 @@ export function summarize(rs) {
     n: rs.length, msPerRace: Math.round(rs.reduce((s, r) => s + r.ms, 0) / rs.length),
     seven: { kimarite: kim(seven), positions: pos(seven), mark2: pct(seven.filter(r => r.mark2).length, seven.length),
       roleBy: Object.fromEntries(['逃げ', '捲り', '差し'].map(h => { const l = seven.filter(r => r.how === h); const c = {}; for (const r of l) c[r.winnerRole] = (c[r.winnerRole] ?? 0) + 1; return [h, Object.fromEntries(Object.entries(c).map(([k, v]) => [k, pct(v, l.length)]))]; })),
+      second: (() => { const c = { 逃げ: 0, 捲り: 0, 差し: 0, マーク: 0 }; for (const r of seven) if (c[r.how2] != null) c[r.how2]++; return Object.fromEntries(Object.entries(c).map(([k, v]) => [k, pct(v, seven.length)])); })(),
       markBy: Object.fromEntries(['逃げ', '捲り', '差し'].map(h => { const l = seven.filter(r => r.how === h); return [h, pct(l.filter(r => r.mark2).length, l.length)]; })),
       line12: pct(seven.filter(r => r.line12).length, seven.length), line123: pct(seven.filter(r => r.line123).length, seven.length) },
     bank: Object.fromEntries(Object.entries(group(r => r.bank)).map(([k, l]) => [k, kim(l)])),
@@ -104,7 +105,7 @@ export function summarize(rs) {
 }
 
 const TARGET = {
-  seven: '逃げ19〜21 / 捲り28 / 差し50〜53 (7車F1・F2)',
+  seven: '逃げ19〜21 / 捲り28 / 差し50〜53 (7車F1・F2) ・全レース 23.5/31.3/44.9',
   pos: { 先頭: '21.6/49.2', 番手: '14.9/46.9', '3番手': '2.6/32.5', 単騎: '6.8/25.7' },
   mark2: '40.6 (S級) / 38.6 (A級)',
   bank: { 333: '33/31/36', 400: '25/30/45', 500: '24/26/50' }
@@ -115,6 +116,7 @@ function printReport(r) {
   console.log(`[7車立て] 決まり手 ${k(r.seven.kimarite)}   実際: ${TARGET.seven}`);
   for (const [role, s] of Object.entries(r.seven.positions)) console.log(`  ${role.padEnd(4, '　')} 1着${s.win}% 3着内${s.top3}%   実際 ${TARGET.pos[role] ?? '-'}  (n=${s.n})`);
   console.log(`  2着がマーク ${r.seven.mark2}% (実際 ${TARGET.mark2}) / 同じラインでワンツー ${r.seven.line12}% / 3着まで独占 ${r.seven.line123}%`);
+  console.log(`  2着の決まり手 ${Object.entries(r.seven.second).map(([a, b]) => `${a}${b}%`).join(' ')}   実際: 逃げ20 / 捲り15 / 差し24 / マーク41 (netkeiba 全レース2021-2026)`);
   console.log(`    決まり手ごとの1着の位置 ${Object.entries(r.seven.roleBy).map(([a, b]) => `${a}:${JSON.stringify(b)}`).join(' ')}`);
   console.log(`    決まり手ごとの2着マーク ${Object.entries(r.seven.markBy).map(([a, b]) => `${a}${b}%`).join(' ')}`);
   console.log(`[9車立て] ${k(r.nine)}`);

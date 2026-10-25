@@ -70,7 +70,8 @@ export class RaceAI {
 
   sprintSpeed(rider) {
     const p = rider.profile, e = rider.energy, T = globalThis.KF_TUNE ?? {};
-    const fatigue = e < .4 ? .72 + .7 * e : 1; // an empty rider cannot hold its top speed
+    const ft = T.ft ?? .4, fk = T.fk ?? .7;
+    const fatigue = e < ft ? 1 - fk * (ft - e) : 1; // 脚が尽きかけると最高速を保てない (タレる)
     // (残脚で上乗せできる速さの幅。広すぎると、脚を溜めただけの選手が直線で楽に突き抜けてしまう)
     return (p.topSpeed * (.90 + .10 * e) + p.sprintBonus * ((T.sb0 ?? 0) + (T.sb1 ?? .7) * e)) * fatigue;
   }
@@ -117,7 +118,7 @@ export class RaceAI {
 
     let d = this._contestDecision(rider, engine, rem);
     if (!d && rider.profile.seriTarget && !engine.setup?.rules?.noBlock && rem > PACE.FINAL_STRAIGHT) d = this._seriDecision(rider, engine, m, rem);
-    if (!d && rem <= PACE.FINAL_STRAIGHT) d = this.finalStraight(rider, engine, m);
+    if (!d && rem <= (globalThis.KF_TUNE?.fsr ?? PACE.FINAL_STRAIGHT)) d = this.finalStraight(rider, engine, m);
     if (!d) {
       const role = rider.role;
       if (role === ROLE.LEADER) d = this.leader(rider, engine, m, rem);
@@ -747,6 +748,16 @@ export class RaceAI {
   // ---------- FINAL STRAIGHT ----------
   finalStraight(rider, engine, m) {
     if (rider.energy <= .04) return { action: ACTION.FADE, speed: rider.profile.topSpeed * .75, lane: rider.laneOffset, reason: '脚が残っておらず失速' };
+    // ラインの前の選手 (番手など) が外へ持ち出して前を抜きにいったら、その後ろに付いて一緒に伸びる
+    // (3番手は番手の車輪を追う。前の選手が詰まっている内に取り残されない)
+    const mate = engine.rider(rider.frontLineMate);
+    const T = globalThis.KF_TUNE ?? {};
+    if ((T.fmate ?? 1) && mate && !mate.finished && mate.action === ACTION.FINAL_SPRINT && mate.distance > rider.distance
+      && mate.distance - rider.distance < engine.spacing.follow * 2.5 && mate.laneOffset - rider.laneOffset >= 8 && rider.energy > .1) {
+      const lane = mate.laneOffset;
+      const clear = !engine.riders.some(o => o !== rider && o !== mate && !o.finished && o.laneOffset > Math.min(lane, rider.laneOffset) - 9 && o.laneOffset < Math.max(lane, rider.laneOffset) + 9 && Math.abs(o.distance - rider.distance) < U(engine, 4));
+      if (clear) return { action: ACTION.FINAL_SPRINT, speed: this.sprintSpeed(rider), lane, reason: `最後の直線。${mate.number}番が外へ持ち出したので、その後ろに付いて伸びる (残脚${pct(rider.energy)})` };
+    }
     const ahead = this._nearestAheadInCorridor(rider, engine, 22);
     let lane = rider.laneOffset, how = '追い込む';
     if (ahead && ahead.rider.speed < rider.speed + 1.5) {

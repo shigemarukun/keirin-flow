@@ -61,7 +61,12 @@ export class PhysicsEngine{
   this.mode=setup?.mode===RACE_MODE.TEACHER?RACE_MODE.TEACHER:RACE_MODE.AUTONOMOUS;
   // 車間 (m)。実際の競輪は前の車輪にほぼ付いて走るので、自律モードは詰めた隊列にする。
   // min: 同じ走路でこれ以上は近づけない / follow: 追走するときの車間 / cutIn: 前に割り込める差 / start: スタート時の間隔
-  this.spacing=this.mode===RACE_MODE.TEACHER?{min:13.5,follow:17,cutIn:9,start:17}:{min:globalThis.KF_TUNE?.spm??7,follow:globalThis.KF_TUNE?.spf??7.8,cutIn:globalThis.KF_TUNE?.spc??5,start:9};
+  // 自律モードの車間は実際に近い値 (自転車の長さ約1.75m + すき間)。画面では見やすいように広げて描く (ui.js)。
+  // unit = 「1台分の車間」の倍率。AIや物理の「前後に何台分」という判断は、すべてこの倍率で伸び縮みする
+  const T=globalThis.KF_TUNE??{};
+  const follow=T.spf??2.6;
+  this.spacing=this.mode===RACE_MODE.TEACHER?{min:13.5,follow:17,cutIn:9,start:17}:{min:T.spm??follow*.85,follow,cutIn:T.spc??follow*.62,start:Math.max(3,follow*1.15)};
+  this.unit=this.mode===RACE_MODE.TEACHER?1:this.spacing.follow/7.8;
   this.setup.mode=this.mode;
   this.profile=RACE_PROFILES[this.setup.trackProfile]??RACE_PROFILES.PROFILE_400;
   // 400バンクを基準にした距離の倍率。AIや展開の文章は「400バンクに直した残り距離」で判断する
@@ -163,7 +168,7 @@ export class PhysicsEngine{
    if(!members.length)return null;
    const tail=[...members].sort((a,b)=>a.distance-b.distance)[0];
    return {tail,gap:tail.distance-myLeader.distance};
-  }).filter(item=>item&&item.gap>6).sort((a,b)=>a.gap-b.gap);
+  }).filter(item=>item&&item.gap>6*this.unit).sort((a,b)=>a.gap-b.gap);
   return candidates[0]?.tail??null;
  }
  getLineFollowMode(rider){
@@ -173,13 +178,13 @@ export class PhysicsEngine{
   const front=this.rider(frontNumber);
   if(!front||front.finished)return LINE_FOLLOW_MODE.FREE;
   const gap=front.distance-rider.distance;
-  if(gap>28||gap<=0)return LINE_FOLLOW_MODE.FREE;
+  if(gap>28*this.unit||gap<=0)return LINE_FOLLOW_MODE.FREE;
   if(rider.lineId===this.settlingLineId||Math.abs(front.laneOffset-rider.laneOffset)>6)return LINE_FOLLOW_MODE.SETTLING;
   return LINE_FOLLOW_MODE.LOCKED_FOLLOW;
  }
  laneDensityAround(rider,lane){
   let score=0;
-  for(const other of this.riders){if(other.number===rider.number||other.finished)continue;const longitudinal=Math.abs(other.distance-rider.distance),lateral=Math.abs(other.laneOffset-lane);if(longitudinal<28&&lateral<9)score+=1-(longitudinal/28)*.55;}
+  for(const other of this.riders){if(other.number===rider.number||other.finished)continue;const longitudinal=Math.abs(other.distance-rider.distance),lateral=Math.abs(other.laneOffset-lane);if(longitudinal<28*this.unit&&lateral<9)score+=1-(longitudinal/(28*this.unit))*.55;}
   return score;
  }
  measureLineIntegrity(lineId){
@@ -188,7 +193,7 @@ export class PhysicsEngine{
   if(members.length<=1)return 1;
   let error=0,count=0;
   for(let i=1;i<members.length;i++){error+=Math.abs((members[i-1].distance-members[i].distance)-this.spacing.follow);count++;}
-  return clamp(1-(error/Math.max(1,count))/24,0,1);
+  return clamp(1-(error/Math.max(1,count))/(24*this.unit),0,1);
  }
 
  findNearestAttacker(rider){
@@ -207,7 +212,7 @@ export class PhysicsEngine{
   for(const other of this.riders){
    if(other.finished||other.number===rider.number||other.laneOffset<=rider.laneOffset+5)continue;
    const gap=rider.distance-other.distance;
-   if(gap>-8&&gap<30)pressure+=clamp((30-gap)/30,0,1)*clamp((other.speed-rider.speed+4)/8,0,1);
+   const U=this.unit;if(gap>-8*U&&gap<30*U)pressure+=clamp((30*U-gap)/(30*U),0,1)*clamp((other.speed-rider.speed+4)/8,0,1);
   }
   return clamp(pressure,0,1);
  }
@@ -217,7 +222,7 @@ export class PhysicsEngine{
    if(other.finished||other.number===rider.number)return false;
    if(other.lineId&&rider.lineId&&other.lineId===rider.lineId)return false;
    const distance=rider.distance-other.distance,closing=other.speed-rider.speed;
-   return distance>-6&&distance<34&&closing>.8;
+   return distance>-6*this.unit&&distance<34*this.unit&&closing>.8;
   }).map(other=>({rider:other,distance:rider.distance-other.distance,closingSpeed:other.speed-rider.speed}));
   return threats.sort((a,b)=>a.distance-b.distance)[0]??null;
  }
@@ -293,22 +298,31 @@ export class PhysicsEngine{
    // 同じ速度で走れば先頭も番手も同じだけ踏んでいて、差は風よけ(下の draft)だけ。
    const T=globalThis.KF_TUNE??{};
    factor=1+(T.acc??.35)*clamp((rider.acceleration??0)/3,0,1.5);
+   // ブロック(外へ張って牽制)は体ごと相手にぶつけにいく動き。そのぶん脚を使う
+   if(plan.action===ACTION.BLOCK)factor*=1+(T.bce??0);
+   // 並走の踏み合い: 別のラインの選手と横に並んで競っているあいだは、どちらも余計に脚を使う
+   // 先頭で外から並ばれて合わせて踏んでいる側 (内で張る先行) は、風も受けながら踏むので、さらに脚を使う
+   if((T.sbcL??0)>0&&[ACTION.ATTACK,ACTION.DEFEND,ACTION.CONTROL_PACE].includes(plan.action)&&this.riders.some(o=>o!==rider&&!o.finished&&(!o.lineId||o.lineId!==rider.lineId)&&o.distance<=rider.distance&&rider.distance-o.distance<1.5&&o.laneOffset>rider.laneOffset+6&&o.laneOffset-rider.laneOffset<26&&[ACTION.ATTACK,ACTION.FULL_CONTEST].includes(o.action)))factor*=1+T.sbcL;
+   if((T.sbc??0)>0&&[ACTION.ATTACK,ACTION.DEFEND,ACTION.FULL_CONTEST,ACTION.CONTROL_PACE].includes(plan.action)&&this.riders.some(o=>o!==rider&&!o.finished&&(!o.lineId||o.lineId!==rider.lineId)&&Math.abs(o.distance-rider.distance)<1.5*this.unit*3&&Math.abs(o.laneOffset-rider.laneOffset)<22&&[ACTION.ATTACK,ACTION.DEFEND,ACTION.FULL_CONTEST].includes(o.action)))factor*=1+T.sbc;
   }
   if([ACTION.SAVE_ENERGY,ACTION.YIELD,ACTION.RETREAT].includes(plan.action))factor=.55;
   // Slipstream: riding close behind someone in the same corridor saves energy.
   let draft=1;
   if(this.mode!==RACE_MODE.TEACHER){
    // 風よけは前の選手にぴったり付いているときに一番効き、車間が空くほど弱くなる (口が空くと一気に脚を使い、さらに離れる=千切れ)
-   const T=globalThis.KF_TUNE??{},near=this.spacing.follow+(T.dn??2),fade=T.df??10;
+   const T=globalThis.KF_TUNE??{},near=this.spacing.follow+(T.dn??2)*this.unit,fade=(T.df??10)*this.unit;
    let best=0;
-   for(const o of this.riders){if(o===rider||o.finished)continue;const g=o.distance-rider.distance;if(g>0&&g<near+fade&&Math.abs(o.laneOffset-rider.laneOffset)<11){best=Math.max(best,g<=near?1:1-(g-near)/fade);}}
-   draft=1-(T.draft??.55)*(rider.profile.draftSkill??.75)*best;
+   for(const o of this.riders){if(o===rider||o.finished)continue;const g=o.distance-rider.distance;if(g>0&&g<near+fade&&Math.abs(o.laneOffset-rider.laneOffset)<11){
+     // 他のラインの選手の後ろは、仲間の後ろほどぴったりとは付けない (締められる・車間が空く)。単騎はさらに付けにくい
+     const mate=rider.lineId&&o.lineId===rider.lineId,k=mate?1:rider.role==='SOLO'&&!this.setup?.rules?.girls?(T.sd??.7):(T.xd??1);
+     best=Math.max(best,(g<=near?1:1-(g-near)/fade)*k);}}
+   draft=1-(T.draft??.4)*(rider.profile.draftSkill??.75)*best;
   }
   const load=(.0022+(this.mode===RACE_MODE.TEACHER?.0105:(globalThis.KF_TUNE?.k??.020))*demand*demand)*factor*draft/Math.max(.55,rider.profile.endurance);
   // 周長が違っても「残り2周で使える脚」は同じ: 長いバンクほど1mあたりの脚の減りを小さくする
   // (333バンクはそのまま = 短い直線で逃げが残りやすい。実データでも333は逃げの1着が多い)
   const scaleK=this.lapScale??1;
-  const bankK=this.mode!==RACE_MODE.TEACHER&&scaleK>1?Math.pow(scaleK,-(globalThis.KF_TUNE?.bankE??1)):1;
+  const bankK=this.mode===RACE_MODE.TEACHER?1:scaleK>1?Math.pow(scaleK,-(globalThis.KF_TUNE?.bankE??1)):Math.pow(scaleK,-(globalThis.KF_TUNE?.bank3??1));
   rider.energy=clamp(rider.energy-load*bankK*dt,0,1);
  }
 
@@ -388,10 +402,11 @@ export class PhysicsEngine{
    for(const blocker of this.riders){
     if(blocker.finished||blocker.number===rider.number||blocker.action!==ACTION.BLOCK)continue;
     if(blocker.lineId&&blocker.lineId===rider.lineId)continue;
-    const longitudinal=Math.abs(blocker.distance-rider.distance),lateral=Math.abs(blocker.laneOffset-rider.laneOffset);
-    if(longitudinal>22||lateral>26)continue;
+    // ブロックが効くのは、すぐ横に並んできた相手だけ (前後1台分ほど・外側)
+    const longitudinal=Math.abs(blocker.distance-rider.distance),lateral=Math.abs(blocker.laneOffset-rider.laneOffset),reach=(globalThis.KF_TUNE?.br??9)*this.unit;
+    if(longitudinal>reach||lateral>26)continue;
     // closer (both along and across the track) = harder check
-    const along=1-clamp(longitudinal/22,0,1),across=1-clamp((lateral-11)/15,0,1);
+    const along=1-clamp(longitudinal/reach,0,1),across=1-clamp((lateral-11)/15,0,1);
     resistance=Math.max(resistance,along*across*(blocker.profile?.blockSkill??.75)*(globalThis.KF_TUNE?.blk??3.6));
    }
    return resistance;
@@ -417,13 +432,16 @@ export class PhysicsEngine{
    desired*=1-this._getOuterLaneLoad(rider);
   }
   desired=Math.max(0,desired-this._getBlockResistance(rider));
+  // 牽制した側も、横へ振ったぶん前へ進む勢いを失う
+  if(this.mode!==RACE_MODE.TEACHER&&plan.action===ACTION.BLOCK)desired=Math.max(0,desired-(globalThis.KF_TUNE?.bsp??0));
   // Boxed in by a rider slightly ahead of us: ease off so we can slip behind him and change lanes.
   // (Without this two riders can lock each other side by side forever.)
   // ただし前の選手に付いている(追走中で、その車輪がすぐ前にある)なら下げない: 横に並ばれても今の走路で車輪に付いて粘る
   // (下げると、並んできた選手に位置を奪われる。3番手が他のラインに割り込まれて最後尾まで下がる原因だった)
   const wheel=plan.action===ACTION.FOLLOW&&plan.followTargetNumber?this.rider(plan.followTargetNumber):null;
   const holdingWheel=wheel&&!wheel.finished&&wheel.distance>rider.distance&&wheel.distance-rider.distance<this.spacing.follow*1.8&&(globalThis.KF_TUNE?.hw2??1);
-  if(this.mode!==RACE_MODE.TEACHER&&rider.boxedFor>.6&&!holdingWheel){
+  // (最後の直線では下げて外へ回り直す時間がない。包まれても、その場で踏み続ける)
+  if(this.mode!==RACE_MODE.TEACHER&&rider.boxedFor>.6&&!holdingWheel&&!(plan.action===ACTION.FINAL_SPRINT&&(globalThis.KF_TUNE?.fsbox??1))){
    const box=this.rider(rider.boxedBy);
    if(box&&!box.finished&&box.distance>=rider.distance&&box.action!==ACTION.YIELD)desired=Math.min(desired,Math.max(PACE_FLOOR,box.speed-1.5));
   }

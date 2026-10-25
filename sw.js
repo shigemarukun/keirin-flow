@@ -1,7 +1,7 @@
 // KEIRIN FLOW service worker
 // 方針: 通信できるときは必ず最新版を取りに行き(古い版が出る問題を防ぐ)、
 // 電波がないときだけ前回保存した版で動かす。
-const CACHE = 'keirin-flow-v4';
+const CACHE = 'keirin-flow-v7';
 
 self.addEventListener('install', event => {
   self.skipWaiting();

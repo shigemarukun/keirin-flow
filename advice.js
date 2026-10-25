@@ -1,12 +1,13 @@
 // KEIRIN FLOW — 展開ごとの買い目アドバイス (3連単)
 //
 // 選んだ展開 (主導権を取ったライン) と同じ展開になった回だけを集め、1〜3着に誰が来やすいかを数える。
-// 回数が少ないので、全体の結果で少しならしてから、3連単のすべての組み合わせに点数を付ける。
+// 回数が少ないので、全体の結果で少しならしてから、3連単のすべての組み合わせに確率を付ける (prob.js)。
 // 点数は「上から足して約6割を押さえられる数」(固い展開ほど少なく、荒れる展開ほど多い。3〜24点)。
-// 本命 / 抑え / 穴 (印の薄い選手が絡む組み合わせ) に分け、その展開で起きやすいことを文章で添える。
-// オッズはまだ使わない (穴はAIの見立てで確率が低いもの)。
+// 本命 / 抑え / 波乱 (印の薄い選手が1・2着に絡む組み合わせ) に分け、その展開で起きやすいことを文章で添える。
+// オッズはまだ使わないので「配当が高い穴」ではなく、AIの見立てで起きにくい「波乱」の目と呼ぶ。
 
-const SMOOTH = 4;      // 全体の結果で、どのくらいならすか (回数に換算)
+import { buildModel, trifectaTable } from './prob.js';
+
 const COVER = 0.6;     // 押さえたい割合
 const MIN_POINTS = 3, MAX_POINTS = 24;
 
@@ -16,24 +17,10 @@ export function buildAdvice({ runs, scenario, marks = {}, names = {} }) {
   const group = scenario?.mainLine != null ? runs.filter(r => r.mainLine === scenario.mainLine) : runs;
   if (!group.length) return null;
   const nG = group.length, nAll = runs.length;
-  // 着順ごとの確率 (この展開の回 + 全体で少しならす)
-  const posProb = k => Object.fromEntries(cars.map(c => {
-    const g = group.filter(r => r.order[k] === c).length, a = runs.filter(r => r.order[k] === c).length / nAll;
-    return [c, (g + SMOOTH * a) / (nG + SMOOTH)];
-  }));
-  const p1 = posProb(0), p2 = posProb(1), p3 = posProb(2);
-  const seen = new Map();
-  for (const r of group) { const k = r.order.slice(0, 3).join('-'); seen.set(k, (seen.get(k) ?? 0) + 1); }
-  // 3連単の点数: 1着の確率 × (1着を除いた中での2着の確率) × (残りの中での3着の確率) + 実際に出た回数
-  const scored = [];
-  for (const a of cars) for (const b of cars) for (const c of cars) {
-    if (a === b || b === c || a === c) continue;
-    const model = p1[a] * (p2[b] / Math.max(0.05, 1 - p2[a])) * (p3[c] / Math.max(0.05, 1 - p3[a] - p3[b]));
-    scored.push({ key: `${a}-${b}-${c}`, cars: [a, b, c], score: 0.6 * model + 0.4 * ((seen.get(`${a}-${b}-${c}`) ?? 0) / nG) });
-  }
-  const total = scored.reduce((s, x) => s + x.score, 0) || 1;
-  for (const x of scored) x.p = x.score / total;
-  scored.sort((x, y) => y.p - x.p);
+  // 3連単の確率: 1着 → 2着 → 3着 を、この展開になった回の結果で数え、全体の見立てに寄せてならす (prob.js)
+  const allOrders = runs.map(r => r.order);
+  const model = group === runs ? buildModel(allOrders, cars) : buildModel(group.map(r => r.order), cars, { base: buildModel(allOrders, cars) });
+  const scored = trifectaTable(model, cars);
   // 画面に出している展開の着順 (代表の1回) は、必ず本命の先頭に置く
   const repKey = scenario?.order?.slice(0, 3).join('-');
   const repIdx = scored.findIndex(x => x.key === repKey);
@@ -43,7 +30,7 @@ export function buildAdvice({ runs, scenario, marks = {}, names = {} }) {
   while (points < scored.length && cum < COVER) cum += scored[points++].p;
   points = Math.max(MIN_POINTS, Math.min(MAX_POINTS, points));
   const strong = new Set(Object.entries(marks).filter(([, m]) => ['◎', '○', '▲'].includes(m)).map(([c]) => Number(c)));
-  // 本命: 上から3割ぶん (1〜6点) / 穴: 印の薄い選手が絡む組み合わせから (点数の約1/4) / 抑え: 残り
+  // 本命: 上から3割ぶん (1〜6点) / 波乱: 印の薄い選手が絡む組み合わせから (点数の約1/4) / 抑え: 残り
   const honmei = []; let c1 = 0;
   for (const x of scored) { if (honmei.length >= 6 || (honmei.length >= 1 && c1 >= 0.3)) break; honmei.push(x); c1 += x.p; }
   const anaN = Math.max(1, Math.round(points / 4));
@@ -89,7 +76,7 @@ function notesFor(group, nG, names) {
 export function adviceText(advice, label = '') {
   if (!advice) return '';
   const line = (t, arr) => (arr.length ? `${t}: ${groupedKeys(arr).join(' / ')}` : '');
-  return [`${label}3連単 ${advice.points}点`, line('本命', advice.honmei), line('抑え', advice.osae), line('穴', advice.ana)].filter(Boolean).join('\n');
+  return [`${label}3連単 ${advice.points}点`, line('本命', advice.honmei), line('抑え', advice.osae), line('波乱', advice.ana)].filter(Boolean).join('\n');
 }
 
 // 1・2着が同じ組み合わせをまとめた書き方 (例: 2-4-9,5,1)。投票アプリに入れるときに見やすい

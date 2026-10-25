@@ -215,11 +215,11 @@ check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い
   check(/後方まで引いて/.test(hiku.text) && bellOrder(hiku).indexOf(1) > bellOrder(hiku).indexOf(4), '「引く」: 前受けが誘導切りを前に入れて、後方まで下げる (打鐘で中団のラインより後ろ)', bellOrder(hiku).join(''));
   check(/中団を取る/.test(chudan.text) && bellOrder(chudan).indexOf(1) < bellOrder(chudan).indexOf(4), '「中団」: 前受けが誘導切りを前に入れて、その後ろを取る (打鐘で中団)', bellOrder(chudan).join(''));
   check(/突っ張/.test(tsu.text), '「突っ張る」: 前受けが誘導切りに来た相手を突っ張る');
-  // EXデータがある選手は、何通りもの未来で 突っ張る / 引く / 中団 を割合で選び、本線・対抗・穴が展開ごとに分かれる
+  // EXデータがある選手は、何通りもの未来で 突っ張る / 引く / 中団 を割合で選び、本線・対抗・波乱が展開ごとに分かれる
   const d = base(); d.riders[0].score = 115; d.riders[0].ex = { tactics: { tsuppari: { s: 5, n: 7 }, kamashi: { s: 3, n: 5 } }, finish: { asLeader: { n: 60, w: { s: 12, n: 60 }, p2: { s: 8, n: 60 }, p3: { s: 6, n: 60 } }, asBante: { n: 3, w: { s: 1, n: 3 }, p2: null, p3: null } } };
   const f = forecastRaces(toRaceSetup(d), 24);
   const themes = f.scenarios.map(x => x.theme);
-  check(themes.length >= 2 && themes.every(t => /番ラインが主導権/.test(t)) && new Set(themes).size === themes.length, '本線・対抗・穴は「どのラインが主導権を取るか」で分かれ、展開の名前が付く', themes.join(' / '));
+  check(themes.length >= 2 && themes.every(t => /番ラインが主導権/.test(t)) && new Set(themes).size === themes.length, '本線・対抗・波乱は「どのラインが主導権を取るか」で分かれ、展開の名前が付く', themes.join(' / '));
 }
 
 // ---------- 展開ごとの買い目アドバイス (3連単) ----------
@@ -233,7 +233,7 @@ check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い
   const wild = mk(Array.from({ length: 30 }, () => [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => rnd() - .5)));
   const aw = buildAdvice({ runs: wild, scenario: { mainLine: 1 }, marks: { 1: '◎', 2: '○', 3: '▲' } });
   check(aw.points > af.points && aw.points <= 24 && aw.difficulty === '荒れそう', '荒れる展開ほど点数が増える (最大24点)', `${aw.points}点`);
-  check(aw.ana.every(x => x.key.split('-').slice(0, 2).some(c => !['1', '2', '3'].includes(c))), '穴は、印の薄い選手が1・2着に絡む組み合わせ');
+  check(aw.ana.every(x => x.key.split('-').slice(0, 2).some(c => !['1', '2', '3'].includes(c))), '波乱は、印の薄い選手が1・2着に絡む組み合わせ');
   check(JSON.stringify(groupedKeys([{ key: '2-4-9' }, { key: '2-4-5' }, { key: '3-4-9' }])) === '["2-4-9,5","3-4-9"]' && /本命: 1-2-3/.test(adviceText(af)),
     '買い目は1・2着が同じものをまとめて書く (例 2-4-9,5)、コピー用の文字も作れる');
   const thin = buildAdvice({ runs: [...firm, ...mk([[3, 4, 5, 1, 2, 6, 7]], 3)], scenario: { mainLine: 3 }, marks: {} });
@@ -241,6 +241,28 @@ check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い
   const { forecastRaces } = await import('./forecast.js');
   const f = forecastRaces(toRaceSetup({ ...SAMPLE_RACE_DATA }), 12);
   check(f.marks[f.scenarios[0].order[0]] === '◎' && f.marks[f.scenarios[0].order[1]] === '○' && f.runs.length === 12, '印は本線に合わせる (◎=本線の1着、○=2着)', JSON.stringify(f.marks));
+}
+
+// ---------- 答え合わせの採点 (確定した予想 → 結果) ----------
+{
+  const { makeLock, scoreLock, summarize, fingerprint } = await import('./scoring.js');
+  const { forecastRaces } = await import('./forecast.js');
+  const { buildAdvice } = await import('./advice.js');
+  const setup = toRaceSetup(SAMPLE_RACE_DATA);
+  const f = forecastRaces(setup, 12);
+  const adv = buildAdvice({ runs: f.runs, scenario: f.scenarios[0], marks: f.marks });
+  const lock = makeLock({ setup, forecast: f, advice: adv, now: new Date('2026-10-25T10:00:00Z') });
+  check(lock.orders.length === 12 && lock.main.length === 3 && lock.fingerprint === fingerprint(setup) && JSON.stringify(lock).length < 20000,
+    '予想を確定すると、本線・印・買い目・未来の着順が小さく保存される', `${JSON.stringify(lock).length}文字`);
+  const hit = scoreLock(lock, lock.main), miss = scoreLock(lock, [...lock.cars].reverse().slice(0, 3));
+  check(hit.trifectaHit && hit.p > miss.p && hit.vsRandom > 1 && hit.logLoss < miss.logLoss && hit.adviceHit === '本命',
+    '本線どおりの結果は、確率が高く当てずっぽうより良い採点になる (買い目は本命で的中)', `本線 ${(hit.p * 100).toFixed(1)}% ${hit.vsRandom.toFixed(1)}倍 / 外れ ${(miss.p * 100).toFixed(2)}%`);
+  // 全組み合わせの確率の合計は1 (どの結果でも採点できる)
+  const { buildModel, trifectaTable } = await import('./prob.js');
+  const total = trifectaTable(buildModel(lock.orders, lock.cars), lock.cars).reduce((a, x) => a + x.p, 0);
+  check(Math.abs(total - 1) < 1e-9, '3連単の確率は全組み合わせで合計1', total.toFixed(6));
+  const s = summarize([{ ...lock, result: hit }, { ...lock, result: miss }, { ...lock }]);
+  check(s.n === 2 && Math.abs(s.vsRandom - Math.sqrt(hit.vsRandom * miss.vsRandom)) < 1e-9, '通算は採点済みの確定予想だけ・当てずっぽうとの比は掛け算の平均', `${s.n}レース ${s.vsRandom.toFixed(2)}倍`);
 }
 
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');

@@ -215,6 +215,30 @@ export class UIRenderer {
         return -38 + (laneOffset + 18) * 1.35;
     }
 
+    // 画面に描く位置 (前後): 計算では自転車1台分(約2.6m)の車間で走っているが、そのまま描くと
+    // 選手の丸が重なって団子に見える。先頭の選手は本当の位置に置き、後ろへ順に、
+    // 「詰まって付いている車間」だけを広げて描く (離れている車間・千切れはそのままの差で見せる)
+    displayDistances(state) {
+        const S = 2.5, tight = 3.4; // 広げる倍率 / 「付いている」とみなす車間 (m)
+        const live = state.riders.filter(r => !r.finished).sort((a, b) => b.distance - a.distance);
+        const out = new Map(state.riders.filter(r => r.finished).map(r => [r.number, r.distance]));
+        let prevTrue = null, prevShown = null;
+        for (const r of live) {
+            if (prevTrue == null) { out.set(r.number, r.distance); }
+            else {
+                const gap = prevTrue - r.distance;
+                out.set(r.number, prevShown - (gap + (S - 1) * Math.min(gap, tight)));
+            }
+            prevTrue = r.distance; prevShown = out.get(r.number);
+        }
+        this._shown = out;
+        return out;
+    }
+
+    shownDistance(rider) {
+        return this._shown?.get(rider.number) ?? rider.distance;
+    }
+
     setTrackLength(length) {
         this.trackGeometry = { ...this.trackGeometry, length };
     }
@@ -275,16 +299,57 @@ export class UIRenderer {
     }
 
 
+    // ---------- カメラ (選手の集団を追って寄る) ----------
+    // スマホの小さな画面でもレースの攻防が見えるよう、走っている集団にあわせて寄って追いかける。
+    // 「全体を見る」に切り替えると、いつもバンク全体を映す。
+    setCameraFollow(on) { this.cameraFollow = !!on; }
+
+    updateCamera(state, dt = 1 / 60) {
+        const W = this.canvas.width, H = this.canvas.height;
+        let target = { x: W / 2, y: H / 2, z: 1 };
+        const live = (state?.riders ?? []).filter(r => !r.finished);
+        if (this.cameraFollow !== false && state?.isStarted && live.length >= 2) {
+            this.displayDistances(state);
+            const pts = live.map(r => this.getBankCoordinates(this.shownDistance(r), this.riderLaneToScreen(r.laneOffset)));
+            if (state.pacer && state.pacer.state === 'LEADING') pts.push(this.getBankCoordinates(state.pacer.distance, this.riderLaneToScreen(-18)));
+            const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+            const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+            const pad = 110;
+            const z = Math.max(1, Math.min(2.3, W / (x1 - x0 + pad * 2), H / (y1 - y0 + pad * 2)));
+            target = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z };
+        }
+        // 急に動かず、なめらかに追う
+        const k = 1 - Math.exp(-Math.max(0, dt) / 0.45);
+        const cam = this.cam ?? (this.cam = { ...target });
+        cam.x += (target.x - cam.x) * k; cam.y += (target.y - cam.y) * k; cam.z += (target.z - cam.z) * k;
+        // 画面の外 (バンクの外の何もないところ) を映しすぎない
+        const halfW = W / 2 / cam.z, halfH = H / 2 / cam.z;
+        cam.x = Math.min(W - halfW, Math.max(halfW, cam.x)); cam.y = Math.min(H - halfH, Math.max(halfH, cam.y));
+    }
+
+    applyCamera() {
+        const c = this.ctx, cam = this.cam;
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        if (!cam) return;
+        const W = this.canvas.width, H = this.canvas.height;
+        c.setTransform(cam.z, 0, 0, cam.z, W / 2 - cam.z * cam.x, H / 2 - cam.z * cam.y);
+    }
+
+    // 寄っているときは、選手の丸を寄った分ほどは大きくしない (隣の選手と重ならないように)
+    markerScale() { return 1 / Math.sqrt(this.cam?.z ?? 1); }
+
     drawBank() {
 
         const c = this.ctx;
 
+        c.setTransform(1, 0, 0, 1, 0, 0);
         c.clearRect(
             0,
             0,
             this.canvas.width,
             this.canvas.height
         );
+        this.applyCamera();
 
 
         // バンク本体
@@ -537,6 +602,26 @@ export class UIRenderer {
         // 選手
         // =====================================================
 
+        this.displayDistances(state);
+
+        // 仕掛けている選手には、後ろに流れる光の尾を付ける (捲り・カマシ・直線の伸びが一目で分かるように)
+        const c = this.ctx;
+        for (const rider of state.riders) {
+            if (rider.finished || !['ATTACK', 'SWITCH_TO_SELF_POWER', 'FINAL_SPRINT', 'MOVE_UP'].includes(rider.action)) continue;
+            const d = this.shownDistance(rider), lane = this.riderLaneToScreen(rider.laneOffset);
+            const len = Math.min(14, Math.max(4, (rider.speed - 14) * 2.2));
+            c.save();
+            c.lineCap = 'round';
+            for (let k = 0; k < 6; k++) {
+                const a0 = this.getBankCoordinates(d - (k / 6) * len, lane), a1 = this.getBankCoordinates(d - ((k + 1) / 6) * len, lane);
+                c.beginPath(); c.moveTo(a0.x, a0.y); c.lineTo(a1.x, a1.y);
+                c.strokeStyle = rider.action === 'FINAL_SPRINT' ? `rgba(250, 204, 21, ${0.55 * (1 - k / 6)})` : `rgba(56, 189, 248, ${0.6 * (1 - k / 6)})`;
+                c.lineWidth = 9 * this.markerScale() * (1 - k / 8);
+                c.stroke();
+            }
+            c.restore();
+        }
+
         const orderedRiders =
             [...state.riders]
                 .sort(
@@ -553,7 +638,7 @@ export class UIRenderer {
 
             const point =
                 this.getBankCoordinates(
-                    rider.distance,
+                    this.shownDistance(rider),
                     this.riderLaneToScreen(rider.laneOffset)
                 );
 
@@ -569,12 +654,12 @@ export class UIRenderer {
             this.drawMarker(
                 point.x,
                 point.y,
-                11,
+                11 * this.markerScale(),
                 rider.style.background,
                 ring,
                 String(rider.number),
                 rider.style.text,
-                12,
+                12 * this.markerScale(),
                 point.angle + (rider.visualAngleOffset ?? 0)
             );
         }
@@ -585,12 +670,12 @@ export class UIRenderer {
     drawSpotlight(state, number, strength = 1) {
         const rider = state.riders.find(r => r.number === number);
         if (!rider) return;
-        const p = this.getBankCoordinates(rider.distance, this.riderLaneToScreen(rider.laneOffset));
+        const p = this.getBankCoordinates(this.shownDistance(rider), this.riderLaneToScreen(rider.laneOffset));
         const c = this.ctx;
         const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
         c.save();
         c.beginPath();
-        c.arc(p.x, p.y, 17 + pulse * 4, 0, Math.PI * 2);
+        c.arc(p.x, p.y, (17 + pulse * 4) * this.markerScale(), 0, Math.PI * 2);
         c.strokeStyle = `rgba(250, 204, 21, ${0.55 * strength + 0.35 * pulse * strength})`;
         c.lineWidth = 3;
         c.stroke();

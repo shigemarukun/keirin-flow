@@ -48,10 +48,14 @@ export function kimarite(snapshots, ranking, frontMateOf, logs = []) {
   const leadAt = key => snapshots[key]?.order?.[0];
   const posAtBack = snapshots.back?.order?.indexOf(winner) ?? -1;
   let winnerHow;
+  const attackedFromBehind = logs.some(l => l.riderNumber === winner && R(l) <= 400 && R(l) > 110 && /捲りに出る|番手捲り|カマす|叩いて主導権|自力発進/.test(l.message));
   // 先頭のまま押し切っても、捲って先頭に立った選手は「捲り」
   const madeMakuri = logs.some(l => l.riderNumber === winner && R(l) <= 600 && /捲りに出る|番手捲り/.test(l.message));
   if (leadAt('straight') === winner && leadAt('back') === winner && (leadAt('home') === winner || !madeMakuri)) winnerHow = '逃げ';
-  else if (leadAt('straight') === winner && posAtBack !== 0) winnerHow = '捲り'; // 直線に入るまでに先頭を奪った (番手捲りも含む)
+  // 直線に入るまでに先頭を奪った (番手捲りも含む)。
+  // または、バックより後ろから外を一気に仕掛けていき、その勢いのまま直線で前を飲み込んだ (捲り追い込み)。
+  // 直線まで後ろで脚を溜めて、そこから前を抜いたのが「差し」
+  else if (leadAt('straight') === winner || (posAtBack !== 0 && attackedFromBehind)) winnerHow = '捲り';
   else winnerHow = '差し';
   // マーク: ラインで自分のすぐ前を走っていた選手の、すぐ後ろの着順でゴール
   const marks = [];
@@ -59,7 +63,22 @@ export function kimarite(snapshots, ranking, frontMateOf, logs = []) {
     const n = ranking[i].number, prev = ranking[i - 1].number;
     if (frontMateOf(n) === prev) marks.push(n);
   }
-  return { winner, how: winnerHow, marks };
+  // 2着の決まり手 (実データの「2着の決まり手」と比べるため)
+  //   マーク: 同じラインで前を走っていた選手 (=1着) のすぐ後ろ / 逃げ: 先頭で逃げて残った
+  //   捲り: 後ろから仕掛けて2着まで来た / 差し: 直線で前を抜いて2着
+  const second = ranking[1]?.number;
+  let secondHow = null;
+  if (second != null) {
+    const attacked = logs.some(l => l.riderNumber === second && R(l) <= 400 && R(l) > 110 && /捲りに出る|番手捲り|カマす|叩いて主導権|自力発進/.test(l.message));
+    const atBack = snapshots.back?.order?.indexOf(second) ?? -1;
+    // (1着と同じ考え方: 捲って先頭に立った選手は、バックで先頭でも「捲り」。最終ホームから先頭なら「逃げ」)
+    const madeMakuri2 = logs.some(l => l.riderNumber === second && R(l) <= 600 && /捲りに出る|番手捲り/.test(l.message));
+    if (marks.includes(second)) secondHow = 'マーク';
+    else if ((attacked && atBack !== 0) || (madeMakuri2 && leadAt('home') !== second)) secondHow = '捲り'; // 後ろから捲って (いったん先頭に立っても) 2着
+    else if (atBack === 0 || leadAt('straight') === second) secondHow = '逃げ';
+    else secondHow = '差し';
+  }
+  return { winner, how: winnerHow, marks, secondHow };
 }
 
 // ---------- 展開の文章 ----------

@@ -275,6 +275,20 @@ S級特選 9車立て 発走14:16
     '【今開催成績】の着順を読み、選手の見立てに出す', JSON.stringify(byCar[1].meet));
 }
 
+// ---------- 予想のリンク共有: 短く圧縮しても、出走表・並び・展開の指定がそのまま戻る ----------
+{
+  const { encodeRaceData, decodeRaceData } = await import('./race-input.js');
+  const d = structuredClone(SAMPLE_RACE_DATA);
+  d.lines = [[7, 8, 9], [1, 2, 3], [4, 5, 6]]; d.tactics = { 4: 'KAMASHI' }; d.frontResponse = { 7: 'TSUPPARI' };
+  d.riders[0].meet = [{ stage: '一次予選', pos: 2 }, { stage: '準決勝', pos: 7 }];
+  const code = await encodeRaceData(d), back = await decodeRaceData(code);
+  const legacy = await decodeRaceData(Buffer.from(JSON.stringify(d)).toString('base64url'));
+  check(JSON.stringify(back.lines) === JSON.stringify(d.lines) && back.tactics[4] === 'KAMASHI' && back.frontResponse[7] === 'TSUPPARI' && back.riders[0].name === d.riders[0].name
+    && back.riders[0].score === d.riders[0].score && back.riders[0].meet.map(m => m.pos).join('') === '27' && !validateRaceData(back).length && legacy.riders.length === 9
+    && code.length < Buffer.from(JSON.stringify(d)).toString('base64url').length / 3,
+  '共有リンクは短く圧縮しても、出走表・並び・展開の指定がそのまま戻る (以前の長いリンクも開ける)', `${code.length}文字 (以前の書き方なら${Buffer.from(JSON.stringify(d)).toString('base64url').length}文字)`);
+}
+
 // ---------- 答え合わせの採点 (確定した予想 → 結果) ----------
 {
   const { makeLock, scoreLock, summarize, fingerprint } = await import('./scoring.js');

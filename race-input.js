@@ -6,27 +6,46 @@ import { STYLE, VENUES, KIMARITE_LABEL, CLASSES, RACE_GRADES, HISTORY, normalize
 const STORAGE_KEY = 'keirin-flow:race-input:v1';
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// ---------- 予想のリンク共有: レースデータを URL の # の後ろに入れる ----------
-export function encodeRaceData(data) {
-  const json = JSON.stringify(data, (k, v) => (v === undefined || v === '' ? undefined : v));
-  const bytes = new TextEncoder().encode(json);
-  let bin = ''; for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+// ---------- 予想のリンク共有 ----------
+// 出走表・並び・展開の指定を、短い名前に置き換えて圧縮し、URL の ?s= に入れる (サーバーは使わない)。
+//   熊本8R (9人・決まり手・今開催成績つき) で 約3400文字 → 約700文字
+// 以前の長いリンク (#r=) も、そのまま開ける。
+const SHORT = { race: 'R', riders: 'P', car: 'c', name: 'n', pref: 'f', class: 'k', score: 's', style: 'y', back: 'b', start: 't', kimarite: 'm', nige: 'e', makuri: 'u', sashi: 'a', mark: 'q', meet: 'x', lines: 'L', venue: 'v', raceNo: 'o', grade: 'g', kind: 'd', tactics: 'T', frontResponse: 'F', autoFormation: 'A', history: 'h', bank: 'B', girls: 'G', ex: 'X', pos: 'z', stage: 'w' };
+const LONG = Object.fromEntries(Object.entries(SHORT).map(([k, v]) => [v, k]));
+const rename = (v, map) => Array.isArray(v) ? v.map(x => rename(x, map)) : v && typeof v === 'object'
+  ? Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined && x !== '' && x !== null).map(([k, x]) => [map[k] ?? k, rename(x, map)])) : v;
+const b64url = bytes => { let bin = ''; for (const b of bytes) bin += String.fromCharCode(b); return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const unb64url = code => Uint8Array.from(atob(code.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+async function pipe(bytes, stream) { return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer()); }
+
+export async function encodeRaceData(data) {
+  // 今開催成績は着順だけ (予選・選抜などの名前は省く)
+  const slim = { ...data, riders: (data.riders ?? []).map(r => (r.meet ? { ...r, meet: r.meet.map(m => ({ pos: m.pos })) } : r)) };
+  const bytes = new TextEncoder().encode(JSON.stringify(rename(slim, SHORT)));
+  if (typeof CompressionStream === 'function') {
+    try { return `2${b64url(await pipe(bytes, new CompressionStream('deflate-raw')))}`; } catch { /* 圧縮できない端末は、そのまま */ }
+  }
+  return `1${b64url(bytes)}`;
 }
-export function decodeRaceData(code) {
-  const bin = atob(code.replace(/-/g, '+').replace(/_/g, '/'));
-  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-  return JSON.parse(new TextDecoder().decode(bytes));
+export async function decodeRaceData(code) {
+  const v = code[0], body = code.slice(1);
+  if (v === '2') return rename(JSON.parse(new TextDecoder().decode(await pipe(unb64url(body), new DecompressionStream('deflate-raw')))), LONG);
+  if (v === '1') return rename(JSON.parse(new TextDecoder().decode(unb64url(body))), LONG);
+  return JSON.parse(new TextDecoder().decode(unb64url(code))); // 以前の長いリンク
 }
-export function shareUrl(data) {
-  return `${location.origin}${location.pathname}#r=${encodeRaceData(data)}`;
+export async function shareUrl(data) {
+  return `${location.origin}${location.pathname}?s=${await encodeRaceData(data)}`;
 }
-function fromLink() {
+// リンクから来たとき: ?s= (新しい短いリンク) か #r= (以前のリンク)
+function linkCode() {
+  return new URLSearchParams(location.search).get('s') ?? location.hash.match(/[#&]r=([A-Za-z0-9_-]+)/)?.[1] ?? null;
+}
+async function fromLink() {
+  const code = linkCode();
+  if (!code) return null;
   try {
-    const m = location.hash.match(/[#&]r=([A-Za-z0-9_-]+)/);
-    if (!m) return null;
-    const data = decodeRaceData(m[1]);
-    history.replaceState(null, '', location.pathname + location.search); // 一度読んだら URL から消す
+    const data = await decodeRaceData(code);
+    history.replaceState(null, '', location.pathname); // 一度読んだら URL から消す
     return data;
   } catch { return null; }
 }
@@ -34,7 +53,7 @@ function fromLink() {
 function load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; } }
 function save(data) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* 保存できない環境でも動く */ } }
 
-export function mountRaceInput(container, { onApply }) {
+export function mountRaceInput(container, { onApply, onLinked }) {
   if (!container) return;
 
   const rowHtml = car => `
@@ -261,11 +280,17 @@ export function mountRaceInput(container, { onApply }) {
 
   // 前回入力した出走表があれば、それで始める (なければサンプル)
   // 共有リンクで開いたらそのレース、なければ前回の出走表、それもなければサンプル
-  const linked = fromLink();
-  const saved = linked && !validateRaceData(linked).length ? linked : load();
+  const saved = load();
   const start = saved && !validateRaceData(saved).length ? saved : structuredClone(SAMPLE_RACE_DATA);
   fill(start);
   apply(start);
+  if (linkCode()) {
+    // 送られてきたリンク: 中身を開いて、その出走表・並び・展開の指定で予想し直す
+    fromLink().then(linked => {
+      if (linked && !validateRaceData(linked).length) { fill(linked); apply(linked); onLinked?.(); }
+      else $('.ri-paste-out').innerHTML = '<p class="ri-warn">送られてきたリンクを開けませんでした。リンクが途中で切れていないか確かめてください。</p>';
+    });
+  }
 
   return {
     getData: () => structuredClone(current),

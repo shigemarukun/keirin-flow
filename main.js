@@ -55,7 +55,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 
  // 出走表の手入力 → このレースで予想 / 展開をタップで選ぶ
  let tactics=null,results=null;
- const raceInput=mountRaceInput(document.getElementById('race-input-ui'),{onApply:newSetup=>{window.KEIRIN_FLOW_APPLY_SETUP(newSetup);tactics?.render();}});
+ const raceInput=mountRaceInput(document.getElementById('race-input-ui'),{onApply:newSetup=>{window.KEIRIN_FLOW_APPLY_SETUP(newSetup);tactics?.render();},onLinked:()=>tactics?.render()});
  tactics=mountTacticsPanel(document.getElementById('tactics-ui'),{
   getData:()=>raceInput?.getData(),apply:data=>raceInput.apply(data),
   getSetup:()=>baseSetup,getPrediction:()=>physics.getPrediction()
@@ -71,7 +71,7 @@ window.addEventListener('DOMContentLoaded',()=>{
  document.getElementById('btn-share')?.addEventListener('click',async()=>{
   const note=document.getElementById('share-note');
   const data=raceInput?.getData();if(!data)return;
-  const url=shareUrl(data);
+  const url=await shareUrl(data);
   try{
    if(navigator.share){await navigator.share({title:'KEIRIN FLOW の展開予想',text:'このレースの展開予想を見てみて',url});if(note)note.textContent='送りました。';return;}
   }catch(e){if(e?.name==='AbortError')return;}

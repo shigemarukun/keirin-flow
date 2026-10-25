@@ -74,7 +74,17 @@ export function summarize(locks) {
   if (!done.length) return null;
   const avg = f => done.reduce((s, l) => s + f(l.result), 0) / done.length;
   const withAdv = done.filter(l => l.result.adviceHit != null);
+  // あなたの読み (戦法・展開の指定) を入れた予想と、入れなかったAIだけの予想の比べ
+  const withAi = done.filter(l => l.result.aiOnly);
+  const geo = list => Math.exp(list.reduce((s, x) => s + Math.log(Math.max(x, 1e-4)), 0) / list.length);
   return {
+    mine: withAi.length ? {
+      n: withAi.length,
+      better: withAi.filter(l => l.result.p > l.result.aiOnly.p * 1.5).length,
+      worse: withAi.filter(l => l.result.p < l.result.aiOnly.p / 1.5).length,
+      vsRandomMine: geo(withAi.map(l => l.result.vsRandom)),
+      vsRandomAi: geo(withAi.map(l => l.result.aiOnly.vsRandom))
+    } : null,
     n: done.length,
     logLoss: avg(r => r.logLoss),
     logLossRandom: avg(r => r.logLossRandom),

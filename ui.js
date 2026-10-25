@@ -739,8 +739,11 @@ export class UIRenderer {
 
         if (lapCounter) {
 
+            // 場面 (周回・赤板・打鐘・最終周…) と残りの距離。場面は400バンクに直した距離で決める
+            const r4 = remaining / (state.lapScale ?? 1);
+            const scene = r4 > 1150 ? '周回' : r4 > 770 ? '青板' : r4 > 600 ? '赤板' : r4 > 400 ? '打鐘' : r4 > 0 ? '最終周' : 'ゴール';
             lapCounter.textContent =
-                `${lap} / 残り${remaining}m`;
+                `${state.isStarted || remaining < (state.totalDistance ?? Infinity) ? `${scene} ・ ` : ''}残り${remaining}m`;
         }
 
 
@@ -752,7 +755,7 @@ export class UIRenderer {
             ) {
 
                 raceStatus.textContent =
-                    'FINISHED';
+                    'ゴール';
 
                 raceStatus.style.color =
                     '#f59e0b';
@@ -763,9 +766,7 @@ export class UIRenderer {
             ) {
 
                 raceStatus.textContent =
-                    state.bellRung
-                        ? 'BELL / FINAL LAP'
-                        : 'RACING...';
+                    'レース中';
 
                 raceStatus.style.color =
                     state.bellRung
@@ -777,8 +778,8 @@ export class UIRenderer {
 
                 raceStatus.textContent =
                     state.elapsedTime > 0
-                        ? 'PAUSED'
-                        : 'PRE-RACE';
+                        ? '一時停止中'
+                        : 'スタート前';
 
                 raceStatus.style.color =
                     '#38bdf8';
@@ -819,11 +820,11 @@ export class UIRenderer {
                             (item, index) => {
                                 const name = state.setup?.meta?.names?.[item.number];
                                 const safe = name ? String(name).replace(/[&<>"']/g, '') : '';
-                                return `<li><strong>${index + 1}着 ${item.number}番${safe ? ` <small>${safe}</small>` : ''}</strong><span>${item.margin ?? ''}</span></li>`;
+                                return `<li><b class="rl-pos">${index + 1}着</b><span class="lg-car car-${item.number}">${item.number}</span><span class="rl-name">${safe}</span><span class="rl-margin">${item.margin ?? ''}</span></li>`;
                             }
                         )
                         .join('')
-                    : '<li class="empty-result">レース終了後に表示</li>';
+                    : '';
         }
     }
 
@@ -854,12 +855,12 @@ export class UIRenderer {
         const container = document.getElementById('decision-log-ui');
         if (!container) return;
         if (!logs.length) {
-            container.innerHTML = '<p class="empty-result">START後にAI判断を表示</p>';
+            container.innerHTML = '<p class="empty-result">レースを再生すると表示します</p>';
             return;
         }
         const latest = logs.slice(-18).reverse();
         container.innerHTML = latest.map(item => {
-            const rider = item.riderNumber == null ? 'SYSTEM' : `${item.riderNumber}番`;
+            const rider = item.riderNumber == null ? '全体' : `${item.riderNumber}番`;
             return `<div class="decision-entry"><span class="decision-meta">残${Math.max(0, Math.round(item.remaining))}m</span><strong>[${rider}]</strong> ${item.message}</div>`;
         }).join('');
     }
@@ -893,29 +894,22 @@ export class UIRenderer {
     }
 
     renderRaceSetup(setup) {
+        // コースの下に「並び」: ラインごとに車番と名前 (周回の前から)。誰と誰がラインかを映像と合わせて見られるように
         const container = document.getElementById('line-list-ui');
         if (!container) return;
         const names = setup?.meta?.names ?? {};
         const esc = v => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-        const label = n => names[n] ? `${n} <small>${esc(names[n])}</small>` : `${n}`;
+        const short = n => { const x = String(names[n] ?? '').replace(/\s/g, ''); return x ? esc(x.length <= 3 ? x : x.slice(0, 2)) : ''; };
         const lineOf = n => (setup?.lines ?? []).find(line => line.members.includes(n));
-
-        // 周回の並び順 (formation) があればその順、なければライン → 単騎の順
         const groups = setup?.formation?.length
             ? setup.formation
             : [...(setup?.lines ?? []).map(line => line.members),
                ...Object.entries(setup?.riders ?? {}).filter(([, r]) => r?.solo).map(([n]) => [Number(n)])];
-
-        let lineNo = 0;
-        container.innerHTML = groups.map(group => {
+        const girls = groups.every(g => g.length === 1);
+        container.innerHTML = `<span class="lg-label">${girls ? '周回の並び' : '並び'}</span>` + groups.map(group => {
             const isLine = group.length > 1 && lineOf(group[0]);
-            const title = isLine ? `ライン${++lineNo}` : '単騎';
-            const members = group.map(label).join(' - ');
-            return `
-            <div class="line-row">
-                <span class="line-name">${title}</span>
-                <span class="line-members">${members}</span>
-            </div>`;
+            return `<span class="lg-group${isLine ? '' : ' is-solo'}" title="${isLine ? 'ライン' : '単騎'}">${group.map(n => `<span class="lg-rider"><span class="lg-car car-${n}">${n}</span><small>${short(n)}</small></span>`).join('')}</span>`;
         }).join('');
     }
+
 }

@@ -31,32 +31,43 @@
 </head>
 <body>
     <div id="app">
-        <header>
-            <p class="eyebrow">KEIRIN DIGITAL TWIN</p>
-            <h1>KEIRIN FLOW</h1>
-            <p class="subtitle">Where Every Race Has a Thousand Futures.</p>
+        <header class="top">
+            <div class="brand">
+                <h1>KEIRIN FLOW</h1>
+                <p class="subtitle">1つのレースに、何通りもの未来</p>
+            </div>
+            <button type="button" id="btn-guide" class="guide-btn">競輪の基本</button>
         </header>
+
+        <nav id="step-nav" aria-label="画面の中の移動">
+            <button type="button" data-go="sec-race"><b>1</b>レース</button>
+            <button type="button" data-go="sec-forecast"><b>2</b>予想</button>
+            <button type="button" data-go="bank-container"><b>3</b>コース</button>
+            <button type="button" data-go="sec-tenkai"><b>4</b>展開</button>
+            <button type="button" data-go="sec-results"><b>5</b>採点</button>
+        </nav>
 
         <section id="welcome" class="welcome" hidden>
             <button type="button" class="welcome-close" aria-label="閉じる">×</button>
             <h2>はじめての方へ</h2>
             <ol>
-                <li><strong>出走表を入力</strong> … 出走表のページの文字をコピーして「貼り付けて読み取る」に貼るだけ。選手・級班・得点・並びが入ります (最初はサンプルのレースが入っています)</li>
-                <li><strong>AIの展開予想</strong> … 本線・対抗・波乱の展開と、着順の確率。「AIの選手の見立て」で、誰がなぜ強いのか・千切れやすいのかも分かります</li>
-                <li><strong>展開を選ぶ</strong> … 並びを入れ替えたり、「突っ張る」「捲り」などをタップして、自分の予想に変える</li>
-                <li><strong>コースで見る</strong> … その展開をレースとして再生。赤板・打鐘・最終周から見ることもできます</li>
+                <li><strong>レース</strong> … 出走表のページの文字をコピーして「貼り付けて予想」を押すだけ (最初はサンプルのレースが入っています)</li>
+                <li><strong>予想</strong> … AIが調子を変えて60回走らせた「結論」。本線・展開のひとこと・買い目</li>
+                <li><strong>コース</strong> … その展開をレースとして再生。テロップが何が起きたかを説明します</li>
+                <li><strong>展開</strong> … 「ひな形」をタップするか、自分の言葉で展開を書くと、その通りに走らせ直します</li>
             </ol>
+            <p class="welcome-note">色の付いた<span class="term-sample">用語</span>はタップすると説明が出ます。右上の「競輪の基本」もどうぞ。</p>
         </section>
 
         <main>
-            <section id="bank-container" aria-label="競輪シミュレーション">
+            <section id="bank-container" aria-label="レースのコース">
                 <canvas id="bankCanvas" width="800" height="600"></canvas>
-                <div id="race-caption" aria-live="polite"><span class="rc-phase"></span><span class="rc-text"></span></div>
+                <div id="race-caption" aria-live="polite"><span class="rc-phase"></span><span class="rc-text"></span><span class="rc-hint"></span></div>
                 <div id="race-info-overlay">
                     <span id="lap-counter">残り2周 / 残り800m</span>
-                    <span id="race-status">PRE-RACE</span>
-                    <span id="gap-status">車間: --</span>
-                    <span id="protocol-status">AI: 各選手が自律判断</span>
+                    <span id="race-status">スタート前</span>
+                    <span id="gap-status" hidden></span>
+                    <span id="protocol-status" hidden></span>
                 </div>
                 <div id="jump-bar" aria-label="見たい場面から再生">
                     <span class="jb-label">ここから見る</span>
@@ -67,71 +78,78 @@
                     <button type="button" data-rem="70">直線</button>
                     <button type="button" id="cam-toggle" class="cam-toggle" aria-pressed="true" title="バンク全体を映す / 選手を追って寄る">全体</button>
                 </div>
+                <div id="line-list-ui" class="line-legend" aria-label="並び"></div>
                 <div id="rider-legend" aria-label="選手の縁の色">
                     <span><i style="background:#38bdf8"></i>仕掛け</span>
                     <span><i style="background:#f97316"></i>踏み合い</span>
                     <span><i style="background:#ef4444"></i>ブロック</span>
                     <span><i style="background:#64748b"></i>脚切れ</span>
                 </div>
+                <ol id="result-list" class="result-list" aria-label="着順"></ol>
             </section>
 
             <aside id="control-panel">
-                <details class="panel-section race-input-panel">
-                    <summary><h2>出走表を入力</h2><span class="ri-summary-hint">タップして開く</span></summary>
-                    <div id="race-input-ui"></div>
-                </details>
+                <section id="sec-race" class="panel-section race-panel">
+                    <h2>レース</h2>
+                    <div id="race-bar-ui"></div>
+                    <details class="race-input-panel">
+                        <summary><span class="ri-sum-title">▲ 入力欄を閉じる</span></summary>
+                        <div id="race-input-ui"></div>
+                    </details>
+                </section>
 
-                <section class="panel-section tenkai-panel forecast-panel">
-                    <h2>AIの展開予想</h2>
+                <section id="sec-forecast" class="panel-section tenkai-panel forecast-panel">
+                    <h2>AIの予想</h2>
                     <div id="forecast-ui"></div>
                 </section>
 
-                <section class="panel-section tactics-panel">
-                    <h2>展開を選ぶ</h2>
+                <section id="sec-tenkai" class="panel-section tactics-panel">
+                    <h2>展開を変える</h2>
                     <div id="tenkai-text-ui"></div>
-                    <p class="ri-help">タップすると、その展開でレースを組み直します。</p>
-                    <div id="tactics-ui"></div>
-                    <button id="btn-run-tactics" class="primary-btn" type="button">▶ この展開で走らせる</button>
+                    <details class="tp-more">
+                        <summary>ラインごとにタップで選ぶ <small>戦法・前受けの動き・並び順</small></summary>
+                        <p class="ri-help">タップすると、その展開でレースを組み直します。</p>
+                        <div id="tactics-ui"></div>
+                    </details>
+                    <button id="btn-run-tactics" class="primary-btn" type="button">▶ この展開をコースで見る</button>
                     <button id="btn-share" class="secondary-btn" type="button">この予想をリンクで送る</button>
                     <p id="share-note" class="ri-help" role="status"></p>
                 </section>
 
-                <section class="panel-section">
-                    <h2>ライン構成</h2>
-                    <div id="line-list-ui"></div>
-                </section>
-
-                <section class="panel-section decision-panel">
-                    <h2>Decision Log</h2>
-                    <div id="decision-log-ui" class="decision-log">
-                        <p class="empty-result">START後にAI判断を表示</p>
-                    </div>
-                </section>
+                <details id="sec-results" class="panel-section results-panel">
+                    <summary><h2>答え合わせ</h2><span class="ri-summary-hint">レースのあとで結果を入れる</span></summary>
+                    <div id="results-ui"></div>
+                </details>
 
                 <section class="panel-section action-buttons">
                     <h2>レース操作</h2>
-                    <button id="btn-start" class="primary-btn" type="button">▶ START</button>
-                    <button id="btn-pause" class="secondary-btn" type="button">⏸ PAUSE</button>
-                    <button id="btn-reset" class="secondary-btn" type="button">↺ RESET</button>
+                    <button id="btn-start" class="primary-btn" type="button">▶ スタート</button>
+                    <button id="btn-pause" class="secondary-btn" type="button">⏸ 一時停止</button>
+                    <button id="btn-reset" class="secondary-btn" type="button">↺ 最初から</button>
                     <label class="speed-control" for="speedRange">
-                        <span>速度 <strong id="speedVal">1.0</strong>x</span>
+                        <span>速度 <strong id="speedVal">1.0</strong>倍</span>
                         <input type="range" id="speedRange" min="0.5" max="3" step="0.5" value="1">
                     </label>
                 </section>
 
-                <section class="panel-section">
-                    <h2>着順</h2>
-                    <ol id="result-list" class="result-list">
-                        <li class="empty-result">レース終了後に表示</li>
-                    </ol>
-                </section>
-
-                <details class="panel-section results-panel">
-                    <summary><h2>答え合わせ</h2><span class="ri-summary-hint">レース前に予想を確定 → 結果を入れる</span></summary>
-                    <div id="results-ui"></div>
+                <details class="panel-section decision-panel">
+                    <summary><h2>選手の判断の記録</h2><span class="ri-summary-hint">レース中にAIの選手が何を考えたか</span></summary>
+                    <div id="decision-log-ui" class="decision-log">
+                        <p class="empty-result">レースを再生すると表示します</p>
+                    </div>
                 </details>
             </aside>
         </main>
+    </div>
+
+    <!-- 用語の説明・競輪の基本 (下から出るシート) -->
+    <div id="sheet" class="sheet" hidden>
+        <div class="sheet-backdrop" data-close></div>
+        <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+            <button type="button" class="sheet-close" data-close aria-label="閉じる">×</button>
+            <h2 id="sheet-title"></h2>
+            <div class="sheet-content"></div>
+        </div>
     </div>
 
     <!-- スマホ: 画面の下にいつも出ている操作ボタン -->

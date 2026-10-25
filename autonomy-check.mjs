@@ -264,7 +264,8 @@ check(fades.length > 0 && fades.every(f => f.ok), '持久力の低い逃げ選�
   // (出走表は検証台と同じ、実際に近い並び。選手の調子は少しゆらす)
   const { makeRace } = await import('./tools/bench.mjs?lib');
   const pos = { 先頭: [0, 0], 番手: [0, 0], 三番手: [0, 0] }; const how = { 逃げ: 0, 捲り: 0, 差し: 0 }; let n = 0, bs1 = 0;
-  for (let i = 0; i < 72; i++) {
+  // (72レースだとたまたまの偏りが大きいので、160レースで見る)
+  for (let i = 0; i < 160; i++) {
     const e = new PhysicsEngine(withCondition(toRaceSetup(makeRace(1000 + i, { venue: '小倉' })), 9000 + i).setup); e.start();
     for (let t = 0; t < 150 && !e.riders.every(r => r.finished); t += 1 / 60) e.update(1 / 60);
     n++; const w = e.ranking[0].number; how[e.getStory().kimarite.how] += 1;

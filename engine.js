@@ -300,6 +300,10 @@ export class PhysicsEngine{
    factor=1+(T.acc??.35)*clamp((rider.acceleration??0)/3,0,1.5);
    // ブロック(外へ張って牽制)は体ごと相手にぶつけにいく動き。そのぶん脚を使う
    if(plan.action===ACTION.BLOCK)factor*=1+(T.bce??0);
+   // 並走の踏み合い: 別のラインの選手と横に並んで競っているあいだは、どちらも余計に脚を使う
+   // 先頭で外から並ばれて合わせて踏んでいる側 (内で張る先行) は、風も受けながら踏むので、さらに脚を使う
+   if((T.sbcL??0)>0&&[ACTION.ATTACK,ACTION.DEFEND,ACTION.CONTROL_PACE].includes(plan.action)&&this.riders.some(o=>o!==rider&&!o.finished&&(!o.lineId||o.lineId!==rider.lineId)&&o.distance<=rider.distance&&rider.distance-o.distance<1.5&&o.laneOffset>rider.laneOffset+6&&o.laneOffset-rider.laneOffset<26&&[ACTION.ATTACK,ACTION.FULL_CONTEST].includes(o.action)))factor*=1+T.sbcL;
+   if((T.sbc??0)>0&&[ACTION.ATTACK,ACTION.DEFEND,ACTION.FULL_CONTEST,ACTION.CONTROL_PACE].includes(plan.action)&&this.riders.some(o=>o!==rider&&!o.finished&&(!o.lineId||o.lineId!==rider.lineId)&&Math.abs(o.distance-rider.distance)<1.5*this.unit*3&&Math.abs(o.laneOffset-rider.laneOffset)<22&&[ACTION.ATTACK,ACTION.DEFEND,ACTION.FULL_CONTEST].includes(o.action)))factor*=1+T.sbc;
   }
   if([ACTION.SAVE_ENERGY,ACTION.YIELD,ACTION.RETREAT].includes(plan.action))factor=.55;
   // Slipstream: riding close behind someone in the same corridor saves energy.

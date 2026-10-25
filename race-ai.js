@@ -310,6 +310,14 @@ export class RaceAI {
     if (iLead) m.wasFront = true;
     else if (lead && lead.distance - rider.distance > engine.spacing.follow) m.wasFront = false;
 
+    // 捲り切れずに下がっている途中: 競った相手のラインの最後尾より後ろに下がるまでは、外のまま下がる (ラインの間に割り込まない)
+    if (m.stalledOut && rem > PACE.FINAL_STRAIGHT) {
+      const foe = engine.rider(m.stalledBy);
+      const tail = foe?.lineId ? engine.riders.filter(o => !o.finished && o.lineId === foe.lineId).sort((a, b) => a.distance - b.distance)[0] : foe;
+      if (tail && !tail.finished && rider.distance > tail.distance - engine.spacing.follow * .8) {
+        return { action: ACTION.FADE, speed: Math.max(PACE.CRUISE, Math.min(rider.speed, tail.speed) - 1.2), lane: Math.max(rider.laneOffset, (foe?.laneOffset ?? rider.laneOffset) + 14), reason: '捲り切れず、外のまま下がる' };
+      }
+    }
     if (iLead) {
       if (threat) return this._defendOrConcede(rider, engine, m, threat, rem);
       m.contestTime = 0;
@@ -333,7 +341,7 @@ export class RaceAI {
     // すでに先頭のすぐ後ろ (好位) にいる捲り型は、外へ仕掛けずに直線で差しにいく (ガールズで多い形)
     const sitRank = engine.setup?.rules?.girls ? (globalThis.KF_TUNE?.sitG ?? 5) : (globalThis.KF_TUNE?.sitM ?? 0);
     const sitting = m.style === 'MAKURI' && !m.struck && engine.positionRank(rider) <= sitRank && behindBy < engine.spacing.follow * (sitRank + .5) && rider.boxedFor < .3;
-    const strikeNow = ((!regroup) && !sitting && rem <= strikeAt && rider.energy > .25) || (regroup && rem <= Math.min(m.strikeAt, 260) && rider.energy > .22) || lateAndStillBehind || m.struck;
+    const strikeNow = !m.stalledOut && (((!regroup) && !sitting && rem <= strikeAt && rider.energy > .25) || (regroup && rem <= Math.min(m.strikeAt, 260) && rider.energy > .22) || lateAndStillBehind || m.struck);
     if (strikeNow && rider.energy > .08) {
       if (!m.struck) m.struck = true;
       const leadGap = lead.distance - rider.distance;
@@ -346,6 +354,20 @@ export class RaceAI {
         const box = engine.rider(rider.boxedBy);
         return { action: ACTION.ATTACK, speed: Math.max(PACE.CRUISE, (box?.speed ?? rider.speed) - 1.5), lane: this._attackLane(rider, engine),
           reason: `${rider.boxedBy}番に外を塞がれて出られず、一旦下げて外へ持ち出す`, tag: 'BOXED' };
+      }
+      // 捲り切れない: 先頭の外に並んだまま、前に出られずにいる。数秒続いたら、外で浮いたまま後退する
+      // (実際の競輪では、並んだまま何百mも走ることはほとんどない。出切るか、力尽きて下がるか)
+      {
+        const T = globalThis.KF_TUNE ?? {};
+        const g = lead.distance - rider.distance;
+        const alongside = lead.lineId !== rider.lineId && g > -U(engine, 1) && g < U(engine, 4) && rider.laneOffset > lead.laneOffset + 6;
+        const dt = Math.min(.1, engine.elapsedTime - (m.stallAt ?? engine.elapsedTime)); m.stallAt = engine.elapsedTime;
+        if (alongside && rider.speed < lead.speed + (T.stv ?? .3)) m.stallT = (m.stallT ?? 0) + dt; else if (!alongside) m.stallT = 0;
+        if ((T.stall ?? 1) && m.stallT > (T.stt ?? 4.5) && rem > PACE.FINAL_STRAIGHT) {
+          m.stalledOut = true; m.struck = false; m.stalledBy = lead.number;
+          engine.emitDecision({ riderNumber: rider.number, category: 'AI_DECISION', action: ACTION.FADE, message: `${lead.number}番の外に並んだが捲り切れず、外で浮いて後退する (残脚${pct(rider.energy)})` });
+          return { action: ACTION.FADE, speed: Math.max(PACE.CRUISE, lead.speed - 1.5), lane: rider.laneOffset, reason: '捲り切れず、外のまま下がる' };
+        }
       }
       const blocker = this._blockerOn(rider, engine);
       if (blocker) return { action: ACTION.ATTACK, speed: this.sprintSpeed(rider), lane: this._attackLane(rider, engine), reason: `${blocker.number}番のブロックで外へ持っていかれながら踏む (残脚${pct(rider.energy)})`, tag: 'BLOCKED' };

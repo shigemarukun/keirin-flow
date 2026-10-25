@@ -105,7 +105,8 @@ export function mountForecastPanel(container, { onWatch } = {}) {
       <ol class="fc-story">
         ${shown.story.map(s => `<li><span class="fc-phase">${esc(s.phase)}</span><span>${esc(s.text)}</span></li>`).join('')}
       </ol>
-      <button type="button" class="primary-btn fc-watch" data-seed="${shown.seed ?? ''}">▶ この展開をコースで見る</button>`;
+      <button type="button" class="primary-btn fc-watch" data-seed="${shown.seed ?? ''}">▶ この展開をコースで見る</button>
+      <button type="button" class="secondary-btn fc-write">✎ 自分の展開を書いて走らせる</button>`;
 
     // この展開の買い目 (3連単)
     const adv = sc && forecast?.runs ? buildAdvice({ runs: forecast.runs, scenario: sc, marks, names }) : null;
@@ -160,6 +161,13 @@ export function mountForecastPanel(container, { onWatch } = {}) {
   container.addEventListener('click', event => {
     const tab = event.target.closest('.fc-tab');
     if (tab) { state.sel = Number(tab.dataset.sel); render(); return; }
+    // 「自分の展開を書いて走らせる」: 文章の入力欄へ移って、すぐ書けるようにする
+    if (event.target.closest('.fc-write')) {
+      const box = document.querySelector('.tt-text');
+      box?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => box?.focus({ preventScroll: true }), 350);
+      return;
+    }
     if (event.target.closest('.ad-copy')) {
       const text = adviceText(state.advice, state.adviceLabel);
       const note = container.querySelector('.ad-copied');

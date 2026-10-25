@@ -185,7 +185,8 @@ export function mountRaceInput(container, { onApply, onLinked }) {
     const venue = $('.ri-venue-name').value, raceNo = Number($('.ri-race-no').value) || undefined;
     const grade = $('.ri-grade').value || undefined;
     return { race: { ...(current?.race ?? {}), ...extras.race, venue: venue || undefined, raceNo, grade, girls: grade === 'L' || undefined }, bank: bankOfVenue(venue) ?? undefined, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
-      tactics: { ...(current?.tactics ?? {}) }, frontResponse: { ...(current?.frontResponse ?? {}) } };
+      tactics: { ...(current?.tactics ?? {}) }, frontResponse: { ...(current?.frontResponse ?? {}) },
+      tenkai: structuredClone(current?.tenkai ?? {}), tenkaiText: current?.tenkaiText };
   };
 
   const bankNote = () => {

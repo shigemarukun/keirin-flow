@@ -275,6 +275,47 @@ S級特選 9車立て 発走14:16
     '【今開催成績】の着順を読み、選手の見立てに出す', JSON.stringify(byCar[1].meet));
 }
 
+// ---------- 文章で書いた展開を読み取る (競輪の言葉の辞書) ----------
+{
+  const { parseTenkaiText, applyTenkai } = await import('./tenkai-text.js');
+  const d = { race: { venue: '熊本' }, lines: [[1, 9], [7, 2], [4, 3, 8], [5, 6]], riders: [
+    { car: 1, name: '棚瀬義大', pref: '岐阜', score: 107, style: '逃' }, { car: 2, name: '阿部将大', pref: '大分', score: 108.32, style: '逃' },
+    { car: 3, name: '恩田淳平', pref: '群馬', score: 108.07, style: '追' }, { car: 4, name: '渡邉壘', pref: '新潟', score: 101.35, style: '逃' },
+    { car: 5, name: '久田裕也', pref: '徳島', score: 104.93, style: '逃' }, { car: 6, name: '山下一輝', pref: '山口', score: 96.74, style: '追' },
+    { car: 7, name: '佐藤壮志', pref: '熊本', score: 103.48, style: '逃' }, { car: 8, name: '朝倉佳弘', pref: '東京', score: 98.64, style: '追' },
+    { car: 9, name: '長尾拳太', pref: '岐阜', score: 106.57, style: '両' }] };
+  const P = t => parseTenkaiText(t, d).changes;
+  const cases = [
+    ['佐藤が打鐘でカマす', c => c.tactics[7] === 'KAMASHI' && c.tenkai[7].strike === 600],
+    ['ジャンで⑦が叩いて主導権', c => c.tactics[7] === 'SENKO' && c.tenkai[7].strike === 600],
+    ['棚瀬は引いて巻き返し', c => c.frontResponse[1] === 'HIKU'],
+    ['棚瀬は出させない', c => c.frontResponse[1] === 'TSUPPARI'],
+    ['佐藤は引かない', c => c.frontResponse[7] === 'TSUPPARI'],
+    ['5番はロング捲り', c => c.tactics[5] === 'MAKURI' && c.tenkai[5].strike >= 400],
+    ['久田が4角から捲り追い込み', c => c.tactics[5] === 'MAKURI' && c.tenkai[5].strike === 100],
+    ['長尾君がバックで番手捲り', c => c.tenkai[9].banteMakuri === 200],
+    ['ハコの長尾は前を見捨てる', c => c.tenkai[9]?.banteMakuri != null],
+    ['九州ラインが前受け', c => c.formationMoves[0]?.line[0] === 7 && c.formationMoves[0].to === 'FRONT'],
+    ['渡邉ラインは赤板で誘導切り', c => c.tenkai[4].cutPacer === true],
+    ['阿部は5番に切り替え', c => c.tenkai[2].switchTo === 5],
+    ['関東の3番手はマーク', c => true],
+    ['二段駆けで1-9', c => c.tactics[1] === 'SENKO' && c.tenkai[9].banteMakuri != null],
+    ['九州の番手はブロックしない', c => c.tenkai[2].noBlock === true],
+    ['久田はカマさず捲りに構える', c => c.tactics[5] === 'MAKURI'],
+    ['棚瀬と佐藤がもがき合い', c => c.tactics[1] === 'SENKO' && c.tactics[7] === 'SENKO'],
+    ['1番は残り300mから仕掛け', c => c.tenkai[1].strike === 300],
+    ['並び 72 19 438 56', c => JSON.stringify(c.lines) === '[[7,2],[1,9],[4,3,8],[5,6]]']
+  ];
+  const bad = cases.filter(([t, f]) => { try { return !f(P(t)); } catch { return true; } }).map(([t]) => t);
+  check(!bad.length, `文章の展開を競輪の言葉で読み取る (${cases.length}通りの言い回し)`, bad.length ? `読めなかった: ${bad.join(' / ')}` : `${cases.length}通りすべて`);
+  const r = parseTenkaiText('棚瀬が逃げ切る。3番が千切れる', d);
+  check(!Object.keys(r.changes.tactics).length && r.outcomes.length === 2, '「逃げ切る」「千切れる」のような結果の言葉は、展開の指定にしない', r.outcomes.join(' / '));
+  const applied = applyTenkai(d, P('佐藤が打鐘でカマす。長尾がバックで番手捲り。九州ラインが前受け'));
+  const setup = toRaceSetup(applied);
+  check(!validateRaceData(applied).length && setup.riders[7].tactic === 'KAMASHI' && setup.riders[7].strikeRem === 600 && setup.riders[9].banteMakuriAt === 200 && setup.formation[0][0] === 7,
+    '読み取った展開が、そのままレースの設定 (戦法・仕掛けどころ・番手捲り・周回の並び) になる', JSON.stringify(setup.formation));
+}
+
 // ---------- 予想のリンク共有: 短く圧縮しても、出走表・並び・展開の指定がそのまま戻る ----------
 {
   const { encodeRaceData, decodeRaceData } = await import('./race-input.js');

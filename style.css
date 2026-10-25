@@ -145,6 +145,10 @@ button:hover { filter: brightness(1.08); }
 @media (max-width: 1050px) {
     #control-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+/* スマホでは1列に (上の2列の指定より後ろに書いて、こちらを優先する) */
+@media (max-width: 720px) {
+    #control-panel { grid-template-columns: 1fr; }
+}
 
 /* 選手の縁の色の凡例 */
 #rider-legend {
@@ -430,6 +434,7 @@ body #app {
 .ri-step { margin: 8px 0 6px; }
 .ri-paste-text { width: 100%; box-sizing: border-box; font-size: 16px; color: #e2e8f0; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 8px; padding: 8px; margin: 6px 0; }
 .ri-paste-out .ri-ok { color: #86efac; font-size: 0.85rem; margin: 6px 0 4px; }
+.tt-out .ri-ok { color: #86efac; font-size: 0.85rem; margin: 6px 0 4px; }
 .ri-warn { color: #fcd34d; font-size: 0.8rem; margin: 4px 0; }
 .ri-paste-list { list-style: none; padding: 0; margin: 4px 0; display: grid; gap: 3px; font-size: 0.8rem; color: #cbd5e1; }
 .ri-paste-list .ri-car { display: inline-grid; width: 20px; height: 20px; font-size: 0.7rem; }
@@ -457,6 +462,27 @@ body #app {
 .re-bar i { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #a78bfa); border-radius: 3px; }
 .re-sub { font-size: 0.72rem; color: #94a3b8; line-height: 1.45; }
 
+.tt-box { margin-bottom: 10px; padding: 10px; border-radius: 10px; background: rgba(8, 145, 178, 0.08); border: 1px solid rgba(34, 211, 238, 0.35); }
+.tt-head strong { display: block; font-size: 0.95rem; color: #a5f3fc; }
+.tt-head small { display: block; color: var(--muted); font-size: 0.72rem; margin-top: 2px; }
+.tt-sugs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.fc-write { margin-top: 8px; width: 100%; }
+.tt-sugs-label { font-size: 0.72rem; color: var(--muted); align-self: center; }
+.tt-more { border: 0; background: transparent; color: #67e8f9; font-size: 0.78rem; text-decoration: underline; cursor: pointer; }
+.tt-sug { border: 1px dashed rgba(34, 211, 238, 0.55); background: transparent; color: #cffafe; border-radius: 999px; padding: 4px 9px; font-size: 0.74rem; cursor: pointer; }
+.tt-sug:active { transform: scale(0.96); }
+.tt-list { list-style: none; padding-left: 0; }
+.tt-list li { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; }
+.tt-car { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; font-weight: 800; font-size: 0.78rem; border: 1px solid rgba(255,255,255,.35); }
+.tt-car-all { background: #334155; color: #e2e8f0; font-size: 0.68rem; }
+.tt-help { margin-top: 8px; }
+.tt-help summary { cursor: pointer; font-size: 0.78rem; color: #a5f3fc; }
+.tt-out:not(:empty) { margin-top: 8px; }
+.tt-text { width: 100%; margin-top: 8px; min-height: 76px; border-radius: 8px; border: 1px solid rgba(148,163,184,.35); background: #0f172a; color: #e2e8f0; padding: 8px; font-size: 16px; line-height: 1.5; box-sizing: border-box; }
+.tt-actions { display: flex; gap: 8px; margin-top: 8px; }
+.tt-actions button { flex: 1; }
+.tt-list, .tp-detail { margin: 6px 0 0; padding-left: 18px; font-size: 0.82rem; line-height: 1.6; }
+.tt-list { padding-left: 0; }
 .tp-note { font-size: 0.7rem; color: var(--muted); margin: 4px 0 0; line-height: 1.4; }
 
 /* 展開ごとの買い目 */

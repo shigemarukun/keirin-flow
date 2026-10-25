@@ -436,7 +436,8 @@ export class PhysicsEngine{
   // (下げると、並んできた選手に位置を奪われる。3番手が他のラインに割り込まれて最後尾まで下がる原因だった)
   const wheel=plan.action===ACTION.FOLLOW&&plan.followTargetNumber?this.rider(plan.followTargetNumber):null;
   const holdingWheel=wheel&&!wheel.finished&&wheel.distance>rider.distance&&wheel.distance-rider.distance<this.spacing.follow*1.8&&(globalThis.KF_TUNE?.hw2??1);
-  if(this.mode!==RACE_MODE.TEACHER&&rider.boxedFor>.6&&!holdingWheel){
+  // (最後の直線では下げて外へ回り直す時間がない。包まれても、その場で踏み続ける)
+  if(this.mode!==RACE_MODE.TEACHER&&rider.boxedFor>.6&&!holdingWheel&&!(plan.action===ACTION.FINAL_SPRINT&&(globalThis.KF_TUNE?.fsbox??1))){
    const box=this.rider(rider.boxedBy);
    if(box&&!box.finished&&box.distance>=rider.distance&&box.action!==ACTION.YIELD)desired=Math.min(desired,Math.max(PACE_FLOOR,box.speed-1.5));
   }

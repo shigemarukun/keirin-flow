@@ -12,6 +12,13 @@
 
 export const SMOOTH = Object.freeze({ first: 0.5, second: 8, third: 6, scenario: 4 });
 
+// 正直さの補正: シミュレーションは、その日の調子・落車・作戦の読み違いなど、走らせても出てこない
+// 「分からなさ」を持っていない。そのままだと実際より自信を持ちすぎる (3連単の一番手が実際の約2倍)。
+// そこで、着ごとの確率を τ 乗してならす (順位は変えずに、差だけを縮める)。
+// τ は、3連単の一番手の確率が、実際の3連単1番人気の的中率 (S級9車で約7.5%) の水準になるように決めた。
+export const TEMPER = 0.75;
+const temper = (o, t) => { if (t === 1) return o; for (const k in o) o[k] = o[k] ** t; return norm(o); };
+
 const cnt = (arr, f) => { const m = new Map(); for (const x of arr) { const k = f(x); m.set(k, (m.get(k) ?? 0) + 1); } return m; };
 const norm = o => { const z = Object.values(o).reduce((a, b) => a + b, 0) || 1; for (const k in o) o[k] /= z; return o; };
 
@@ -36,7 +43,10 @@ export function buildModel(orders, cars, { base = null, s = SMOOTH } = {}) {
       third[`${a}-${b}`] = Object.fromEntries(cars.filter(c => c !== a && c !== b).map(c => [c, ((c123.get(`${a}-${b}-${c}`) ?? 0) + s.third * prior3[c]) / (nab + s.third)]));
     }
   }
-  return { first: norm(first), second, third, n };
+  const t = globalThis.KF_TUNE?.tau ?? TEMPER;
+  for (const a in second) temper(second[a], t);
+  for (const k in third) temper(third[k], t);
+  return { first: temper(norm(first), t), second, third, n };
 }
 
 // 3連単すべての確率 (大きい順)

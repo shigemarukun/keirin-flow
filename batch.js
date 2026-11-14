@@ -87,7 +87,7 @@ export function scoreForecast(setup, forecast, actual) {
   const advice = sc ? buildAdvice({ runs: forecast.runs, scenario: sc, marks: forecast.marks, names: setup?.meta?.names ?? {} }) : null;
   const lock = makeLock({ setup, forecast, advice });
   const s = scoreLock(lock, actual);
-  return { main: lock.main, p: s.p, rank: s.rank, combos: s.combos, vsRandom: s.vsRandom, logLoss: s.logLoss, logLossRandom: s.logLossRandom, winP: s.winP, winHit: s.winHit, exactaHit: s.exactaHit, trifectaHit: s.trifectaHit, adviceHit: s.adviceHit, advicePoints: s.advicePoints };
+  return { main: lock.main, p: s.p, rank: s.rank, combos: s.combos, vsRandom: s.vsRandom, logLoss: s.logLoss, logLossRandom: s.logLossRandom, winP: s.winP, winHit: s.winHit, exactaHit: s.exactaHit, trifectaHit: s.trifectaHit, adviceHit: s.adviceHit, advicePoints: s.advicePoints, bets: s.bets };
 }
 
 // まとめの数字 (確率の当たり具合は掛け算の平均)
@@ -99,8 +99,15 @@ export function summarizeBatch(rows) {
   const avg = f => done.reduce((s, r) => s + f(r), 0) / n;
   const withAdv = done.filter(r => r.ai.adviceHit != null);
   const both = done.filter(r => r.mine);
+  const betSum = {};
+  for (const r of done) for (const [k, b] of Object.entries(r.ai.bets ?? {})) {
+    const x = betSum[k] ??= { n: 0, hits: 0, expect: 0, points: b.points };
+    x.n++; if (b.hit) x.hits++; x.expect += b.expect;
+  }
+  for (const x of Object.values(betSum)) x.expect /= x.n;
   return {
     n,
+    bets: betSum,
     vsRandom: geo(done.map(r => r.ai.vsRandom)),
     winHit: avg(r => r.ai.winHit ? 1 : 0),
     exactaHit: avg(r => r.ai.exactaHit ? 1 : 0),

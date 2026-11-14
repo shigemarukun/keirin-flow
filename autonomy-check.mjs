@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { PhysicsEngine } from './engine.js';
 import { DEFAULT_RACE_SETUP } from './race-plan.js';
 import { withCondition } from './forecast.js';
+globalThis.KF_TUNE ??= JSON.parse(process.env.KF_TUNE || '{}');
 
 let failures = 0;
 const check = (ok, label, detail = '') => {

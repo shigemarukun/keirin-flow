@@ -668,3 +668,22 @@ body.sheet-open { overflow: hidden; }
 .race-input-panel:not([open]) > summary { display: none; }
 .race-input-panel[open] > summary { border-top: 0; padding: 0 0 8px; text-align: right; }
 .race-input-panel[open] .ri-sum-title { font-size: 0.78rem; color: var(--muted); font-weight: 600; }
+
+/* 買い方ごとの買い目と当たる見込み */
+.fc-confnote { font-size: 0.78rem; color: #cbd5e1; margin-top: -4px; }
+.bt-buy { display: grid; gap: 8px; padding: 10px; border-radius: 12px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.25); }
+.bt-buy .fc-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
+.bt-buy .fc-sub small { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.bt-buy .fc-sub .fc-car { width: 22px; height: 22px; font-size: 0.75rem; }
+.bt-types { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.bt-type { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 2px; border-radius: 9px; border: 1px solid rgba(148, 163, 184, 0.3); background: #0b1220; color: #cbd5e1; font-size: 0.74rem; font-weight: 700; cursor: pointer; }
+.bt-type small { font-size: 0.68rem; color: #94a3b8; font-weight: 600; }
+.bt-type.is-on { border-color: #facc15; background: rgba(250, 204, 21, 0.12); color: #fef08a; }
+.bt-type.is-on small { color: #fde68a; }
+.bt-tickets { gap: 6px; }
+.bt-hit { font-size: 0.9rem; color: #e2e8f0; }
+.bt-hit strong { color: #fde68a; }
+.rs-bets { width: 100%; border-collapse: collapse; margin: 6px 0 4px; font-size: 0.78rem; }
+.rs-bets th, .rs-bets td { text-align: left; padding: 4px 6px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); font-weight: 500; }
+.rs-bets thead th { color: var(--muted); font-size: 0.7rem; }
+.rs-bets small { color: var(--muted); }

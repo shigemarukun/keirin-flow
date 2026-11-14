@@ -23,7 +23,7 @@ function mulberry32(seed) {
 const gaussian = rnd => { const u = Math.max(1e-9, rnd()), v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
 
 // 選手ごとの「調子」: 地力・加速・持久力を ±数% ゆらす (その日の出来)
-export function withCondition(setup, seed, spread = 0.03) {
+export function withCondition(setup, seed, spread = globalThis.KF_TUNE?.cs ?? 0.05) {
   const rnd = mulberry32(seed);
   const s = structuredClone(setup);
   const condition = {};
@@ -120,15 +120,19 @@ export function summarizeRuns(setup, runs) {
   // 2車単・3連単は、出た回数ではなく確率の見立て (1着→2着→3着を数えてならす。prob.js)
   const model = buildModel(runs.map(r => r.order), cars);
   const tri = trifectaTable(model, cars);
+  // 1着率・2着内率・3着内率も、正直さの補正をした確率の見立てから出す (出た回数そのままだと自信を持ちすぎる)
+  const pm = { win: zero(), top2: zero(), top3: zero() };
+  for (const { cars: [a, b, c], p } of tri) { pm.win[a] += p; pm.top2[a] += p; pm.top2[b] += p; pm.top3[a] += p; pm.top3[b] += p; pm.top3[c] += p; }
   const ex = cars.flatMap(a => cars.filter(b => b !== a).map(b => ({ key: `${a}-${b}`, rate: model.first[a] * model.second[a][b] }))).sort((x, y) => y.rate - x.rate);
   return {
     n,
     scenarios,
     // 印は「1つの答え」として本線に合わせる: ◎○▲=本線の1〜3着、△=ほかで3着以内に来やすい2人
-    marks: scenarios[0] ? marksFromMain(scenarios[0].order, rate(top3)) : marksFrom(rate(win), rate(top3)),
+    marks: scenarios[0] ? marksFromMain(scenarios[0].order, pm.top3) : marksFrom(pm.win, pm.top3),
     // 買い目のアドバイス用に、1回ごとの着順と展開を軽くして残す
     runs: runs.map(r => ({ order: r.order, mainLine: r.mainLine, how: r.kimarite?.how ?? null, ev: { chigire: r.ev.chigire, kamashi: r.ev.kamashi, makuri: r.ev.makuri, banteMakuriBy: r.ev.banteMakuriBy } })),
-    win: rate(win), top2: rate(top2), top3: rate(top3),
+    win: pm.win, top2: pm.top2, top3: pm.top3,
+    counts: { win: rate(win), top3: rate(top3) }, // 出た回数そのまま (確かめる用)
     exacta: ex.slice(0, 5), trifecta: tri.slice(0, 5).map(x => ({ key: x.key, rate: x.p })),
     kimarite: top(kimarite, 3),
     backLeader: top(backLeader, 3),

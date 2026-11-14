@@ -7,6 +7,13 @@ import { makeLock, scoreLock, summarize, fingerprint } from './scoring.js';
 import { buildAdvice } from './advice.js';
 import { splitBatchText, prepareRace, scoreForecast, summarizeBatch, compareText, stripUserReads, setupOf } from './batch.js';
 import { forecastRaces } from './forecast.js';
+import { BET_TYPES } from './bets.js';
+
+// 買い方ごとの「当たった割合」と「AIの見込み」の表
+const betTable = (bets, note = true) => {
+  const rows = BET_TYPES.filter(b => bets?.[b.id]).map(b => { const x = bets[b.id]; return `<tr><th>${b.label} <small>${x.points}点</small></th><td>${x.hits}/${x.n} <b>${Math.round(x.hits / x.n * 100)}%</b></td><td>見込み ${Math.round(x.expect * 100)}%</td></tr>`; });
+  return rows.length ? `<table class="rs-bets"><thead><tr><th>買い方</th><th>当たった</th><th>AIの見込み</th></tr></thead><tbody>${rows.join('')}</tbody></table>${note ? '<p class="ri-help">「当たった割合」と「見込み」が近いほど、AIの見込みが正直ということ。レースが増えるほど比べやすくなります。</p>' : ''}` : '';
+};
 
 // 予想を1つ計算する (作業用スレッドがあればそこで。画面を止めない)
 let bw = null, bwId = 0;
@@ -94,13 +101,14 @@ export function mountResultsPanel(container, { getSetup, getForecast, getData = 
   const scoreHtml = (s, counted, lock) => {
     const mark = ok => ok ? '<b class="rs-ok">当たり</b>' : '<b class="rs-ng">外れ</b>';
     const ai = lock?.main ?? [];
-    const adv = s.adviceHit == null ? '' : s.adviceHit ? `<li>買い目 (${s.advicePoints}点) の<b class="rs-ok">「${esc(s.adviceHit)}」で的中</b></li>` : `<li>買い目 (${s.advicePoints}点) には<b class="rs-ng">入っていなかった</b></li>`;
+    const adv = s.adviceHit == null ? '' : s.adviceHit ? `<li>展開別の3連単 (${s.advicePoints}点) の<b class="rs-ok">「${esc(s.adviceHit)}」で的中</b></li>` : `<li>展開別の3連単 (${s.advicePoints}点) には<b class="rs-ng">入っていなかった</b></li>`;
     return `
       <ul class="rs-list">
         <li>AIの本線 ${ai.join('-')} / 実際 ${s.actual.join('-')} … 1着 ${mark(s.winHit)}・2車単 ${mark(s.exactaHit)}・3連単 ${mark(s.trifectaHit)}</li>
         <li>実際の3連単 ${s.key} に、AIは <strong>${pct(s.p, 1)}</strong> を付けていた (${s.combos}通り中 ${s.rank ?? '—'}番目)。当てずっぽうの <strong>${s.vsRandom.toFixed(1)}倍</strong></li>
         <li>実際の1着 ${s.actual[0]}番の1着率は ${pct(s.winP)} と見ていた</li>
         ${adv}
+        ${s.bets ? `<li>買い方ごと: ${BET_TYPES.filter(b => s.bets[b.id]).map(b => `${b.label}${s.bets[b.id].hit ? '<b class="rs-ok">◯</b>' : '<b class="rs-ng">×</b>'}<small>(見込み${Math.round(s.bets[b.id].expect * 100)}%)</small>`).join(' ')}</li>` : ''}
         ${s.aiOnly ? `<li>${esc(compareText(s, s.aiOnly))} (あなたの読み ${pct(s.p, 1)} / AIだけ ${pct(s.aiOnly.p, 1)})</li>` : s.aiOnlyPending ? '<li class="rs-sub">あなたの読みを入れなかった場合 (AIだけの予想) と比べています…</li>' : ''}
         <li class="rs-sub">対数損失 ${s.logLoss.toFixed(2)} (当てずっぽうなら ${s.logLossRandom.toFixed(2)}・小さいほど良い) / 1着のブライア ${s.brier.toFixed(3)}</li>
         ${counted ? '<li class="rs-sub">確定した予想なので、通算の成績に数えました</li>' : '<li class="rs-sub">確定前の予想なので、通算には数えていません</li>'}
@@ -113,8 +121,9 @@ export function mountResultsPanel(container, { getSetup, getForecast, getData = 
       <ul class="rs-list">
         <li>実際の3連単に付けていた確率は、平均で当てずっぽうの <strong>${s.vsRandom.toFixed(1)}倍</strong> (1倍より大きいほど、AIの見立てが役に立っている)</li>
         <li>本線の1着が当たった ${pct(s.winHit)} ・ 本線の3連単がそのまま当たった ${pct(s.trifectaHit)}</li>
+        ${s.bets && Object.values(s.bets).some(Boolean) ? `<li>買い方ごとの成績${betTable(s.bets)}</li>` : ''}
         ${s.mine ? `<li>あなたの読みを入れた ${s.mine.n}レース: 読みで確率が上がった <strong>${s.mine.better}レース</strong>・下がった ${s.mine.worse}レース (当てずっぽうの ${s.mine.vsRandomMine.toFixed(1)}倍 / AIだけなら ${s.mine.vsRandomAi.toFixed(1)}倍)</li>` : ''}
-        ${s.adviceHit != null ? `<li>買い目が当たった ${pct(s.adviceHit)} (${s.adviceN}レース・平均${s.advicePoints.toFixed(1)}点)</li>` : ''}
+        ${s.adviceHit != null ? `<li>展開別の3連単の買い目が当たった ${pct(s.adviceHit)} (${s.adviceN}レース・平均${s.advicePoints.toFixed(1)}点)</li>` : ''}
         <li class="rs-sub">対数損失 ${s.logLoss.toFixed(2)} (当てずっぽう ${s.logLossRandom.toFixed(2)}) / 1着のブライア ${s.brier.toFixed(3)}</li>
       </ul>
       ${s.n < 20 ? '<p class="ri-help">まだレース数が少ないので、たまたまの影響が大きい数字です (20レースほどで傾向が見えてきます)。</p>' : ''}
@@ -134,13 +143,13 @@ export function mountResultsPanel(container, { getSetup, getForecast, getData = 
     if (!fc?.forecast || fc.refining) { note = '予想の計算が終わるまで少し待ってから、もう一度押してください。'; render(); return { ok: false, text: note }; }
     const sc = fc.forecast.scenarios?.[0];
     const advice = sc ? buildAdvice({ runs: fc.forecast.runs, scenario: sc, marks: fc.forecast.marks, names: setup?.meta?.names ?? {} }) : null;
-    const l = makeLock({ setup, forecast: fc.forecast, main: fc.main, advice, adviceLabel: sc ? `${sc.label}(${sc.theme ?? ''})` : '' });
+    const l = makeLock({ setup, forecast: fc.forecast, main: fc.main, advice, adviceLabel: sc ? `${sc.label}(${sc.theme ?? ''})` : '', betType: fc.betType ?? null });
     // あなたの読み (戦法・展開の指定) を入れていれば、入れなかった場合の出走表も残す (採点のときにAIだけの予想と比べる)
     const data = getData();
     const ai = stripUserReads(data);
     if (ai) { l.aiOnly = ai; l.tenkaiText = data?.tenkaiText ?? ''; }
     const locks = load(STORAGE_KEY); locks.push(l);
-    note = save(locks) ? `${timeLabel(l.lockedAt)} に確定しました。本線 ${l.main.join('-')}${l.advice ? `・買い目${l.advice.points}点` : ''}${ai ? '・あなたの読み入り' : ''}` : 'このブラウザでは保存できませんでした (プライベートモードなど)';
+    note = save(locks) ? `${timeLabel(l.lockedAt)} に確定しました。本線 ${l.main.join('-')}${l.bets && l.betType && l.bets[l.betType] ? `・${BET_TYPES.find(b => b.id === l.betType)?.label} ${l.bets[l.betType].keys.length}点 (当たる見込み 約${Math.round(l.bets[l.betType].hit * 100)}%)` : ''}${ai ? '・あなたの読み入り' : ''}` : 'このブラウザでは保存できませんでした (プライベートモードなど)';
     target = l.id; render();
     return { ok: /確定しました/.test(note), text: /確定しました/.test(note) ? `${note}。レースが終わったら「答え合わせ」で結果を入れてください` : note };
   };
@@ -201,7 +210,8 @@ export function mountResultsPanel(container, { getSetup, getForecast, getData = 
           <ul class="rs-list">
             <li>実際の決着に付けていた確率は、平均で当てずっぽうの <strong>${sumB.vsRandom.toFixed(1)}倍</strong></li>
             <li>本線の1着 ${pct(sumB.winHit)}・2車単 ${pct(sumB.exactaHit)}・3連単 ${pct(sumB.trifectaHit)} が当たった</li>
-            ${sumB.adviceHit != null ? `<li>買い目 (平均${sumB.advicePoints.toFixed(1)}点) が当たった ${pct(sumB.adviceHit)}</li>` : ''}
+            ${sumB.bets && Object.keys(sumB.bets).length ? `<li>買い方ごと${betTable(sumB.bets)}</li>` : ''}
+            ${sumB.adviceHit != null ? `<li>展開別の3連単の買い目 (平均${sumB.advicePoints.toFixed(1)}点) が当たった ${pct(sumB.adviceHit)}</li>` : ''}
             ${sumB.mine ? `<li>あなたの読みを入れた ${sumB.mine.n}レース: 読みで確率が上がった <strong>${sumB.mine.better}</strong>・下がった ${sumB.mine.worse} (当てずっぽうの ${sumB.mine.vsRandomMine.toFixed(1)}倍 / AIだけなら ${sumB.mine.vsRandomAi.toFixed(1)}倍)</li>` : ''}
           </ul>
           ${sumB.mine ? '<p class="ri-help">結果を知ってから書いた展開は、どうしても当たりやすくなります。本当の腕試しは、レースの前に①で確定してから。</p>' : ''}

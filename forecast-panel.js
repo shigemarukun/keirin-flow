@@ -5,6 +5,10 @@ import { predictRace, forecastRaces } from './forecast.js';
 import { RaceAI } from './race-ai.js';
 import { buildAdvice, adviceText, groupedKeys } from './advice.js';
 import { linkTerms } from './glossary.js';
+import { buildBets, betsText, BET_TYPES } from './bets.js';
+
+const BET_KEY = 'keirin-flow:bet-type';
+const loadBetType = () => { try { const v = localStorage.getItem(BET_KEY); return BET_TYPES.some(b => b.id === v) ? v : 'trio'; } catch { return 'trio'; } };
 
 const STYLE_LABEL = { SENKO: '先行', MAKURI: '捲り', KAMASHI: 'カマシ', OIKOMI: '追込' };
 const ai = new RaceAI();
@@ -93,7 +97,6 @@ export function mountForecastPanel(container, { onWatch, onLock } = {}) {
     else win = `${nm(w)}が1着`;
     return `${parts.length ? parts.join('。') + '。' : ''}${win}、2着${s2}番・3着${s3}番。`;
   };
-  const confidence = rate => rate >= 0.6 ? { label: 'かたい', cls: 'hi' } : rate >= 0.4 ? { label: '本線有力', cls: 'mid' } : { label: '混戦', cls: 'lo' };
 
   const render = () => {
     const { main, forecast, progress, names } = state;
@@ -119,29 +122,37 @@ export function mountForecastPanel(container, { onWatch, onLock } = {}) {
     // この展開の買い目 (3連単)
     const adv = sc && forecast?.runs ? buildAdvice({ runs: forecast.runs, scenario: sc, marks, names }) : null;
     state.advice = adv; state.adviceLabel = sc ? `${sc.label}(${sc.theme ?? ''}) ` : '';
-    const conf = sc && sel === 0 ? confidence(sc.rate) : null;
+    // 買い方ごとの買い目と当たる見込み (展開に関係なく、何通りもの未来すべてから)。レースの固さもここから
+    const bets = forecast?.runs && !state.refining ? buildBets(forecast.runs.map(r => r.order)) : null;
+    state.bets = bets;
+    const conf = bets?.confidence ?? null;
+    const betType = state.betType ?? (state.betType = loadBetType());
+    const bt = bets?.types?.[betType];
     const row = (title, arr, cls) => arr.length ? `<div class="ad-row ${cls}"><span class="ad-kind">${title}</span><div class="ad-combos">${groupedKeys(arr).map(g => `<span class="ad-combo">${esc(g)}</span>`).join('')}</div></div>` : '';
 
     let html = `
       <div class="fc-hero">
-        <div class="fc-hero-head"><span class="fc-label">AIの結論${raceLabel ? ` <small>${esc(raceLabel)}</small>` : ''}</span>${conf ? `<span class="fc-conf fc-conf-${conf.cls}">${conf.label}</span>` : ''}</div>
+        <div class="fc-hero-head"><span class="fc-label">AIの結論${raceLabel ? ` <small>${esc(raceLabel)}</small>` : ''}</span>${conf ? `<span class="fc-conf fc-conf-${conf.cls}" title="${esc(conf.note)}">${conf.label}</span>` : ''}</div>
         ${scenarios.length > 1 ? `<div class="fc-tabs" role="tablist">${scenarios.map((x, i) => `
           <button type="button" role="tab" class="fc-tab${i === sel ? ' is-on' : ''}" data-sel="${i}" aria-selected="${i === sel}">
             <span>${esc(x.label)}</span><strong>${combo(x.exacta)}</strong><small>${pct(x.rate)}</small>
           </button>`).join('')}</div>` : ''}
         <div class="fc-order">${top3.map((n, i) => `<span class="fc-place"><em>${i + 1}着</em>${carChip(n)}${mark(n)}${name(n)}</span>`).join('<span class="fc-arrow">›</span>')}</div>
         <p class="fc-line">${sc ? linkTerms(oneLiner(sc, state.setup), seen) : 'AIが何通りもの未来を計算しています。まずは能力どおりに走らせた1レースの結果です。'}</p>
-        ${k ? `<div class="fc-kimarite">${linkTerms('決まり手', seen)}: <strong>${linkTerms(k.how, seen)}</strong>${sc ? ` ・ ${forecast.n}回中${sc.count}回この展開 (${pct(sc.rate)})` : ''}</div>` : ''}
+        ${k ? `<div class="fc-kimarite">${linkTerms('決まり手', seen)}: <strong>${linkTerms(k.how, seen)}</strong>${sc ? `<br><small>この主導権の形になったのは ${forecast.n}回中${sc.count}回 (${pct(sc.rate)})。着順まで同じとは限りません</small>` : ''}</div>` : ''}
         ${!forecast || state.refining ? `<div class="fc-prog" title="計算の進み具合"><i style="width:${Math.round(progress / RUNS * 100)}%"></i></div><p class="ri-help">${forecast ? 'さらに走らせて精度を上げています' : '何通りもの未来を計算中'}… ${progress}/${RUNS}</p>` : ''}
-        ${adv ? `<div class="ad-box ad-mini">
-          <div class="fc-sub">この展開の買い目 <small>${linkTerms('3連単', seen)} ${adv.points}点・${esc(adv.difficulty)}</small></div>
-          ${adv.thin ? `<p class="ad-thin">この展開は${forecast.n}回中${adv.n}回だけなので、参考程度に</p>` : ''}
-          ${row('本命', adv.honmei, 'ad-honmei')}${row('抑え', adv.osae, 'ad-osae')}${row('波乱', adv.ana, 'ad-ana')}
-        </div>` : ''}
+        ${conf ? `<p class="fc-confnote">${conf.label}: ${esc(conf.note)}${bets ? ` (一番ありそうな2車単でも ${pct(bets.topExacta)})` : ''}</p>` : ''}
+        ${bets ? `<div class="bt-buy">
+          <div class="fc-sub">買い方 <small><button type="button" class="term" data-term="軸">軸</button> ${carChip(bets.axis)} ${names[bets.axis] ? esc(names[bets.axis]) : ''} (1着の見込み ${pct(bets.axisWin)})</small></div>
+          <div class="bt-types" role="tablist">${BET_TYPES.map(b => `<button type="button" role="tab" class="bt-type${b.id === betType ? ' is-on' : ''}" data-bet="${b.id}" aria-selected="${b.id === betType}"><span>${b.label}</span><small>${pct(bets.types[b.id].hit)}</small></button>`).join('')}</div>
+          ${bt ? `<div class="ad-combos bt-tickets">${bt.tickets.map(t => `<span class="ad-combo">${esc(t.key)}</span>`).join('')}</div>
+          <p class="bt-hit">${bt.tickets.length}点で <strong>当たる見込み 約${Math.round(bt.hit * 100)}%</strong></p>
+          <p class="ri-help">${linkTerms(bt.label, seen)} … ${esc(bt.desc)}。見込みは、AIが何通りもの未来から出した確率です (オッズ・配当は見ていません)。</p>` : ''}
+        </div>` : forecast ? '<p class="ri-help">買い目は、未来の計算が終わってから出します…</p>' : ''}
         <div class="fc-actions">
           <button type="button" class="primary-btn fc-watch" data-seed="${shown.seed ?? ''}">▶ この展開をコースで見る</button>
           <button type="button" class="secondary-btn fc-lock" ${forecast && !state.refining ? '' : 'disabled'}>${state.locked ? '✓ 確定済み' : '予想を確定'}</button>
-          ${adv ? '<button type="button" class="secondary-btn ad-copy">買い目をコピー</button>' : ''}
+          ${bets ? '<button type="button" class="secondary-btn ad-copy">買い目をコピー</button>' : ''}
         </div>
         <p class="ri-help fc-note" role="status">${esc(state.note ?? '')}</p>
         <button type="button" class="fc-write">✎ 自分の読みで展開を変える</button>
@@ -155,7 +166,10 @@ export function mountForecastPanel(container, { onWatch, onLock } = {}) {
     if (adv) {
       more += `
       <div class="ad-box">
-        <div class="fc-label">買い目の理由 <small>この展開の約${Math.round(adv.cover * 100)}%を押さえる</small></div>
+        <div class="fc-label">「${esc(sc.label)}」の展開になったときの3連単 <small>${adv.points}点</small></div>
+        ${adv.thin ? `<p class="ad-thin">この展開は${forecast.n}回中${adv.n}回だけなので、参考程度に</p>` : ''}
+        ${row('本命', adv.honmei, 'ad-honmei')}${row('抑え', adv.osae, 'ad-osae')}${row('波乱', adv.ana, 'ad-ana')}
+        <p class="ri-help">この展開になれば約${Math.round(adv.cover * 100)}%を押さえる点数です。ただし、この展開になるとは限らないので、レース全体で当たる見込みは約${Math.round(adv.overall * 100)}%です。</p>
         ${adv.notes.length ? `<ul class="ad-notes">${adv.notes.map(t => `<li>${linkTerms(t, seen)}</li>`).join('')}</ul>` : ''}
         <p class="ri-help">オッズは使っていません。波乱は「AIの見立てでは確率が低いけど、この展開なら起きうる」組み合わせです (配当の高さではありません)。</p>
         <p class="ri-help ad-copied" role="status"></p>
@@ -206,11 +220,13 @@ export function mountForecastPanel(container, { onWatch, onLock } = {}) {
       return;
     }
     if (event.target.closest('.ad-copy')) {
-      const text = adviceText(state.advice, state.adviceLabel);
+      const text = state.bets ? betsText(state.bets, state.betType) : adviceText(state.advice, state.adviceLabel);
       (navigator.clipboard?.writeText(text) ?? Promise.reject()).then(() => { state.note = '買い目をコピーしました'; render(); })
         .catch(() => { state.note = text; render(); });
       return;
     }
+    const bb = event.target.closest('.bt-type');
+    if (bb) { state.betType = bb.dataset.bet; try { localStorage.setItem(BET_KEY, state.betType); } catch { /* 覚えられなくても動く */ } render(); return; }
     if (event.target.closest('.fc-lock')) {
       const r = onLock?.();
       if (r) { state.note = r.text; if (r.ok) state.locked = true; render(); }
@@ -235,7 +251,7 @@ export function mountForecastPanel(container, { onWatch, onLock } = {}) {
   const update = setup => {
     jobId += 1;
     const id = jobId;
-    state = { main: null, forecast: null, progress: 0, sel: 0, names: setup?.meta?.names ?? {}, setup, moreOpen: state.moreOpen ?? false };
+    state = { main: null, forecast: null, progress: 0, sel: 0, names: setup?.meta?.names ?? {}, setup, moreOpen: state.moreOpen ?? false, betType: state.betType };
     render();
     if (!setup) return;
     const plain = JSON.parse(JSON.stringify(setup));

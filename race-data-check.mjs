@@ -403,5 +403,18 @@ S級特選 9車立て 発走14:16
   check(guideHtml().includes('レースの流れ') && guideHtml().includes('data-term='), '「競輪の基本」は用語のリンク付きで読める');
 }
 
+// ---------- 買い方ごとの買い目と当たる見込み ----------
+{
+  const { buildBets, betHits, confidenceOf } = await import('./bets.js');
+  check(betHits('trio', '7-4-5', [4, 5, 7]) && betHits('wide', '4-7', [4, 5, 7]) && !betHits('wide', '4-9', [4, 5, 7]) && betHits('quinella', '5-4', [4, 5, 7]) && !betHits('exacta', '5-4', [4, 5, 7]) && betHits('trifecta', '4-5-7', [4, 5, 7]),
+    '買い方ごとの当たり判定 (3連複・ワイド・2車複は順番を問わない)');
+  const orders = [[1, 2, 3, 4, 5, 6, 7], [1, 2, 3, 4, 5, 6, 7], [2, 1, 3, 4, 5, 6, 7], [1, 3, 2, 4, 5, 6, 7], [4, 1, 2, 3, 5, 6, 7], [1, 2, 4, 3, 5, 6, 7]];
+  const b = buildBets(orders);
+  const t = b.types;
+  check(b.axis === 1 && t.wide.hit > t.trio.hit && t.trio.hit > t.trifecta.hit * 0.99 && t.trio.tickets.length === 4 && Object.values(t).every(x => x.hit > 0 && x.hit <= 1),
+    '軸は1着になりやすい選手。見込みは ワイド > 3連複 ≧ 3連単 の順で、0〜100%に収まる', Object.values(t).map(x => `${x.label}${Math.round(x.hit * 100)}%`).join(' '));
+  check(confidenceOf(0.4).label === 'かたい' && confidenceOf(0.2).label === '本線有力' && confidenceOf(0.1).label === '混戦', 'レースの固さは、一番ありそうな2車単の確率で決める');
+}
+
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

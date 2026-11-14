@@ -9,9 +9,13 @@
 //   ・対数損失 −log(その確率)  … 小さいほど良い。何レースかの平均で比べる
 //   ・1着のブライアスコア Σ(1着率 − 実際)²  … 0に近いほど良い (全員同じ確率なら約0.86〜0.89)
 import { buildModel, trifectaTable } from './prob.js';
+import { buildBets, betHits, BET_TYPES } from './bets.js';
 
 // 予想を確定するときに残すもの (未来の着順だけ残せば、確率はあとから同じ式で計算し直せる)
-export function makeLock({ setup, forecast, main, advice, adviceLabel, now = new Date() }) {
+export function makeLock({ setup, forecast, main, advice, adviceLabel, betType = null, now = new Date() }) {
+  // 買い方ごとの買い目と、そのときの「当たる見込み」 (答え合わせで、見込みどおり当たっているかを確かめる)
+  const b = forecast?.runs?.length ? buildBets(forecast.runs.map(r => r.order)) : null;
+  const bets = b ? Object.fromEntries(Object.entries(b.types).map(([k, t]) => [k, { keys: t.tickets.map(x => x.key), hit: t.hit }])) : null;
   const cars = Object.keys(setup?.riders ?? {}).map(Number).sort((a, b) => a - b);
   return {
     id: `${now.getTime().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -27,6 +31,7 @@ export function makeLock({ setup, forecast, main, advice, adviceLabel, now = new
     orders: (forecast?.runs ?? []).map(r => r.order),
     win: forecast?.win ?? {},
     advice: advice ? { label: adviceLabel ?? '', points: advice.points, honmei: advice.honmei.map(x => x.key), osae: advice.osae.map(x => x.key), ana: advice.ana.map(x => x.key) } : null,
+    bets, betType, confidence: b?.confidence?.label ?? null,
     result: null
   };
 }
@@ -64,7 +69,9 @@ export function scoreLock(lock, actual) {
     brier,
     winP: win[a1] ?? 0,
     winHit: ai[0] === a1, exactaHit: ai[0] === a1 && ai[1] === a2, trifectaHit: ai[0] === a1 && ai[1] === a2 && ai[2] === a3,
-    adviceHit, advicePoints: adv?.points ?? null
+    adviceHit, advicePoints: adv?.points ?? null,
+    // 買い方ごと: 当たったか・当たる見込みはいくつだったか
+    bets: lock.bets ? Object.fromEntries(Object.entries(lock.bets).map(([k, t]) => [k, { hit: t.keys.some(key => betHits(k, key, [a1, a2, a3])), expect: t.hit, points: t.keys.length }])) : null
   };
 }
 
@@ -77,7 +84,13 @@ export function summarize(locks) {
   // あなたの読み (戦法・展開の指定) を入れた予想と、入れなかったAIだけの予想の比べ
   const withAi = done.filter(l => l.result.aiOnly);
   const geo = list => Math.exp(list.reduce((s, x) => s + Math.log(Math.max(x, 1e-4)), 0) / list.length);
+  // 買い方ごとの通算: 当たった割合と、AIが言っていた見込みの平均 (近いほど、見込みが正直)
+  const betSum = Object.fromEntries(BET_TYPES.map(bt => {
+    const rs = done.map(l => l.result.bets?.[bt.id]).filter(Boolean);
+    return [bt.id, rs.length ? { n: rs.length, hits: rs.filter(r => r.hit).length, expect: rs.reduce((s, r) => s + r.expect, 0) / rs.length, points: rs[0].points } : null];
+  }));
   return {
+    bets: betSum,
     mine: withAi.length ? {
       n: withAi.length,
       better: withAi.filter(l => l.result.p > l.result.aiOnly.p * 1.5).length,

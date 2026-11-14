@@ -38,9 +38,13 @@ export function buildAdvice({ runs, scenario, marks = {}, names = {} }) {
   const ana = rest.filter(x => x.cars.slice(0, 2).some(c => !strong.has(c)) && x.p >= scored[0].p * 0.08).slice(0, anaN);
   const osae = rest.filter(x => !ana.includes(x)).slice(0, Math.max(0, points - honmei.length - ana.length));
   const pick = arr => arr.map(x => ({ key: x.key, p: x.p }));
+  // レース全体 (この展開にならない回も含めて) で当たる見込み
+  const chosen = new Set([...honmei, ...osae, ...ana].map(x => x.key));
+  const overall = trifectaTable(buildModel(allOrders, cars), cars).reduce((s, x) => s + (chosen.has(x.key) ? x.p : 0), 0);
   return {
     points: honmei.length + osae.length + ana.length,
     cover: [...honmei, ...osae, ...ana].reduce((s, x) => s + x.p, 0),
+    overall,
     difficulty: points <= 6 ? '固い' : points <= 14 ? 'ふつう' : '荒れそう',
     honmei: pick(honmei), osae: pick(osae), ana: pick(ana),
     notes: nG >= 5 ? notesFor(group, nG, names) : [],

@@ -9,6 +9,7 @@ import { mountResultsPanel } from './results-panel.js';
 import { shareUrl } from './race-input.js';
 import { mountGlossary, PHASE_HINT } from './glossary.js';
 import { mountRaceBar } from './race-bar.js';
+import { openLinesEditor } from './lines-editor.js';
 
 window.addEventListener('DOMContentLoaded',()=>{
  const aiModel=new AIModel();
@@ -66,7 +67,14 @@ window.addEventListener('DOMContentLoaded',()=>{
   onPasted:({text,warnings})=>{document.querySelector('.race-input-panel')?.removeAttribute('open');raceBar?.note([text,...(warnings??[])].join('。'),!!warnings?.length);goTo('sec-forecast');},
   onRacesChange:()=>raceBar?.render()
  });
- raceBar=mountRaceBar(document.getElementById('race-bar-ui'),{input:raceInput,onSelected:()=>goTo('sec-forecast')});
+ // 並びを変える (レース欄の並び・コースの下の並びから開く)。決定したらすぐ予想し直す
+ const editLines=()=>openLinesEditor({data:raceInput.getData(),formation:baseSetup?.formation,onSave:groups=>{
+  const d=raceInput.getData();d.lines=groups;d.autoFormation=false;
+  const ok=raceInput.apply(d);
+  if(ok!==false){raceBar?.note(`並びを ${groups.map(g=>g.join('-')).join(' / ')} に変えて、予想し直しました`);goTo('sec-forecast');}
+  return ok;}});
+ raceBar=mountRaceBar(document.getElementById('race-bar-ui'),{input:{...raceInput,formation:()=>baseSetup?.formation},onSelected:()=>goTo('sec-forecast'),onEditLines:editLines});
+ document.getElementById('line-list-ui')?.addEventListener('click',editLines);
  // 画面の中の移動 (レース・予想・コース・展開・答え合わせ)
  const nav=document.getElementById('step-nav');
  nav?.addEventListener('click',event=>{const b=event.target.closest('[data-go]');if(b)goTo(b.dataset.go);});

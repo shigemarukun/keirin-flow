@@ -906,7 +906,7 @@ export class UIRenderer {
             : [...(setup?.lines ?? []).map(line => line.members),
                ...Object.entries(setup?.riders ?? {}).filter(([, r]) => r?.solo).map(([n]) => [Number(n)])];
         const girls = groups.every(g => g.length === 1);
-        container.innerHTML = `<span class="lg-label">${girls ? '周回の並び' : '並び'}</span>` + groups.map(group => {
+        container.innerHTML = `<span class="lg-label">${girls ? '周回の並び' : '並び'} <u>変える</u></span>` + groups.map(group => {
             const isLine = group.length > 1 && lineOf(group[0]);
             return `<span class="lg-group${isLine ? '' : ' is-solo'}" title="${isLine ? 'ライン' : '単騎'}">${group.map(n => `<span class="lg-rider"><span class="lg-car car-${n}">${n}</span><small>${short(n)}</small></span>`).join('')}</span>`;
         }).join('');

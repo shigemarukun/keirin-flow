@@ -5,7 +5,7 @@ import { raceLabelOf } from './race-input.js';
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const GRADE = { S: 'S級', A: 'A級', C: 'チャレンジ', L: 'ガールズ' };
 
-export function mountRaceBar(container, { input, onSelected }) {
+export function mountRaceBar(container, { input, onSelected, onEditLines }) {
   if (!container) return { render() {}, note() {} };
   let note = null, editing = false;
 
@@ -15,13 +15,14 @@ export function mountRaceBar(container, { input, onSelected }) {
     const races = input.races();
     const cur = input.currentId();
     const n = data?.riders?.length ?? 0;
-    const lines = (data?.lines ?? []).map(g => g.join('')).join(' / ');
+    const lines = (input.formation?.() ?? data?.lines ?? []).map(g => g.join('-')).join(' / ');
     const grade = GRADE[data?.race?.grade] ?? (data?.race?.girls ? 'ガールズ' : '');
     container.innerHTML = `
       <div class="rb-current">
         ${sample
           ? '<div class="rb-title">サンプルのレース</div><div class="rb-sub">自分で予想したいレースの出走表を貼り付けてください</div>'
-          : `<div class="rb-title">${esc(raceLabelOf(data))}</div><div class="rb-sub">${[grade, n ? `${n}車立て` : '', lines ? `並び ${esc(lines)}` : ''].filter(Boolean).join('・')}</div>`}
+          : `<div class="rb-title">${esc(raceLabelOf(data))}</div><div class="rb-sub">${[grade, n ? `${n}車立て` : ''].filter(Boolean).join('・')}</div>`}
+        ${n ? `<button type="button" class="rb-lines" aria-label="並びを変える"><span class="rb-lines-label">並び</span><strong>${esc(lines || '未入力')}</strong><span class="rb-lines-edit">変える</span></button>` : ''}
       </div>
       <div class="rb-actions">
         <button type="button" class="primary-btn rb-paste">貼り付けて予想</button>
@@ -45,6 +46,7 @@ export function mountRaceBar(container, { input, onSelected }) {
       return;
     }
     if (event.target.closest('.rb-open')) { input.openPaste(); return; }
+    if (event.target.closest('.rb-lines')) { onEditLines?.(); return; }
     if (event.target.closest('.rb-edit')) { editing = !editing; render(); return; }
     const del = event.target.closest('.rb-del');
     if (del) { input.remove(del.dataset.id); render(); return; }

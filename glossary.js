@@ -89,10 +89,11 @@ export function linkTerms(text, seen = null) {
 
 // ---------- 下から出るシート ----------
 let lastFocus = null;
-export function openSheet(title, html) {
+export function openSheet(title, html, mode = '') {
   const sheet = document.getElementById('sheet');
   if (!sheet) return;
-  lastFocus = document.activeElement;
+  if (sheet.hidden) lastFocus = document.activeElement;
+  sheet.dataset.mode = mode; // 用語の説明か、並びの編集か
   sheet.querySelector('#sheet-title').textContent = title;
   sheet.querySelector('.sheet-content').innerHTML = html;
   sheet.hidden = false;

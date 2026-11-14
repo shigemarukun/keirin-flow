@@ -428,5 +428,19 @@ S級特選 9車立て 発走14:16
   check(data.race.grade === 'A' && data.race.venue === '名古屋' && data.race.raceNo === 9, '「S1 H0 B0」のS回数を級 (S級) と間違えず、A級として読む', `${data.race.grade}`);
 }
 
+// ---------- 並びを変える ----------
+{
+  const { LineOps, linesText } = await import('./lines-editor.js');
+  const g0 = [[1, 2], [4, 6], [5, 3, 7]];
+  const cars = [1, 2, 3, 4, 5, 6, 7];
+  const j = LineOps.join(g0, 7, 2);
+  check(linesText(j) === '1-2-7 / 4-6 / 5-3' && LineOps.valid(j, cars), '選手をタップ→くっつけたい選手をタップで、その選手の後ろに付く', linesText(j));
+  check(linesText(LineOps.join(g0, 3, 5)) === '1-2 / 4-6 / 3-5-7', '同じラインの選手どうしなら、順番 (先頭・番手) が入れ替わる');
+  check(linesText(LineOps.solo(g0, 6)) === '1-2 / 4 / 6 / 5-3-7', '「単騎にする」でラインから外れ、元のラインのすぐ後ろに置かれる');
+  check(linesText(LineOps.move(g0, 2, -1)) === '1-2 / 5-3-7 / 4-6' && !LineOps.valid([[1, 2], [4, 6], [5, 3]], cars), '▲▼でラインの前後が入れ替わり、全員そろっていない並びは受け付けない');
+  const lj = LineOps.join(LineOps.join(g0, 1, 4), 2, 6);
+  check(linesText(lj) === '4-1-6-2 / 5-3-7' && LineOps.valid(lj, cars), 'くっつけ直しを続けても全員が1回ずつ残る', linesText(lj));
+}
+
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

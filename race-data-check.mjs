@@ -416,5 +416,17 @@ S級特選 9車立て 発走14:16
   check(confidenceOf(0.4).label === 'かたい' && confidenceOf(0.2).label === '本線有力' && confidenceOf(0.1).label === '混戦', 'レースの固さは、一番ありそうな2車単の確率で決める');
 }
 
+// ---------- 1人ずつ何行かに分けて書かれた出走表 (AIにまとめてもらった形など) ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const text = readFileSync(new URL('./tools/sample-card-blocks.txt', import.meta.url), 'utf8');
+  const { data, found } = parseRaceCardText(text);
+  const r = Object.fromEntries(data.riders.map(x => [x.car, x]));
+  check(data.riders.length === 7 && data.riders.every(x => x.score && x.pref && x.class === 'A1' && x.style) && r[3].name === '山田敦也' && r[4].back === 19 && r[5].start === 9 && r[3].start === 1 && r[1].kimarite.sashi === 7,
+    '「1番 福田拓也｜栃木｜…」の下に得点・S/H/B・決まり手が続く形を、7人とも読む (「2連対」「4周」「逃0 捲0 差7 マ2」を車番と間違えない)', data.riders.map(x => `${x.car}${x.name}`).join(' '));
+  check(found.lines && !found.linesPredicted && JSON.stringify(data.lines) === '[[1,2],[4,6],[5,3,7]]', '【並び予想】の次の行の「1-2 / 4-6 / 5-3-7」を並びとして読む', JSON.stringify(data.lines));
+  check(data.race.grade === 'A' && data.race.venue === '名古屋' && data.race.raceNo === 9, '「S1 H0 B0」のS回数を級 (S級) と間違えず、A級として読む', `${data.race.grade}`);
+}
+
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
 process.exit(failures ? 1 : 0);

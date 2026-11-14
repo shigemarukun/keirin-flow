@@ -565,7 +565,8 @@ export function parseRaceCardText(text) {
 
   // 並び: 「並び」「ライン」の後ろの数字、または 123/45/67 のような書き方
   let lines = [];
-  const lineText = src.match(/(?:並び|ライン|周回)[^\n\d]{0,10}([1-9][1-9 \t\/\-・|｜←→]{2,40})/)?.[1]
+  const lineText = src.match(/(?:並び|ライン|周回)[^\n\d]{0,10}\n?[ \t]*([1-9][1-9 \t\/\-・|｜←→]{2,40})(?=[ \t]*(?:\n|$))/)?.[1]
+    ?? src.match(/(?:並び|ライン|周回)[^\n\d]{0,10}([1-9][1-9 \t\/\-・|｜←→]{2,40})/)?.[1]
     ?? src.match(/(?:^|[ \t])([1-9]{1,4}(?:[ \t]*[\/／|][ \t]*[1-9]{1,4}){1,6})(?=[ \t]|$)/m)?.[1];
   // 見出し (【周回予想ライン】【並び】など) の下に、1ラインずつ「1-9（棚瀬-長尾）」「5」のように書かれた形
   const sec = src.match(/(?:並び|ライン|周回)[^\n\d]*\n((?:[ \t]*[1-9](?:[ \t]*[-ー－・=][ \t]*[1-9])*[ \t]*(?:[（(][^)）\n]*[)）])?[ \t]*(?:\n|$)){2,9})/);
@@ -585,7 +586,8 @@ export function parseRaceCardText(text) {
   const head = src.split('\n').slice(0, 2).join(' ');
   const venue = VENUES.find(v => src.includes(`${v.name}競輪`) || new RegExp(`競輪場\\s*[:：]\\s*${v.name}`).test(src))?.name ?? VENUES.find(v => head.includes(v.name) && !/^\s*[1-9]\s/.test(head))?.name;
   const raceNo = Number(src.match(/(?:^|[^\d])(1[0-2]|[1-9])\s*R(?![a-zA-Z])/)?.[1]) || undefined;
-  const grade = /ガールズ|L級/.test(src) ? 'L' : /チャレンジ/.test(src) ? 'C' : /S級|S[12]\b|SS\b/.test(src) ? 'S' : /A級|A[12]\b/.test(src) ? 'A' : undefined;
+  // 級: 「S1」は S回数 (S1 H0 B0) のこともあるので、すぐ後ろに H/B が続くものは級として見ない
+  let grade = /ガールズ|L級/.test(src) ? 'L' : /チャレンジ/.test(src) ? 'C' : /S級|S[12]\b(?![ \t]*[HB][ \t]*:?[ \t]*\d)|SS\b/.test(src) ? 'S' : /A級|A[12]\b/.test(src) ? 'A' : undefined;
 
   // 選手: 「車番(1〜9) + 名前」を目印に区切る (EXデータの表より前の部分だけを見る)
   const exStart = src.search(/EXデータ\s*[:：]|かまし成功率|ライン先頭時|^.*番手時/m);
@@ -599,10 +601,21 @@ export function parseRaceCardText(text) {
   // (「9車立て」「5周」などを選手と間違えないように)
   const scoreRe = /^(?:1[0-2]\d|[4-9]\d)\.\d{2}$/;
   const perLine = cardSrc.split('\n').filter(row => /^\s*[1-9]\s+\S/.test(row) && /(?:^|[^\d.])(?:1[0-2]\d|[4-9]\d)\.\d{2}(?![\d])/.test(row)).length >= 5;
+  // 1人ずつ何行かに分けて書かれた出走表 (「1番 福田拓也｜栃木｜100期｜A1｜両」の下に得点・S/H/B・決まり手の行が続く形)。
+  // 行の先頭に「車番 名前」があり、同じ行に府県・級班・脚質・区切り(｜)のどれかがある行だけを選手の始まりとみなす
+  // (「2連対48%」「4周」「逃0 捲0 差7 マ2」の数字を車番と間違えないように)
+  const headRe = /^\s*([1-9])\s+([぀-ヿ㐀-鿿々]{2,})/;
+  const isHeadRow = row => headRe.test(row) && (/[|｜]/.test(row) || PREFS.some(p => row.includes(p)) || /(?:^|[\s|｜])(?:[SAL][S123]|SS)(?=[\s|｜]|$)/.test(row) || /(?:^|[\s|｜])(?:逃|両|追)(?=[\s|｜]|$)/.test(row));
+  const headRows = cardSrc.split('\n').map((row, li) => ({ row, li })).filter(x => isHeadRow(x.row));
+  const blockMode = !perLine && headRows.length >= 5 && new Set(headRows.map(x => x.row.match(headRe)[1])).size === headRows.length;
+  const headLines = new Set(headRows.map(x => x.li));
+  // 選手のまとまりの終わり: 次の選手の行か、【並び予想】などの見出しの行
+  const stopLines = new Set(cardSrc.split('\n').map((row, li) => /^\s*(?:【|■|◆|▼|\[)/.test(row) && !isHeadRow(row) ? li : -1).filter(li => li >= 0));
   const anchors = [];
   for (let i = 0; i < tokens.length - 1; i++) {
     if (!/^[1-9]$/.test(tokens[i])) continue;
     if (perLine && !(firstOfLine(i) && tokens.some((t, k) => lineOf[k] === lineOf[i] && scoreRe.test(t.replace(/^[^\d]*/, ''))))) continue;
+    if (blockMode && !(firstOfLine(i) && headLines.has(lineOf[i]))) continue;
     const car = Number(tokens[i]);
     if (anchors.some(a => a.car === car)) continue;
     // 名前は車番のすぐ後ろ (枠番が間にある書き方にも対応して2つ先まで見る)
@@ -613,6 +626,10 @@ export function parseRaceCardText(text) {
   const riders = anchors.map((a, k) => {
     let block = tokens.slice(a.nameAt, k + 1 < anchors.length ? anchors[k + 1].at : tokens.length);
     if (perLine) block = block.filter((_, x) => lineOf[a.nameAt + x] === lineOf[a.at]); // その選手の行だけ
+    if (blockMode) { // 次の見出しの行より前まで
+      const stop = [...stopLines].filter(li => li > lineOf[a.at]).sort((x, y) => x - y)[0];
+      if (stop != null) block = block.filter((_, x) => lineOf[a.nameAt + x] < stop);
+    }
     // 姓と名が空白で分かれていればつなげる
     let name = block[0];
     if (isNameToken(block[1]) && name.length + block[1].length <= 7 && !/[逃両追]/.test(block[1])) name += ' ' + block[1];
@@ -632,7 +649,7 @@ export function parseRaceCardText(text) {
     const sm = [...rest.matchAll(/(?:^|\s)S(?:回数)?(\s*[:=]?\s*)(\d{1,2})(?=\s|$)/g)]
       .find(x => !(x[1] === '' && ['1', '2'].includes(x[2]))); // 「S1」「S2」(すき間なし) は級班
     // 「S1 B7」のように S のすぐ後ろに B が続くなら、それは級班ではなく S回数 (級班は別に書いてある)
-    const sb = rest.match(/(?:^|\s)S\s*:?\s*(\d{1,2})\s+B\s*:?\s*\d{1,2}(?=\s|$)/);
+    const sb = rest.match(/(?:^|\s)S\s*:?\s*(\d{1,2})\s+(?:H\s*:?\s*\d{1,2}\s+)?B\s*:?\s*\d{1,2}(?=\s|$)/);
     const start = sb ? sb[1] : sm ? sm[2] : null;
     if (start != null) r.start = Number(start);
     // 「S H B」の列がある表 (例 WINTICKETの基本情報: 得点 114.33 のあとに S 3  H 2  B 5 が数字だけで並ぶ)
@@ -651,6 +668,9 @@ export function parseRaceCardText(text) {
     if (Object.keys(kim).length >= 2) r.kimarite = kim;
     return r;
   });
+  // 級は、読み取れた選手の級班がそろっていればそちらを優先 (「A級初日特別選抜」でも S回数の「S1」に引っぱられないように)
+  const cg = riders.map(r => r.class?.[0]).filter(Boolean);
+  if (cg.length >= 3 && cg.every(c => c === cg[0]) && grade !== 'C' && grade !== 'L') grade = cg[0] === 'L' ? 'L' : cg[0];
   // EXデータ (あれば) を選手に付ける
   // 今開催の成績: 「【今開催成績】」などの見出しの下に「1 棚瀬：一次予選2着 二次予選4着 準決勝7着」
   const meetSec = src.match(/(?:今開催|今節|開催成績|節成績)[^\n]*\n((?:[ \t]*[1-9][^\n]*\n?){1,9})/);

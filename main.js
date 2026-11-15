@@ -10,6 +10,7 @@ import { shareUrl } from './race-input.js';
 import { mountGlossary, PHASE_HINT } from './glossary.js';
 import { mountRaceBar } from './race-bar.js';
 import { openLinesEditor } from './lines-editor.js';
+import { openOddsSheet } from './odds-sheet.js';
 
 window.addEventListener('DOMContentLoaded',()=>{
  const aiModel=new AIModel();
@@ -34,7 +35,10 @@ window.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('bank-container')?.scrollIntoView({behavior:'smooth',block:'start'});
  };
  mountGlossary();
- const forecast=mountForecastPanel(document.getElementById('forecast-ui'),{onWatch:seed=>watchRace(seed),onLock:()=>results?.lock?.()});
+ const forecast=mountForecastPanel(document.getElementById('forecast-ui'),{onWatch:seed=>watchRace(seed),onLock:()=>results?.lock?.(),
+  // オッズ (みんなの見立て): このレースのデータに持たせる。入れても予想は計算し直さない
+  getOdds:()=>raceInput?.getData()?.odds??null,
+  onOdds:()=>{const d=raceInput.getData();openOddsSheet({cars:(d.riders??[]).map(r=>Number(r.car)),current:d.odds,onSave:o=>{raceInput.setOdds(o);forecast.render();}});}});
 
  let audioContext=null;
  const ensureAudioReady=async()=>{try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return false;audioContext??=new C();if(audioContext.state==='suspended')await audioContext.resume();return audioContext.state==='running';}catch{return false;}};

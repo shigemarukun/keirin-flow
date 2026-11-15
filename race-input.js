@@ -20,7 +20,8 @@ async function pipe(bytes, stream) { return new Uint8Array(await new Response(ne
 
 export async function encodeRaceData(data) {
   // 今開催成績は着順だけ (予選・選抜などの名前は省く)
-  const slim = { ...data, riders: (data.riders ?? []).map(r => (r.meet ? { ...r, meet: r.meet.map(m => ({ pos: m.pos })) } : r)) };
+  const { odds: _odds, ...noOdds } = data; // オッズはその時点のものなので、リンクには入れない
+  const slim = { ...noOdds, riders: (noOdds.riders ?? []).map(r => (r.meet ? { ...r, meet: r.meet.map(m => ({ pos: m.pos })) } : r)) };
   const bytes = new TextEncoder().encode(JSON.stringify(rename(slim, SHORT)));
   if (typeof CompressionStream === 'function') {
     try { return `2${b64url(await pipe(bytes, new CompressionStream('deflate-raw')))}`; } catch { /* 圧縮できない端末は、そのまま */ }
@@ -195,7 +196,7 @@ export function mountRaceInput(container, { onApply, onLinked, onPasted, onRaces
     const grade = $('.ri-grade').value || undefined;
     return { race: { ...(current?.race ?? {}), ...extras.race, venue: venue || undefined, raceNo, grade, girls: grade === 'L' || undefined }, bank: bankOfVenue(venue) ?? undefined, riders, lines: parseLines($('.ri-lines').value), autoFormation: $('.ri-auto').checked,
       tactics: { ...(current?.tactics ?? {}) }, frontResponse: { ...(current?.frontResponse ?? {}) },
-      tenkai: structuredClone(current?.tenkai ?? {}), tenkaiText: current?.tenkaiText };
+      tenkai: structuredClone(current?.tenkai ?? {}), tenkaiText: current?.tenkaiText, odds: current?.odds };
   };
 
   const bankNote = () => {
@@ -282,6 +283,7 @@ export function mountRaceInput(container, { onApply, onLinked, onPasted, onRaces
     showErrors([]);
     // 読み取れたら、そのまま予想する (足りないところがあれば、表を開いて直してもらう)
     const next = read();
+    delete next.odds; // 別のレースのオッズを持ち越さない
     const errors = validateRaceData(next);
     if (!errors.length && apply(next)) {
       $('.ri-paste-text').value = '';
@@ -321,6 +323,12 @@ export function mountRaceInput(container, { onApply, onLinked, onPasted, onRaces
     races: () => loadRaces(),
     currentId: () => (current ? raceId(current) : null),
     isSample: () => isSample(current),
+    // オッズだけを付け替える (予想は計算し直さない)
+    setOdds: odds => {
+      if (!current) return;
+      if (odds) current.odds = odds; else delete current.odds;
+      save(current); rememberRace(current);
+    },
     select: id => { const r = loadRaces().find(x => x.id === id); if (!r) return false; fill(r.data); return apply(r.data); },
     remove: id => { saveRaces(loadRaces().filter(x => x.id !== id)); onRacesChange?.(); },
     openPaste: () => { const d = container.closest('details'); d?.setAttribute('open', ''); d?.scrollIntoView({ behavior: 'smooth', block: 'start' }); setTimeout(() => $('.ri-paste-text').focus({ preventScroll: true }), 350); },

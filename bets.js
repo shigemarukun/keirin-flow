@@ -5,6 +5,7 @@
 // それぞれ確率の高い順に決まった点数を選び、「その買い目のどれかが当たる見込み」を出す。
 // 見込みは、選んだ買い目のどれかが当たる着順の確率を全部足したもの (重なりは1回だけ数える)。
 import { buildModel, trifectaTable } from './prob.js';
+import { formationText } from './formation.js';
 
 export const BET_TYPES = [
   { id: 'trio', label: '3連複', points: 4, desc: '1〜3着に来る3人を当てる (順番は関係なし)。3連単より当たりやすい' },
@@ -59,7 +60,7 @@ export function buildBets(orders, cars = null) {
     types[bt.id] = { ...bt, tickets: list, hit };
   }
   const topEx = combos(table, 'exacta')[0]?.p ?? 0;
-  return { axis, axisWin: win[axis], types, confidence: confidenceOf(topEx), topExacta: topEx, topTrifecta: table[0]?.p ?? 0 };
+  return { cars: cs, table, win, axis, axisWin: win[axis], types, confidence: confidenceOf(topEx), topExacta: topEx, topTrifecta: table[0]?.p ?? 0 };
 }
 
 // レースの固さ: 一番ありそうな2車単の確率で決める (実際の2車単1番人気が当たるのは2割ほど)
@@ -73,5 +74,5 @@ export function confidenceOf(topExacta) {
 export function betsText(bets, type) {
   const t = bets?.types?.[type];
   if (!t) return '';
-  return `${t.label} ${t.tickets.length}点 (当たる見込み 約${Math.round(t.hit * 100)}%)\n${t.tickets.map(x => x.key).join(' / ')}`;
+  return `${t.label} ${t.tickets.length}点 (当たる見込み 約${Math.round(t.hit * 100)}%)\n${formationText(t.tickets.map(x => x.key), type, bets.cars)}`;
 }

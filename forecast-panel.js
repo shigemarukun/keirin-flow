@@ -6,6 +6,8 @@ import { RaceAI } from './race-ai.js';
 import { buildAdvice, adviceText, groupedKeys } from './advice.js';
 import { linkTerms } from './glossary.js';
 import { buildBets, betsText, BET_TYPES } from './bets.js';
+import { toFormations, formationText } from './formation.js';
+import { marketWin, marketTrifecta, gaps, trifectaTiers, ODDS_TYPES } from './odds.js';
 
 const BET_KEY = 'keirin-flow:bet-type';
 const loadBetType = () => { try { const v = localStorage.getItem(BET_KEY); return BET_TYPES.some(b => b.id === v) ? v : 'trio'; } catch { return 'trio'; } };
@@ -71,7 +73,7 @@ const CAR_FG = { 1: '#111', 2: '#fff', 3: '#fff', 4: '#fff', 5: '#111', 6: '#fff
 const carChip = n => `<span class="fc-car" style="background:${CAR_BG[n]};color:${CAR_FG[n]}">${n}</span>`;
 const combo = key => String(key).split('-').map(n => carChip(Number(n))).join('<span class="fc-dash">-</span>');
 
-export function mountForecastPanel(container, { onWatch, onLock } = {}) {
+export function mountForecastPanel(container, { onWatch, onLock, getOdds = () => null, onOdds } = {}) {
   if (!container) return { update() {} };
   let worker = null, jobId = 0;
   try { worker = new Worker(new URL('./forecast-worker.js', import.meta.url), { type: 'module' }); } catch { worker = null; }
@@ -128,7 +130,18 @@ export function mountForecastPanel(container, { onWatch, onLock } = {}) {
     const conf = bets?.confidence ?? null;
     const betType = state.betType ?? (state.betType = loadBetType());
     const bt = bets?.types?.[betType];
-    const row = (title, arr, cls) => arr.length ? `<div class="ad-row ${cls}"><span class="ad-kind">${title}</span><div class="ad-combos">${groupedKeys(arr).map(g => `<span class="ad-combo">${esc(g)}</span>`).join('')}</div></div>` : '';
+    const carsAll = Object.keys(state.setup?.riders ?? {}).map(Number).sort((a, b) => a - b);
+    const fchips = (keys, type) => toFormations(keys, type, carsAll).map(f => `<span class="ad-combo">${esc(f.text)}${f.points > 1 ? `<small>${f.points}点</small>` : ''}</span>`).join('');
+    const row = (title, arr, cls) => arr.length ? `<div class="ad-row ${cls}"><span class="ad-kind">${title}</span><div class="ad-combos">${fchips(arr.map(x => x.key), 'trifecta')}</div></div>` : '';
+    // オッズ (みんなの見立て) があれば、AIとのズレ・倍率つきの3連単
+    const od = getOdds();
+    const oddsOf = (type, key) => od?.odds?.[type]?.[type === 'trifecta' || type === 'exacta' ? key : key.split('-').map(Number).sort((a, b) => a - b).join('-')];
+    const mw = od && bets ? marketWin(od.odds, carsAll) : null;
+    const mTri = od && bets ? marketTrifecta(od.odds, carsAll) : null;
+    const tiers = bets ? trifectaTiers(bets.table, mTri && Object.keys(mTri).length ? mTri : null) : null;
+    const pct1 = v => `${(v * 100).toFixed(v < 0.1 ? 1 : 0)}%`;
+    const minOdds = mTri && Object.keys(mTri).length ? Math.min(...Object.values(mTri).map(x => x.odds)) : null;
+    const oddsFmt = v => v >= 100 ? `${Math.round(v)}倍` : `${v.toFixed(1)}倍`;
 
     let html = `
       <div class="fc-hero">
@@ -145,10 +158,26 @@ export function mountForecastPanel(container, { onWatch, onLock } = {}) {
         ${bets ? `<div class="bt-buy">
           <div class="fc-sub">買い方 <small><button type="button" class="term" data-term="軸">軸</button> ${carChip(bets.axis)} ${names[bets.axis] ? esc(names[bets.axis]) : ''} (1着の見込み ${pct(bets.axisWin)})</small></div>
           <div class="bt-types" role="tablist">${BET_TYPES.map(b => `<button type="button" role="tab" class="bt-type${b.id === betType ? ' is-on' : ''}" data-bet="${b.id}" aria-selected="${b.id === betType}"><span>${b.label}</span><small>${pct(bets.types[b.id].hit)}</small></button>`).join('')}</div>
-          ${bt ? `<div class="ad-combos bt-tickets">${bt.tickets.map(t => `<span class="ad-combo">${esc(t.key)}</span>`).join('')}</div>
+          ${bt ? `<div class="ad-combos bt-tickets">${fchips(bt.tickets.map(t => t.key), betType)}</div>
           <p class="bt-hit">${bt.tickets.length}点で <strong>当たる見込み 約${Math.round(bt.hit * 100)}%</strong></p>
-          <p class="ri-help">${linkTerms(bt.label, seen)} … ${esc(bt.desc)}。見込みは、AIが何通りもの未来から出した確率です (オッズ・配当は見ていません)。</p>` : ''}
+          ${od ? `<details class="bt-each"><summary>1点ずつ (AIの確率・オッズ)</summary><ul>${bt.tickets.map(t => { const o = oddsOf(betType, t.key); return `<li><b>${esc(t.key)}</b> AI ${pct1(t.p)}${o ? ` ・ ${oddsFmt(o)}` : ' ・ オッズなし'}</li>`; }).join('')}</ul></details>` : ''}
+          <p class="ri-help">${linkTerms(bt.label, seen)} … ${esc(bt.desc)}。見込みは、AIが何通りもの未来から出した確率です。</p>` : ''}
         </div>` : forecast ? '<p class="ri-help">買い目は、未来の計算が終わってから出します…</p>' : ''}
+        ${tiers ? `<div class="bt-buy tr-tiers">
+          <div class="fc-sub">3連単の 本命・中穴・穴 <small>${mTri && Object.keys(mTri).length ? `オッズ ${esc(od.at ?? '')}時点` : 'オッズ未入力: AIの確率から出した目安の倍率で分けています'}</small></div>
+          ${tiers.map(t => `<div class="tr-row tr-${t.id}"><div class="tr-head"><b>${t.label}</b><small>${esc(t.desc)}</small><span>見込み ${pct1(t.hit)}</span></div>
+            ${t.list.length ? `<div class="ad-combos">${fchips(t.list.map(x => x.key), 'trifecta')}</div>
+            <ul class="tr-list">${t.list.map(x => `<li><b>${esc(x.key)}</b> AI ${pct1(x.p)} ・ ${x.fromAi ? `目安 ${oddsFmt(x.odds)}` : `${oddsFmt(x.odds)}${x.est ? '(推定)' : ''}`}${x.mp != null ? ` <small>みんな ${pct1(x.mp)}${x.p > x.mp * 1.4 ? ' → AIの方が高い' : ''}</small>` : ''}</li>`).join('')}</ul>` : `<p class="ri-help">この倍率に入る組み合わせはありません${t.id === 'honmei' && minOdds ? ` (一番人気でも${oddsFmt(minOdds)}の、本命が無いレースです)` : ''}</p>`}
+          </div>`).join('')}
+        </div>` : ''}
+        ${mw ? `<div class="bt-buy mk-box">
+          <div class="fc-sub">AIの見立て と みんなの見立て (1着) <small>オッズ ${esc(od.at ?? '')}時点${mw.full ? '' : '・一部のオッズからの目安'}</small></div>
+          <table class="mk-table"><thead><tr><th></th><th>AI</th><th>みんな</th><th></th></tr></thead><tbody>
+          ${gaps(bets.win, mw.win, carsAll).map(g => `<tr class="mk-${g.tag.id}"><td>${carChip(g.car)} ${names[g.car] ? `<small>${esc(names[g.car])}</small>` : ''}</td><td>${pct(g.ai)}</td><td>${pct(g.market)}</td><td>${g.tag.label ? `<b>${g.tag.label}</b>` : ''}</td></tr>`).join('')}
+          </tbody></table>
+          <p class="ri-help">狙い目 = AIの方が1.4倍以上高く見ている選手。人気しすぎ = みんなの方が1.4倍以上高く見ている選手。</p>
+        </div>` : ''}
+        ${bets ? `<button type="button" class="secondary-btn od-open">${od ? `オッズ ${esc(od.at ?? '')}時点${od.ok === false ? ' ⚠ 怪しい' : ''} (入れ直す)` : 'オッズを入れて、みんなの見立てと比べる'}</button>` : ''}
         <div class="fc-actions">
           <button type="button" class="primary-btn fc-watch" data-seed="${shown.seed ?? ''}">▶ この展開をコースで見る</button>
           <button type="button" class="secondary-btn fc-lock" ${forecast && !state.refining ? '' : 'disabled'}>${state.locked ? '✓ 確定済み' : '予想を確定'}</button>
@@ -227,6 +256,7 @@ export function mountForecastPanel(container, { onWatch, onLock } = {}) {
     }
     const bb = event.target.closest('.bt-type');
     if (bb) { state.betType = bb.dataset.bet; try { localStorage.setItem(BET_KEY, state.betType); } catch { /* 覚えられなくても動く */ } render(); return; }
+    if (event.target.closest('.od-open')) { onOdds?.(); return; }
     if (event.target.closest('.fc-lock')) {
       const r = onLock?.();
       if (r) { state.note = r.text; if (r.ok) state.locked = true; render(); }
@@ -273,5 +303,5 @@ export function mountForecastPanel(container, { onWatch, onLock } = {}) {
     }
   };
 
-  return { update, getLast: () => state };
+  return { update, getLast: () => state, render: () => { if (state.main) render(); } };
 }

@@ -718,3 +718,32 @@ body.sheet-open { overflow: hidden; }
 .le-text { font-size: 16px; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.35); background: #0b1220; color: #e2e8f0; }
 .le-msg { color: #fde68a; font-size: 0.8rem; margin-bottom: 8px; }
 .le-actions { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; }
+
+/* フォーメーション・3連単の本命/中穴/穴・みんなの見立て */
+.ad-combo small { margin-left: 4px; font-size: 0.66rem; color: var(--muted); font-weight: 500; }
+.bt-each summary { cursor: pointer; font-size: 0.76rem; color: #67e8f9; }
+.bt-each ul, .tr-list { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 2px; font-size: 0.76rem; color: #cbd5e1; }
+.tr-list small { color: #a5f3fc; }
+.tr-row { padding: 8px 0; border-top: 1px solid rgba(148, 163, 184, 0.15); display: grid; gap: 6px; }
+.tr-row:first-of-type { border-top: 0; }
+.tr-head { display: flex; align-items: baseline; gap: 8px; }
+.tr-head b { font-size: 0.92rem; }
+.tr-head small { color: var(--muted); font-size: 0.7rem; }
+.tr-head span { margin-left: auto; font-size: 0.74rem; color: #fde68a; }
+.tr-honmei .tr-head b { color: #86efac; }
+.tr-chuana .tr-head b { color: #7dd3fc; }
+.tr-ana .tr-head b { color: #f9a8d4; }
+.mk-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.mk-table th { text-align: left; color: var(--muted); font-weight: 500; font-size: 0.7rem; padding: 2px 4px; }
+.mk-table td { padding: 4px; border-top: 1px solid rgba(148, 163, 184, 0.12); }
+.mk-table td small { color: #cbd5e1; font-size: 0.68rem; }
+.mk-table .fc-car { width: 22px; height: 22px; font-size: 0.75rem; }
+.mk-value b { color: #86efac; }
+.mk-over b { color: #fca5a5; }
+.od-open { width: 100%; }
+.od-prompt summary { cursor: pointer; font-size: 0.8rem; color: #67e8f9; margin-bottom: 6px; }
+.od-text { width: 100%; box-sizing: border-box; min-height: 130px; padding: 10px; border-radius: 10px; background: #0b1220; color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.35); font-size: 16px; margin: 8px 0; }
+.od-at { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: #cbd5e1; margin-bottom: 8px; }
+.od-time { font-size: 16px; padding: 4px 8px; border-radius: 8px; background: #0b1220; color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.35); }
+.od-notes { margin: 4px 0 8px 18px; font-size: 0.76rem; color: #cbd5e1; }
+.od-sum { margin-bottom: 10px; }

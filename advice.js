@@ -1,3 +1,4 @@
+import { toFormations } from './formation.js';
 // KEIRIN FLOW — 展開ごとの買い目アドバイス (3連単)
 //
 // 選んだ展開 (主導権を取ったライン) と同じ展開になった回だけを集め、1〜3着に誰が来やすいかを数える。
@@ -84,8 +85,7 @@ export function adviceText(advice, label = '') {
 }
 
 // 1・2着が同じ組み合わせをまとめた書き方 (例: 2-4-9,5,1)。投票アプリに入れるときに見やすい
-export function groupedKeys(arr) {
-  const m = new Map();
-  for (const x of arr) { const [a, b, c] = x.key.split('-'); const k = `${a}-${b}`; if (!m.has(k)) m.set(k, []); m.get(k).push(c); }
-  return [...m.entries()].map(([k, cs]) => `${k}-${cs.join(',')}`);
+// フォーメーション表記でまとめる (例: 2-4-159, 12-全-12)
+export function groupedKeys(arr, cars = []) {
+  return toFormations(arr.map(x => x.key), 'trifecta', cars).map(f => (f.points > 1 ? `${f.text} (${f.points}点)` : f.text));
 }

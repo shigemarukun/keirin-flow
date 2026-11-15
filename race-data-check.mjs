@@ -234,8 +234,8 @@ check(auto.formation[0][0] === 1, 'AIに隊列を任せると、S回数の多い
   const aw = buildAdvice({ runs: wild, scenario: { mainLine: 1 }, marks: { 1: '◎', 2: '○', 3: '▲' } });
   check(aw.points > af.points && aw.points <= 24 && aw.difficulty === '荒れそう', '荒れる展開ほど点数が増える (最大24点)', `${aw.points}点`);
   check(aw.ana.every(x => x.key.split('-').slice(0, 2).some(c => !['1', '2', '3'].includes(c))), '波乱は、印の薄い選手が1・2着に絡む組み合わせ');
-  check(JSON.stringify(groupedKeys([{ key: '2-4-9' }, { key: '2-4-5' }, { key: '3-4-9' }])) === '["2-4-9,5","3-4-9"]' && /本命: 1-2-3/.test(adviceText(af)),
-    '買い目は1・2着が同じものをまとめて書く (例 2-4-9,5)、コピー用の文字も作れる');
+  check(JSON.stringify(groupedKeys([{ key: '2-4-9' }, { key: '2-4-5' }, { key: '3-4-9' }])) === '["2-4-59 (2点)","3-4-9"]' && /本命: 1-2-3/.test(adviceText(af)),
+    '買い目はフォーメーション表記でまとめて書く (例 2-4-59)、コピー用の文字も作れる', JSON.stringify(groupedKeys([{ key: '2-4-9' }, { key: '2-4-5' }, { key: '3-4-9' }])));
   const thin = buildAdvice({ runs: [...firm, ...mk([[3, 4, 5, 1, 2, 6, 7]], 3)], scenario: { mainLine: 3 }, marks: {} });
   check(thin.thin && thin.notes.length === 0, 'その展開になった回が少ないときは「参考程度」とし、起きそうなことは出さない');
   const { forecastRaces } = await import('./forecast.js');
@@ -440,6 +440,39 @@ S級特選 9車立て 発走14:16
   check(linesText(LineOps.move(g0, 2, -1)) === '1-2 / 5-3-7 / 4-6' && !LineOps.valid([[1, 2], [4, 6], [5, 3]], cars), '▲▼でラインの前後が入れ替わり、全員そろっていない並びは受け付けない');
   const lj = LineOps.join(LineOps.join(g0, 1, 4), 2, 6);
   check(linesText(lj) === '4-1-6-2 / 5-3-7' && LineOps.valid(lj, cars), 'くっつけ直しを続けても全員が1回ずつ残る', linesText(lj));
+}
+
+// ---------- フォーメーション表記 ----------
+{
+  const { formationText } = await import('./formation.js');
+  const cars = [1, 2, 3, 4, 5, 6, 7];
+  const gen = (A, B, C) => { const o = []; for (const a of A) for (const b of B) for (const c of C) if (a !== b && b !== c && a !== c) o.push(`${a}-${b}-${c}`); return o; };
+  const f1 = formationText(gen([1], [2, 3], [2, 3, 4, 5]), 'trifecta', cars);
+  const f2 = formationText(gen([1, 2], cars, [1, 2]), 'trifecta', cars);
+  const f3 = formationText(gen([1, 2], [1, 2, 3], [1, 2, 3, 6]), 'trifecta', cars);
+  check(f1 === '1-23-2345 (6点)' && f2 === '12-全-12 (10点)' && f3 === '12-123-1236 (8点)', '3連単の買い目をフォーメーションにまとめる (1-23-2345・12-全-12・12-123-1236)', `${f1} / ${f2} / ${f3}`);
+  check(formationText(['1-2-3', '1-2-5', '1-3-5', '2-3-5'], 'trio', cars) === '1235 BOX (4点)' && formationText(['3-5', '5-3', '3-7'], 'exacta', cars).startsWith('35 BOX'), 'ボックスになるものは「1235 BOX」');
+  const mixed = gen([1], [2, 3], [2, 3, 4, 5]).concat(['4-1-5']);
+  check(formationText(mixed, 'trifecta', cars) === '1-23-2345 (6点) / 4-1-5', 'まとまらない買い目は、そのまま1点で残す (元に無い買い目を混ぜない)');
+}
+
+// ---------- オッズ (みんなの見立て) ----------
+{
+  const { parseOddsText, checkOdds, marketWin, gaps, trifectaTiers } = await import('./odds.js');
+  const cars = [1, 2, 3, 4, 5, 6, 7];
+  const s = { 1: 3, 2: 2.5, 3: 2.8, 4: 2, 5: 3.5, 6: 1.5, 7: 1 }; const tot = 16.3;
+  const ex = []; for (const a of cars) for (const b of cars) if (a !== b) ex.push(`${a}-${b} ${(0.75 / (s[a] / tot * s[b] / (tot - s[a]))).toFixed(1)}`);
+  const r = parseOddsText(`23時20分時点\n2車単\n${ex.join('\n')}\n3連単\n5-1-3 52.2倍\n3連複\n1=3=5 6.2`, cars);
+  check(r.at === '23:20' && Object.keys(r.odds.exacta).length === 42 && r.odds.trifecta['5-1-3'] === 52.2 && r.odds.trio['1-3-5'] === 6.2, 'オッズを貼ると、時刻・2車単・3連単・3連複を読み取る');
+  check(checkOdds(r.odds, 7).ok, '本物らしいオッズ (1/オッズの合計が約1.33) は警告なし');
+  const fake = parseOddsText(ex.map(l => l.replace(/ ([\d.]+)$/, (m, x) => ' ' + (x / 2).toFixed(1))).join('\n'), cars);
+  check(!checkOdds(fake.odds, 7).ok, '作られたような数字 (1/オッズの合計がおかしい) は「怪しい」と警告する');
+  const mw = marketWin(r.odds, cars);
+  check(mw.full && Math.abs(mw.win[5] - 3.5 / 16.3) < 0.005, '2車単の全通りから、みんなの見立ての1着率を出す', `5番 ${(mw.win[5] * 100).toFixed(1)}%`);
+  const g = gaps({ 1: 0.1, 2: 0.1, 3: 0.1, 4: 0.3, 5: 0.1, 6: 0.2, 7: 0.1 }, mw.win, cars);
+  check(g.find(x => x.car === 4).tag.id === 'value' && g.find(x => x.car === 5).tag.id === 'over', 'AIの方が高く見ている選手は「狙い目」、みんなの方が高い選手は「人気しすぎ」');
+  const t = trifectaTiers([{ key: '1-2-3', p: 0.05 }, { key: '1-3-2', p: 0.02 }, { key: '7-6-4', p: 0.004 }]);
+  check(t[0].list[0].key === '1-2-3' && t[1].list[0].key === '1-3-2' && t[2].list[0].key === '7-6-4', 'オッズが無くても、AIの確率から出した目安の倍率で本命・中穴・穴に分ける');
 }
 
 console.log(failures ? `\n${failures}件 失敗` : '\nすべて合格');
